@@ -17,7 +17,7 @@ if (-not (Test-Path -LiteralPath $target -PathType Container)) { throw "Deploy t
 
 $targetManifestPath = Join-Path $target "manifest.json"
 if (-not (Test-Path -LiteralPath $targetManifestPath -PathType Leaf)) { throw "Target is not a Jam Deck plugin directory: missing manifest.json" }
-$targetManifest = Get-Content -Raw -LiteralPath $targetManifestPath | ConvertFrom-Json
+$targetManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $targetManifestPath | ConvertFrom-Json
 if ($targetManifest.id -ne "jam-deck") { throw "Target manifest id is not jam-deck." }
 
 function Get-DataState([string]$PluginDir) {
@@ -46,7 +46,7 @@ foreach ($name in $files) {
 
 & node --check (Join-Path $repoRoot "main.js")
 if ($LASTEXITCODE -ne 0) { throw "Source main.js syntax check failed." }
-$sourceManifest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "manifest.json") | ConvertFrom-Json
+$sourceManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot "manifest.json") | ConvertFrom-Json
 if ($sourceManifest.id -ne "jam-deck") { throw "Source manifest id is not jam-deck." }
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -65,7 +65,7 @@ try {
   }
   & node --check (Join-Path $staging "main.js")
   if ($LASTEXITCODE -ne 0) { throw "Staged main.js syntax check failed." }
-  $stagedManifest = Get-Content -Raw -LiteralPath (Join-Path $staging "manifest.json") | ConvertFrom-Json
+  $stagedManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $staging "manifest.json") | ConvertFrom-Json
   if ($stagedManifest.id -ne "jam-deck") { throw "Staged manifest id is not jam-deck." }
 
   foreach ($name in $files) {
