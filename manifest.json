@@ -1,0 +1,10 @@
+{
+  "id": "jam-deck",
+  "name": "Jam Deck",
+  "version": "0.15.0",
+  "minAppVersion": "1.7.2",
+  "description": "A fixed-grid secondary-screen dashboard with tasks, clipboard, live editable Canvas workspaces, launchers and browser widgets.",
+  "author": "Jam",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}

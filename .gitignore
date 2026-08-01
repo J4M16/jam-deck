@@ -1,0 +1,10 @@
+node_modules/
+data.json
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+.cache/
+coverage/
+dist/
+backups/

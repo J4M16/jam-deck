@@ -1,0 +1,51 @@
+{
+  "dataVersion": 3,
+  "editMode": false,
+  "clipboardPollMs": 700,
+  "clipboardMaxItems": 60,
+  "widgets": [
+    {
+      "id": "clock-example",
+      "type": "clock",
+      "x": 1,
+      "y": 1,
+      "w": 3,
+      "h": 3,
+      "config": {}
+    },
+    {
+      "id": "clipboard-example",
+      "type": "clipboard",
+      "x": 10,
+      "y": 1,
+      "w": 3,
+      "h": 10,
+      "config": {}
+    }
+  ],
+  "clipboardItems": [],
+  "musicLikes": [],
+  "musicLauncher": {
+    "schemaVersion": 1,
+    "lastConnectedProvider": null
+  },
+  "deckTasks": [
+    {
+      "id": "task-example",
+      "text": "示例生活待办",
+      "status": "active",
+      "createdAt": 0,
+      "completedAt": null,
+      "archivedAt": null,
+      "description": "",
+      "links": [],
+      "images": [],
+      "category": "life",
+      "dueDate": "2026-07-31",
+      "journalPath": null,
+      "archiveRef": null,
+      "pendingJournalOp": null,
+      "tombstone": false
+    }
+  ]
+}
