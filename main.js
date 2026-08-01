@@ -7,6 +7,7 @@ const readline = require("readline");
 const zlib = require("zlib");
 
 const VIEW_TYPE = "jam-deck-view";
+const VIEW_TYPE_GAME_DECK = "game-deck-world";
 // 40x36 keeps each cell near-square on a 1920x1080 deck (~37x23px).
 const GRID_COLS = 40;
 const GRID_ROWS = 36;
@@ -6547,6 +6548,67 @@ class JamDeckView extends ItemView {
   }
 }
 
+class GameDeckWorldView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.world = null;
+    this.handleResize = () => {
+      if (this.world && typeof this.world.resize === "function") this.world.resize();
+    };
+  }
+
+  getViewType() {
+    return VIEW_TYPE_GAME_DECK;
+  }
+
+  getDisplayText() {
+    return "Game Deck";
+  }
+
+  getIcon() {
+    return "dice";
+  }
+
+  async onOpen() {
+    const root = this.contentEl;
+    root.empty();
+    root.addClass("game-deck-root");
+
+    const toolbar = root.createDiv({ cls: "game-deck-toolbar" });
+    const title = toolbar.createDiv({ cls: "game-deck-title" });
+    title.createSpan({ text: "Game Deck", cls: "game-deck-title-main" });
+    title.createSpan({ text: "实验性 3D 世界", cls: "game-deck-title-sub" });
+    this.statusEl = toolbar.createDiv({ cls: "game-deck-status", text: "正在加载草地世界…" });
+
+    const stage = root.createDiv({ cls: "game-deck-stage" });
+    let worldApi = null;
+    try {
+      worldApi = require("./game-deck-world.js");
+    } catch (error) {
+      console.error("game-deck world bundle missing", error);
+      this.statusEl.setText("缺少 game-deck-world.js，请先运行 npm run build:world");
+      return;
+    }
+    const mount = worldApi && (worldApi.mountGameDeckWorld || (worldApi.default && worldApi.default.mountGameDeckWorld));
+    if (typeof mount !== "function") {
+      this.statusEl.setText("世界模块未导出 mountGameDeckWorld");
+      return;
+    }
+    this.world = mount(stage, {
+      onStatus: (text) => {
+        if (this.statusEl) this.statusEl.setText(text || "");
+      },
+    });
+    this.registerDomEvent(window, "resize", this.handleResize);
+  }
+
+  async onClose() {
+    if (this.world && typeof this.world.dispose === "function") this.world.dispose();
+    this.world = null;
+  }
+}
+
 class JamDeckPlugin extends Plugin {
   async onload() {
     this.settingsSaveQueue = Promise.resolve();
@@ -6580,8 +6642,11 @@ class JamDeckPlugin extends Plugin {
     this.primeClipboard();
 
     this.registerView(VIEW_TYPE, (leaf) => new JamDeckView(leaf, this));
+    this.registerView(VIEW_TYPE_GAME_DECK, (leaf) => new GameDeckWorldView(leaf, this));
     this.addRibbonIcon("layout-dashboard", "Open Jam Deck", () => this.openDeck());
+    this.addRibbonIcon("dice", "Open Game Deck", () => this.openGameDeck());
     this.addCommand({ id: "open-jam-deck", name: "Open dashboard", callback: () => this.openDeck() });
+    this.addCommand({ id: "open-game-deck", name: "Open Game Deck world", callback: () => this.openGameDeck() });
     this.addCommand({ id: "toggle-edit-mode", name: "Toggle edit mode", callback: async () => {
       this.settings.editMode = !this.settings.editMode;
       await this.saveSettings();
@@ -6618,6 +6683,7 @@ class JamDeckPlugin extends Plugin {
     for (const owner of (this.canvasInkOwners || new Map()).values()) void owner.flush();
     void this.stopMusicMedia();
     this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => leaf.detach());
+    this.app.workspace.getLeavesOfType(VIEW_TYPE_GAME_DECK).forEach((leaf) => leaf.detach());
   }
 
   async loadSettings() {
@@ -8459,6 +8525,15 @@ class JamDeckPlugin extends Plugin {
     if (!leaf) {
       leaf = this.app.workspace.getLeaf("tab");
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    }
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  async openGameDeck() {
+    let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_GAME_DECK)[0];
+    if (!leaf) {
+      leaf = this.app.workspace.getLeaf("tab");
+      await leaf.setViewState({ type: VIEW_TYPE_GAME_DECK, active: true });
     }
     this.app.workspace.revealLeaf(leaf);
   }

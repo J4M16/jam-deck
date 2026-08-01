@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-01 — 0.16.0 GameDeck 分支启动：Three.js 草地世界
+
+- Git：在 `GameDeck` 分支提交 Jam Deck 0.15.0 基线后开始分叉；3D 实验只在此分支推进。
+- 新增 `game-deck/world.js`（Three.js + OrbitControls）：草地、可拾取音乐盒/日历/图片/文本占位；拖动移动，Alt+拖动缩放。
+- `GameDeckWorldView` 注册为 `game-deck-world`，侧栏骰子与命令打开；`scripts/build-world.mjs` 打包出 `game-deck-world.js`，部署脚本允许首次追加该文件。
+- 完整 `npm run verify`（含 build:world）通过。
+- 处理模型签名：Cursor Grok 4.5（主代理）
+
 ## 2026-08-01 — 0.15.0 组件紧凑水印与面积优先自动让位
 
 - 读取当前正式布局并把九类组件现有尺寸固化为各自的最小完整显示阈值；保留机械布局下限 2×2，不迁移个人布局数据。

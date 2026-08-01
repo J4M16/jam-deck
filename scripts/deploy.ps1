@@ -5,7 +5,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$files = @("main.js", "styles.css", "manifest.json")
+$requiredFiles = @("main.js", "styles.css", "manifest.json")
+$optionalFiles = @("game-deck-world.js")
+$files = @($requiredFiles + $optionalFiles)
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..")).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $target = [IO.Path]::GetFullPath($TargetPluginDir).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $separator = [IO.Path]::DirectorySeparatorChar
@@ -38,7 +40,9 @@ foreach ($name in $files) {
   $sourcePath = Join-Path $repoRoot $name
   $targetPath = Join-Path $target $name
   if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Missing source file: $sourcePath" }
-  if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) { throw "Missing target file: $targetPath" }
+  if ($requiredFiles -contains $name -and -not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+    throw "Missing target file: $targetPath"
+  }
 }
 
 & node --check (Join-Path $repoRoot "main.js")
@@ -69,7 +73,10 @@ try {
     $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repoRoot $name)).Hash
     $stageHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $staging $name)).Hash
     if ($sourceHash -ne $stageHash) { throw "Staging hash mismatch: $name" }
-    Copy-Item -LiteralPath (Join-Path $target $name) -Destination (Join-Path $backup $name)
+    $targetPath = Join-Path $target $name
+    if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+      Copy-Item -LiteralPath $targetPath -Destination (Join-Path $backup $name)
+    }
   }
 
   foreach ($name in $files) {

@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.16.0 — 2026-08-01
+
+- GameDeck 分支实验：新增 Three.js「Game Deck」世界视图（草地场景 + 音乐盒 / 日历 / 图片 / 文本占位模型）。
+- 支持点击选中、地面拖动摆放、Alt+拖动拉伸；侧栏骰子图标与命令 `Open Game Deck world` 可打开。
+- 世界源码在 `game-deck/world.js`，经 esbuild 打包为 `game-deck-world.js`；原有 2D Jam Deck 工作台仍可用。
+
 ## 0.15.0 — 2026-08-01
 
 - 以当前九类组件的实际排布尺寸记录各自“完整显示阈值”；任一方向低于阈值时，只保留居中的标题图标水印，不再挤压正文。

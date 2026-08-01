@@ -1,9 +1,9 @@
 {
   "id": "jam-deck",
   "name": "Jam Deck",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "minAppVersion": "1.7.2",
-  "description": "A fixed-grid secondary-screen dashboard with tasks, clipboard, live editable Canvas workspaces, launchers and browser widgets.",
+  "description": "Jam Deck workbench plus experimental Game Deck Three.js world (GameDeck branch).",
   "author": "Jam",
   "authorUrl": "",
   "isDesktopOnly": true

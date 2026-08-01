@@ -165,7 +165,13 @@ assert(pluginSource.includes("jam-deck-music-transport-stage") && styleSource.in
 assert(styleSource.includes("color-mix(in srgb, var(--jd-surface) 94%, transparent)") && styleSource.includes("justify-self: start") && styleSource.includes("text-align: left"), "hover transport must veil the timeline and metadata must follow the screenshot's left-aligned beside-disc layout");
 assert(styleSource.includes("@container (max-width: 270px)"), "the music widget must adapt to narrow dashboard columns");
 assert(styleSource.includes(".jam-deck-music-disc,") && styleSource.includes("animation: none !important;"), "reduced motion must stop CD rotation");
-assert(pluginSource.includes("function jamDeckPreviewWidgetLayout"), "dashboard edit drag must expose a pure layout preview engine");
+assert(pluginSource.includes('VIEW_TYPE_GAME_DECK = "game-deck-world"'), "GameDeck branch must register a dedicated world view type");
+assert(pluginSource.includes("class GameDeckWorldView"), "GameDeck must expose a Three.js world ItemView");
+assert(pluginSource.includes("openGameDeck"), "GameDeck must be openable from a command or ribbon action");
+assert(fs.existsSync(path.join(__dirname, "..", "game-deck", "world.js")), "GameDeck source world module must exist");
+assert(fs.existsSync(path.join(__dirname, "..", "game-deck-world.js")), "GameDeck bundled world must be built before verify");
+assert(fs.readFileSync(path.join(__dirname, "..", "game-deck-world.js"), "utf8").includes("mountGameDeckWorld"), "bundled world must export mountGameDeckWorld");
+assert(styleSource.includes(".game-deck-root") && styleSource.includes(".game-deck-stage"), "GameDeck world view must have dedicated layout styles");
 assert(pluginSource.includes("function jamDeckCollectFillSlots"), "dashboard insert must collect fillable gaps");
 assert(pluginSource.includes("function jamDeckPickFillSlot"), "dashboard insert must pick the hovered gap slot");
 assert(pluginSource.includes("function jamDeckApplyFillSlot"), "dashboard insert must apply the fill rectangle size");

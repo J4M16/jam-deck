@@ -5,6 +5,7 @@
 - Obsidian 运行副本位于 `D:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
 - 修改后至少运行 `npm run verify`。
+- `GameDeck` 分支承载 Three.js 实验世界；改世界源码后需 `npm run build:world`（verify 已包含）。详见 `docs/GAME_DECK.md`。
 - 发布到 Obsidian 前先禁用 Jam Deck 或关闭 Obsidian，再运行 `npm run deploy`。新版本部署完成后：若 Obsidian 未运行，必须主动启动 Obsidian；若 Obsidian 已运行，则重新启用或重载 Jam Deck，确保用户实际进入新版本。
 - 保持 `manifest.json`、`package.json` 与 `CHANGELOG.md` 版本一致。
 - 每次功能变更同时更新 `docs/DEVELOPMENT_LOG.md` 和 Obsidian 的 `Work/Jam Deck.md`/`log.md`。
