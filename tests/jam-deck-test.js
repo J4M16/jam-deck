@@ -285,6 +285,26 @@ assert.strictEqual(widgetLayout.resolveRestore(pushFixture, "target", { cols: 14
 // Layout fixtures pin their own grid so they stay meaningful when the deck density changes.
 const GRID_12 = { cols: 12, rows: 18 };
 
+const directEmpty = widgetLayout.preview(
+  [
+    { id: "fixed", type: "clock", x: 1, y: 1, w: 4, h: 4 },
+    { id: "moving", type: "music", x: 1, y: 10, w: 4, h: 3 },
+  ],
+  "moving",
+  { col: 8, row: 9, placementX: 7, placementY: 8 },
+  GRID_12,
+);
+assert.strictEqual(directEmpty.mode, "direct", "a free rectangle large enough for the selected widget must accept a direct drop");
+assert(directEmpty.canCommit, "direct placement in empty space must be committable");
+assert.deepStrictEqual(
+  directEmpty.widgets.find((item) => item.id === "moving"),
+  { id: "moving", type: "music", x: 7, y: 8, w: 4, h: 3 },
+  "direct placement must preserve the selected widget dimensions",
+);
+assert.deepStrictEqual(directEmpty.widgets.find((item) => item.id === "fixed"), { id: "fixed", type: "clock", x: 1, y: 1, w: 4, h: 4 }, "direct placement must not disturb unrelated widgets");
+assert.strictEqual(directEmpty.slot.axis, "free", "direct placement must expose a full-size free-space preview rectangle");
+assert(pluginSource.includes("placementX: colFloat - grabOffsetX") && pluginSource.includes("placementY: rowFloat - grabOffsetY"), "free placement must preserve the original pointer grab offset");
+
 const verticalGap = widgetLayout.preview(
   [
     { id: "b", type: "clock", x: 1, y: 1, w: 4, h: 4 },
@@ -567,6 +587,51 @@ assert.strictEqual(shiftedMap.launcher.x, 11, "widgets beyond the sash must stay
 const blocked = widgetLayout.applySash(sashLayout, columnSash, 20);
 assert.strictEqual(blocked.find((item) => item.id === "music").w, 2, "oversized sash drag must clamp to the minimum size");
 assert.strictEqual(blocked.find((item) => item.id === "clock").w, 8, "clamped sash drag must still move the shared boundary as far as it can");
+assert(sashPack.nodes.some((node) => node.axis === "xy" && node.x === 41 && node.y === 7 && node.widgetId === "launcher"), "the launcher bottom-right corner must expose an owned cross node");
+assert(sashPack.nodes.some((node) => node.axis === "xy" && node.x === 7 && node.y === 37 && node.widgetId === "clipboard"), "the clipboard bottom-right corner must expose an owned cross node");
+assert(sashPack.nodes.some((node) => node.axis === "xy" && node.x === 41 && node.y === 37 && node.widgetId === "canvas"), "the canvas bottom-right outer corner must expose an owned cross node");
+const launcherCornerResize = widgetLayout.resizeCorner(sashLayout, "launcher", -5, -2);
+assert.deepStrictEqual(launcherCornerResize.find((item) => item.id === "launcher"), { id: "launcher", type: "launcher", x: 11, y: 1, w: 25, h: 4 }, "an owned corner must resize only its component");
+assert.deepStrictEqual(launcherCornerResize.find((item) => item.id === "canvas"), sashLayout.find((item) => item.id === "canvas"), "launcher corner resize must not alter the canvas below");
+assert.deepStrictEqual(launcherCornerResize.find((item) => item.id === "music"), sashLayout.find((item) => item.id === "music"), "launcher corner resize must not alter its left neighbor");
+const clipboardCornerResize = widgetLayout.resizeCorner(sashLayout, "clipboard", -2, -3);
+assert.deepStrictEqual(clipboardCornerResize.find((item) => item.id === "clipboard"), { id: "clipboard", type: "clipboard", x: 1, y: 20, w: 4, h: 14 }, "the left bottom corner must resize only clipboard");
+assert.deepStrictEqual(clipboardCornerResize.find((item) => item.id === "canvas"), sashLayout.find((item) => item.id === "canvas"), "clipboard corner resize must not alter the adjacent canvas");
+const canvasCornerResize = widgetLayout.resizeCorner(sashLayout, "canvas", -4, -5);
+assert.deepStrictEqual(canvasCornerResize.find((item) => item.id === "canvas"), { id: "canvas", type: "canvas-embed", x: 7, y: 7, w: 30, h: 25 }, "the outer bottom-right corner must resize only canvas");
+assert.deepStrictEqual(canvasCornerResize.find((item) => item.id === "launcher"), sashLayout.find((item) => item.id === "launcher"), "canvas corner resize must not alter the launcher above");
+assert.deepStrictEqual(canvasCornerResize.find((item) => item.id === "clipboard"), sashLayout.find((item) => item.id === "clipboard"), "canvas corner resize must not alter the clipboard beside it");
+assert(pluginSource.includes("active.node.widgetId") && pluginSource.includes("jamDeckResizeWidgetAtCorner"), "owned edge-corner handles must use the single-widget resize path");
+const rightEdgeSash = sashPack.sashes.find((sash) => sash.edge === "end" && sash.axis === "x");
+const bottomEdgeSash = sashPack.sashes.find((sash) => sash.edge === "end" && sash.axis === "y");
+assert(rightEdgeSash && rightEdgeSash.beforeIds.includes("launcher") && rightEdgeSash.beforeIds.includes("canvas"), "the right edge sash must resize every right-pinned component together");
+assert(bottomEdgeSash && bottomEdgeSash.beforeIds.includes("canvas") && bottomEdgeSash.beforeIds.includes("clipboard"), "the bottom edge sash must resize every bottom-pinned component together");
+const rightEdgePulledIn = widgetLayout.applySash(sashLayout, rightEdgeSash, -3);
+assert.strictEqual(rightEdgePulledIn.find((item) => item.id === "launcher").w, 27, "pulling the right edge inward must free a full-height blank strip");
+assert.strictEqual(rightEdgePulledIn.find((item) => item.id === "canvas").w, 31, "all components sharing the right edge must shrink by the same amount");
+const movedRightEdgeSash = widgetLayout.collectNodes(rightEdgePulledIn).sashes.find((sash) => sash.edge === "end" && sash.axis === "x");
+assert.strictEqual(movedRightEdgeSash.line, 38, "the right outer handle must follow the new occupied boundary instead of disappearing");
+const rightEdgeRestored = widgetLayout.applySash(rightEdgePulledIn, movedRightEdgeSash, 3);
+assert.strictEqual(rightEdgeRestored.find((item) => item.id === "launcher").w, 30, "the followed outer handle must expand components back into the blank strip");
+const bottomEdgePulledUp = widgetLayout.applySash(sashLayout, bottomEdgeSash, -4);
+assert.strictEqual(bottomEdgePulledUp.find((item) => item.id === "canvas").h, 26, "pulling the bottom edge upward must shorten bottom-pinned canvas content");
+assert.strictEqual(bottomEdgePulledUp.find((item) => item.id === "clipboard").h, 13, "all components sharing the bottom edge must shrink together");
+const movedBottomEdgeSash = widgetLayout.collectNodes(bottomEdgePulledUp).sashes.find((sash) => sash.edge === "end" && sash.axis === "y");
+assert.strictEqual(movedBottomEdgeSash.line, 33, "the bottom outer handle must follow the new occupied boundary instead of disappearing");
+const bottomEdgeRestored = widgetLayout.applySash(bottomEdgePulledUp, movedBottomEdgeSash, 4);
+assert.strictEqual(bottomEdgeRestored.find((item) => item.id === "canvas").h, 30, "the followed bottom handle must restore components into the freed rows");
+
+const largestInsertion = widgetLayout.insertByLargest([
+  { id: "largest", type: "canvas-embed", x: 1, y: 1, w: 12, h: 12 },
+  { id: "other", type: "clock", x: 13, y: 1, w: 8, h: 6 },
+], { id: "new", type: "tasks", x: 1, y: 1, w: 4, h: 4 }, { cols: 20, rows: 12 });
+assert(largestInsertion, "a full layout must split a compressible component instead of reporting no space");
+assert.strictEqual(largestInsertion.victimId, "largest", "automatic insertion must choose the current largest component first");
+assert.strictEqual(largestInsertion.axis, "x", "equal-loss splits must use the stable beside placement");
+assert.deepStrictEqual(largestInsertion.layout.find((item) => item.id === "largest"), { id: "largest", type: "canvas-embed", x: 1, y: 1, w: 8, h: 12 }, "the largest component must shrink by the inserted component width");
+assert.deepStrictEqual(largestInsertion.layout.find((item) => item.id === "new"), { id: "new", type: "tasks", x: 9, y: 1, w: 4, h: 4 }, "the new component must be inserted beside the compressed largest component at its complete minimum size");
+assert.deepStrictEqual(largestInsertion.layout.find((item) => item.id === "other"), { id: "other", type: "clock", x: 13, y: 1, w: 8, h: 6 }, "unrelated components must remain fixed during largest-area insertion");
+assert(widgetLayout.collisionFree(largestInsertion.layout, 20, 12), "largest-area insertion must remain collision free");
 
 const countdownHelpers = JamDeckPlugin.countdownHelpers;
 assert(countdownHelpers, "countdown helpers must be exported for deterministic fixtures");

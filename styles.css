@@ -836,6 +836,72 @@
   opacity: 0;
   transition: none;
 }
+/* Embedded Canvas Eagle image search hover button */
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search {
+  position: absolute;
+  z-index: 55;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.92);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.92;
+  box-shadow:
+    inset 0 0 0 1px rgb(15 23 42 / 0.08),
+    0 1px 3px rgb(15 23 42 / 0.14),
+    0 6px 16px rgb(15 23 42 / 0.12);
+  transition: opacity 160ms cubic-bezier(.22, 1, .36, 1), box-shadow 180ms cubic-bezier(.22, 1, .36, 1), background 160ms cubic-bezier(.22, 1, .36, 1);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search:hover,
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search:focus-visible {
+  opacity: 1;
+  color: var(--text-normal);
+  box-shadow:
+    inset 0 0 0 1px rgb(15 23 42 / 0.12),
+    0 2px 5px rgb(15 23 42 / 0.16),
+    0 10px 22px rgb(15 23 42 / 0.14);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search svg {
+  width: 15px;
+  height: 15px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search.is-loading {
+  pointer-events: none;
+  color: var(--color-accent);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search.is-loading svg {
+  animation: jam-deck-canvas-image-search-pulse 900ms ease-in-out infinite;
+}
+@keyframes jam-deck-canvas-image-search-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+.theme-dark .jam-deck-canvas-leaf .jam-deck-canvas-image-search {
+  background: rgb(30 34 40 / 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.10),
+    0 1px 3px rgb(0 0 0 / 0.42),
+    0 6px 16px rgb(0 0 0 / 0.38);
+}
+@media (prefers-reduced-motion: reduce) {
+  .jam-deck-canvas-leaf .jam-deck-canvas-image-search {
+    transition: none;
+  }
+  .jam-deck-canvas-leaf .jam-deck-canvas-image-search.is-loading svg {
+    animation: none;
+    opacity: 1;
+  }
+}
 .jam-deck-canvas-stack-overlay {
   position: absolute;
   z-index: 70;

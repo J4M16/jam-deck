@@ -1,6 +1,6 @@
 "use strict";
 
-const { ItemView, Modal, Notice, Plugin, WorkspaceLeaf, normalizePath, setIcon } = require("obsidian");
+const { ItemView, Modal, Notice, Plugin, WorkspaceLeaf, normalizePath, requestUrl, setIcon } = require("obsidian");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const readline = require("readline");
@@ -38,6 +38,12 @@ const MEDIA_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 const MEDIA_ARTWORK_MAX_BYTES = 768 * 1024;
 const MEDIA_REQUEST_TIMEOUT_MS = 5000;
 const MEDIA_READY_TIMEOUT_MS = 6000;
+// Eagle AI 搜索（ai-search 插件本地服务，端口为其默认固定值）；素材仍由 Eagle 管理，库目录软排除在 Obsidian 索引外。
+const EAGLE_SEARCH_API_URL = "http://127.0.0.1:38766/api/search/image";
+const EAGLE_LIBRARY_ROOT = "JAM收集.library";
+const EAGLE_SEARCH_RESULT_LIMIT = 20;
+const EAGLE_SEARCH_STACK_GAP = 40;
+const EAGLE_SEARCH_HIDE_DELAY_MS = 250;
 const MEDIA_LAUNCH_POLL_MS = 500;
 const MEDIA_LAUNCH_TIMEOUT_MS = 12000;
 
@@ -1973,6 +1979,72 @@ function jamDeckCanvasStackKind(data) {
   return JAM_DECK_CANVAS_IMAGE_EXTENSIONS.has(extension) ? "image" : null;
 }
 
+function jamDeckEagleSearchBody(filename, bytes, limit) {
+  const safeName = String(filename || "image.jpg").replace(/["\r\n]/g, "_") || "image.jpg";
+  const boundary = `----jamDeckEagle${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const encoder = new TextEncoder();
+  const imageHead = encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${safeName}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+  const limitPart = encoder.encode(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="limit"\r\n\r\n${Number.isFinite(Number(limit)) && Number(limit) >= 1 ? Math.floor(Number(limit)) : EAGLE_SEARCH_RESULT_LIMIT}`);
+  const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+  const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+  const body = new Uint8Array(imageHead.length + payload.length + limitPart.length + tail.length);
+  body.set(imageHead, 0);
+  body.set(payload, imageHead.length);
+  body.set(limitPart, imageHead.length + payload.length);
+  body.set(tail, imageHead.length + payload.length + limitPart.length);
+  return { body: body.buffer, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+function jamDeckEagleTopResults(payload, limit = EAGLE_SEARCH_RESULT_LIMIT) {
+  const results = payload && Array.isArray(payload.results) ? payload.results : [];
+  const cap = Number.isFinite(Number(limit)) && Number(limit) >= 1 ? Math.floor(Number(limit)) : EAGLE_SEARCH_RESULT_LIMIT;
+  const out = [];
+  for (const entry of results) {
+    const id = entry && typeof entry.id === "string" ? entry.id.trim() : "";
+    if (!id) continue;
+    out.push({ id, score: Number(entry.score) || 0 });
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+function jamDeckEagleMetadataPath(libraryRoot, id) {
+  const root = String(libraryRoot || "").replace(/\/+$/, "");
+  const cleanId = String(id || "").trim();
+  if (!root || !cleanId) return null;
+  return `${root}/images/${cleanId}.info/metadata.json`;
+}
+
+function jamDeckEagleItemPath(libraryRoot, id, metadata) {
+  const root = String(libraryRoot || "").replace(/\/+$/, "");
+  const cleanId = String(id || "").trim();
+  if (!root || !cleanId || !metadata || metadata.isDeleted) return null;
+  const name = typeof metadata.name === "string" ? metadata.name.trim() : "";
+  const ext = typeof metadata.ext === "string" ? metadata.ext.trim() : "";
+  if (!name || !ext) return null;
+  return `${root}/images/${cleanId}.info/${name}.${ext}`;
+}
+
+function jamDeckEagleStackLayout(sourceRect, items, gap = EAGLE_SEARCH_STACK_GAP) {
+  const rect = jamDeckCanvasStackRect(sourceRect);
+  if (!rect || !Array.isArray(items) || !items.length) return null;
+  const safeGap = Number.isFinite(Number(gap)) && Number(gap) >= 0 ? Number(gap) : EAGLE_SEARCH_STACK_GAP;
+  const baseX = rect.x + rect.width + safeGap;
+  const baseY = rect.y;
+  const fallbackRatio = rect.height / rect.width;
+  return items.map((item) => {
+    const pixelWidth = Number(item && item.width);
+    const pixelHeight = Number(item && item.height);
+    const ratio = pixelWidth >= 1 && pixelHeight >= 1 ? pixelHeight / pixelWidth : fallbackRatio;
+    return {
+      x: jamDeckRoundCanvasStackValue(baseX),
+      y: jamDeckRoundCanvasStackValue(baseY),
+      width: jamDeckRoundCanvasStackValue(rect.width),
+      height: jamDeckRoundCanvasStackValue(Math.max(1, rect.width * ratio)),
+    };
+  });
+}
+
 function jamDeckCanvasStackNormalizationKey(kind) {
   return kind === "text" ? "stackTextNormalization" : kind === "image" ? "stackImageNormalization" : null;
 }
@@ -3874,6 +3946,296 @@ class CanvasReturnCoordinator {
   }
 }
 
+class CanvasImageSearchController {
+  constructor(runtime, entry) {
+    this.runtime = runtime;
+    this.entry = entry;
+    this.canvas = entry.leaf && entry.leaf.view && entry.leaf.view.canvas;
+    this.root = entry.leaf && entry.leaf.containerEl;
+    this.ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
+    this.disposers = [];
+    this.button = null;
+    this.buttonHovered = false;
+    this.hoverNode = null;
+    this.hoverFrame = 0;
+    this.pendingHoverTarget = null;
+    this.hideTimer = 0;
+    this.searching = false;
+    this.destroyed = false;
+  }
+
+  install() {
+    if (!this.canvas || !this.root || !this.ownerWindow || this.destroyed) return false;
+    const doc = this.entry.ownerDocument;
+    this.button = doc.createElement("button");
+    this.button.type = "button";
+    this.button.className = "jam-deck-canvas-image-search";
+    this.button.setAttribute("aria-label", "在 Eagle 中以图搜图");
+    this.button.setAttribute("title", "Eagle 以图搜图");
+    setIcon(this.button, "search");
+    this.button.style.display = "none";
+    this.root.appendChild(this.button);
+    const buttonPointerDown = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const buttonClick = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const node = this.hoverNode;
+      if (node && !this.searching) void this.performSearch(node);
+    };
+    const buttonEnter = () => {
+      this.buttonHovered = true;
+      this.cancelHide();
+    };
+    const buttonLeave = () => {
+      this.buttonHovered = false;
+      this.scheduleHide();
+    };
+    this.button.addEventListener("pointerdown", buttonPointerDown, true);
+    this.button.addEventListener("click", buttonClick, true);
+    this.button.addEventListener("pointerenter", buttonEnter);
+    this.button.addEventListener("pointerleave", buttonLeave);
+    const pointermove = (event) => this.queueHoverCheck(event);
+    const dismiss = (event) => {
+      if (this.searching) return;
+      if (this.button && (event.target === this.button || this.button.contains(event.target))) return;
+      this.hideButton();
+    };
+    this.root.addEventListener("pointermove", pointermove, true);
+    this.root.addEventListener("pointerdown", dismiss, true);
+    this.root.addEventListener("wheel", dismiss, true);
+    this.disposers.push(() => this.root.removeEventListener("pointermove", pointermove, true));
+    this.disposers.push(() => this.root.removeEventListener("pointerdown", dismiss, true));
+    this.disposers.push(() => this.root.removeEventListener("wheel", dismiss, true));
+    return true;
+  }
+
+  queueHoverCheck(event) {
+    if (this.destroyed || !this.ownerWindow) return;
+    this.pendingHoverTarget = event.target;
+    if (this.hoverFrame) return;
+    this.hoverFrame = this.ownerWindow.requestAnimationFrame(() => {
+      this.hoverFrame = 0;
+      const target = this.pendingHoverTarget;
+      this.pendingHoverTarget = null;
+      if (target) this.onHoverCheck(target);
+    });
+  }
+
+  findImageNodeByElement(target) {
+    const el = target && typeof target.closest === "function" ? target.closest(".canvas-node") : null;
+    if (!el || !this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return null;
+    for (const node of this.canvas.nodes.values()) {
+      if (!node || node.nodeEl !== el) continue;
+      let data = null;
+      try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { return null; }
+      return jamDeckCanvasStackKind(data) === "image" ? node : null;
+    }
+    return null;
+  }
+
+  onHoverCheck(target) {
+    if (this.destroyed || this.searching) return;
+    const stack = this.entry.imageStackController;
+    if (stack && (stack.previewWrapper || stack.imageFocus || stack.drag)) {
+      this.hideButton();
+      return;
+    }
+    if (this.button && (target === this.button || this.button.contains(target))) return;
+    const node = this.findImageNodeByElement(target);
+    if (node) {
+      this.hoverNode = node;
+      this.showButton(node);
+    } else {
+      this.scheduleHide();
+    }
+  }
+
+  showButton(node) {
+    if (!this.button || !node || !node.nodeEl) return;
+    const rootRect = this.root.getBoundingClientRect();
+    const rect = node.nodeEl.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    this.cancelHide();
+    this.button.style.display = "";
+    this.button.style.left = `${Math.round(rect.right - rootRect.left - 32)}px`;
+    this.button.style.top = `${Math.round(rect.top - rootRect.top + 4)}px`;
+  }
+
+  scheduleHide() {
+    if (this.destroyed || this.hideTimer || this.searching || !this.ownerWindow) return;
+    this.hideTimer = this.ownerWindow.setTimeout(() => {
+      this.hideTimer = 0;
+      if (!this.buttonHovered && !this.searching) this.hideButton();
+    }, EAGLE_SEARCH_HIDE_DELAY_MS);
+  }
+
+  cancelHide() {
+    if (!this.hideTimer || !this.ownerWindow) return;
+    this.ownerWindow.clearTimeout(this.hideTimer);
+    this.hideTimer = 0;
+  }
+
+  hideButton() {
+    this.cancelHide();
+    if (this.button) this.button.style.display = "none";
+    if (!this.searching) this.hoverNode = null;
+  }
+
+  async resolveResultFiles(results) {
+    const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
+    const adapter = app && app.vault && app.vault.adapter;
+    if (!app || !adapter || typeof adapter.read !== "function") return [];
+    const files = [];
+    for (const result of results) {
+      try {
+        const metaPath = jamDeckEagleMetadataPath(EAGLE_LIBRARY_ROOT, result.id);
+        if (!metaPath) continue;
+        const raw = await adapter.read(metaPath);
+        let metadata = null;
+        try { metadata = JSON.parse(raw); } catch (error) { metadata = null; }
+        const itemPath = jamDeckEagleItemPath(EAGLE_LIBRARY_ROOT, result.id, metadata);
+        if (!itemPath) continue;
+        const file = app.vault.getAbstractFileByPath(itemPath);
+        if (!file) continue;
+        files.push({
+          id: result.id,
+          score: result.score,
+          file,
+          width: Number(metadata.width) || 0,
+          height: Number(metadata.height) || 0,
+        });
+      } catch (error) { /* 单个结果解析失败不影响其余结果 */ }
+    }
+    return files;
+  }
+
+  insertResultStack(sourceRect, files) {
+    const canvas = this.canvas;
+    if (!canvas || canvas.readonly || typeof canvas.createFileNode !== "function" || typeof canvas.requestSave !== "function") throw new Error("Canvas 节点创建能力不可用");
+    const layouts = jamDeckEagleStackLayout(sourceRect, files, EAGLE_SEARCH_STACK_GAP);
+    if (!layouts) throw new Error("原图位置不可用");
+    const created = [];
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const layout = layouts[index];
+        const node = canvas.createFileNode({
+          pos: { x: layout.x + layout.width / 2, y: layout.y + layout.height / 2 },
+          position: "center",
+          file: files[index].file,
+        });
+        if (!node) continue;
+        created.push(node);
+        const data = typeof node.getData === "function" ? node.getData() : null;
+        if (data && typeof node.setData === "function") {
+          node.setData({ ...data, x: layout.x, y: layout.y, width: layout.width, height: layout.height });
+        }
+        if (typeof canvas.markMoved === "function") canvas.markMoved(node);
+        if (typeof node.render === "function") node.render();
+      }
+      if (!created.length) throw new Error("Canvas 未创建任何结果节点");
+      if (canvas.requestPushHistory && typeof canvas.requestPushHistory.run === "function") canvas.requestPushHistory.run();
+      canvas.requestSave();
+      const view = this.entry.leaf && this.entry.leaf.view;
+      if (view && typeof view.saveImmediately === "function") void Promise.resolve(view.saveImmediately()).catch(() => {});
+    } catch (error) {
+      for (const node of created) {
+        try { if (typeof canvas.removeNode === "function") canvas.removeNode(node); } catch (removeError) {}
+      }
+      try { canvas.requestSave(); } catch (saveError) {}
+      throw error;
+    }
+    try {
+      if (typeof canvas.deselectAll === "function") canvas.deselectAll();
+      if (typeof canvas.select === "function") canvas.select(created[0]);
+    } catch (error) {}
+    return created;
+  }
+
+  async performSearch(node) {
+    if (this.searching || this.destroyed) return;
+    const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
+    if (!app || !app.vault) return;
+    let data = null;
+    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+    const sourceRect = jamDeckCanvasStackRect(data);
+    const sourcePath = data && typeof data.file === "string" ? data.file : null;
+    if (!sourceRect || !sourcePath) {
+      new Notice("Jam Deck：无法读取图片节点");
+      return;
+    }
+    const sourceFile = app.vault.getAbstractFileByPath(sourcePath);
+    if (!sourceFile) {
+      new Notice("Jam Deck：找不到图片文件");
+      return;
+    }
+    this.searching = true;
+    if (this.button) this.button.addClass("is-loading");
+    try {
+      const bytes = await app.vault.readBinary(sourceFile);
+      const { body, contentType } = jamDeckEagleSearchBody(sourceFile.name || "image.jpg", bytes, EAGLE_SEARCH_RESULT_LIMIT);
+      let response;
+      try {
+        response = await requestUrl({
+          url: EAGLE_SEARCH_API_URL,
+          method: "POST",
+          headers: { "Content-Type": contentType },
+          body,
+          throw: false,
+        });
+      } catch (networkError) {
+        throw new Error("无法连接 Eagle，请确认 Eagle 已启动");
+      }
+      if (!response || response.status !== 200) {
+        const status = response ? response.status : 0;
+        throw new Error(status === 503 ? "Eagle AI 搜索服务未就绪" : `Eagle 搜索请求失败（${status}）`);
+      }
+      const results = jamDeckEagleTopResults(response.json, EAGLE_SEARCH_RESULT_LIMIT);
+      if (!results.length) {
+        new Notice("Jam Deck：Eagle 没有找到相似图片");
+        return;
+      }
+      const files = await this.resolveResultFiles(results);
+      if (!files.length) {
+        new Notice("Jam Deck：相似图片不在当前 Eagle 库中");
+        return;
+      }
+      const created = this.insertResultStack(sourceRect, files);
+      new Notice(`Jam Deck：已在原图右侧放入 ${created.length} 张相似图片`);
+    } catch (error) {
+      console.error("jam-deck eagle image search failed", error);
+      new Notice(`Jam Deck：以图搜图失败 · ${error.message || "未知错误"}`);
+    } finally {
+      this.searching = false;
+      if (this.button) this.button.removeClass("is-loading");
+      this.hideButton();
+    }
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.cancelHide();
+    if (this.hoverFrame && this.ownerWindow) {
+      try { this.ownerWindow.cancelAnimationFrame(this.hoverFrame); } catch (error) {}
+      this.hoverFrame = 0;
+    }
+    for (const dispose of this.disposers) {
+      try { dispose(); } catch (error) {}
+    }
+    this.disposers = [];
+    if (this.button) {
+      try { this.button.remove(); } catch (error) {}
+      this.button = null;
+    }
+    this.hoverNode = null;
+    this.canvas = null;
+    this.root = null;
+  }
+}
+
 class CanvasRuntimeAdapter {
   constructor(deckView) {
     this.deckView = deckView;
@@ -4220,6 +4582,8 @@ class CanvasRuntimeAdapter {
       entry.linkNavigationBridge.install();
       entry.imageStackController = new CanvasImageStackController(this, entry);
       entry.imageStackController.install();
+      entry.imageSearchController = new CanvasImageSearchController(this, entry);
+      entry.imageSearchController.install();
       entry.inkOverlay = await CanvasInkOverlay.create(this, entry);
       try { leaf.onResize(); } catch (error) {}
       return entry;
@@ -4270,6 +4634,10 @@ class CanvasRuntimeAdapter {
     if (entry.imageStackController) {
       try { entry.imageStackController.destroy(); } catch (error) { console.error("jam-deck canvas stack cleanup failed", error); }
       entry.imageStackController = null;
+    }
+    if (entry.imageSearchController) {
+      try { entry.imageSearchController.destroy(); } catch (error) { console.error("jam-deck canvas image search cleanup failed", error); }
+      entry.imageSearchController = null;
     }
     if (entry.inkOverlay) {
       try { await entry.inkOverlay.destroy(); } catch (error) { console.error("jam-deck canvas ink cleanup failed", error); }
@@ -4600,11 +4968,26 @@ function jamDeckMergeSashRanges(ranges) {
 }
 
 function jamDeckCollectLayoutSashes(widgets, options = {}) {
+  const cols = options.cols || GRID_COLS;
+  const rows = options.rows || GRID_ROWS;
   const minW = options.minW || JAM_DECK_WIDGET_MIN_W;
   const minH = options.minH || JAM_DECK_WIDGET_MIN_H;
   const list = (Array.isArray(widgets) ? widgets : []).filter((item) => item && item.id);
   const vertical = new Map();
   const horizontal = new Map();
+  const rightEdge = [];
+  const bottomEdge = [];
+  const rightLine = list.reduce((line, item) => Math.max(line, item.x + item.w), 1);
+  const bottomLine = list.reduce((line, item) => Math.max(line, item.y + item.h), 1);
+
+  for (const item of list) {
+    if (item.x + item.w === rightLine) {
+      rightEdge.push({ start: item.y, end: item.y + item.h, beforeIds: [item.id], afterIds: [] });
+    }
+    if (item.y + item.h === bottomLine) {
+      bottomEdge.push({ start: item.x, end: item.x + item.w, beforeIds: [item.id], afterIds: [] });
+    }
+  }
 
   for (let i = 0; i < list.length; i++) {
     for (let j = 0; j < list.length; j++) {
@@ -4659,10 +5042,35 @@ function jamDeckCollectLayoutSashes(widgets, options = {}) {
       });
     }
   }
+  for (const range of jamDeckMergeSashRanges(rightEdge)) {
+    sashes.push({
+      id: `edge-x:${rightLine}:${range.start}:${range.end}`,
+      axis: "x",
+      edge: "end",
+      line: rightLine,
+      start: range.start,
+      end: range.end,
+      beforeIds: range.beforeIds,
+      afterIds: [],
+    });
+  }
+  for (const range of jamDeckMergeSashRanges(bottomEdge)) {
+    sashes.push({
+      id: `edge-y:${bottomLine}:${range.start}:${range.end}`,
+      axis: "y",
+      edge: "end",
+      line: bottomLine,
+      start: range.start,
+      end: range.end,
+      beforeIds: range.beforeIds,
+      afterIds: [],
+    });
+  }
   return sashes.sort((left, right) => left.axis.localeCompare(right.axis) || left.line - right.line || left.start - right.start);
 }
 
 function jamDeckCollectLayoutNodes(widgets, options = {}) {
+  const list = (Array.isArray(widgets) ? widgets : []).filter((item) => item && item.id);
   const sashes = jamDeckCollectLayoutSashes(widgets, options);
   const vertical = sashes.filter((sash) => sash.axis === "x");
   const horizontal = sashes.filter((sash) => sash.axis === "y");
@@ -4672,14 +5080,19 @@ function jamDeckCollectLayoutNodes(widgets, options = {}) {
     for (const sashY of horizontal) {
       if (sashY.line < sashX.start || sashY.line > sashX.end) continue;
       if (sashX.line < sashY.start || sashX.line > sashY.end) continue;
-      nodes.push({
+      const node = {
         id: `xy:${sashX.line}:${sashY.line}`,
         axis: "xy",
         x: sashX.line,
         y: sashY.line,
         sashX: sashX.id,
         sashY: sashY.id,
-      });
+      };
+      if (sashX.edge === "end" || sashY.edge === "end") {
+        const owners = list.filter((item) => item.x + item.w === node.x && item.y + item.h === node.y);
+        if (owners.length === 1) node.widgetId = owners[0].id;
+      }
+      nodes.push(node);
     }
   }
 
@@ -4733,9 +5146,19 @@ function jamDeckApplySashDelta(widgets, sash, delta, options = {}) {
   const byId = new Map(layout.map((item) => [item.id, item]));
   const befores = (sash.beforeIds || []).map((id) => byId.get(id)).filter(Boolean);
   const afters = (sash.afterIds || []).map((id) => byId.get(id)).filter(Boolean);
-  if (!befores.length || !afters.length) return null;
+  const endEdge = sash.edge === "end";
+  if (!befores.length || (!afters.length && !endEdge)) return null;
 
   if (sash.axis === "x") {
+    if (endEdge) {
+      const maxShrink = befores.reduce((limit, item) => Math.min(limit, item.w - minW), Infinity);
+      const maxGrow = Math.max(0, cols + 1 - sash.line);
+      const step = Math.max(-maxShrink, Math.min(maxGrow, amount));
+      if (!step) return null;
+      for (const item of befores) item.w += step;
+      if (!jamDeckWidgetLayoutCollisionFree(layout, cols, rows, minW, minH)) return null;
+      return layout;
+    }
     // Positive delta moves the shared vertical boundary right: left grows, right shrinks.
     let maxPos = Infinity;
     let maxNeg = Infinity;
@@ -4752,6 +5175,15 @@ function jamDeckApplySashDelta(widgets, sash, delta, options = {}) {
       item.w -= step;
     }
   } else if (sash.axis === "y") {
+    if (endEdge) {
+      const maxShrink = befores.reduce((limit, item) => Math.min(limit, item.h - minH), Infinity);
+      const maxGrow = Math.max(0, rows + 1 - sash.line);
+      const step = Math.max(-maxShrink, Math.min(maxGrow, amount));
+      if (!step) return null;
+      for (const item of befores) item.h += step;
+      if (!jamDeckWidgetLayoutCollisionFree(layout, cols, rows, minW, minH)) return null;
+      return layout;
+    }
     let maxPos = Infinity;
     let maxNeg = Infinity;
     for (const item of befores) maxNeg = Math.min(maxNeg, item.h - minH);
@@ -4772,6 +5204,20 @@ function jamDeckApplySashDelta(widgets, sash, delta, options = {}) {
   void cols;
   void rows;
 
+  if (!jamDeckWidgetLayoutCollisionFree(layout, cols, rows, minW, minH)) return null;
+  return layout;
+}
+
+function jamDeckResizeWidgetAtCorner(widgets, widgetId, deltaX, deltaY, options = {}) {
+  const cols = options.cols || GRID_COLS;
+  const rows = options.rows || GRID_ROWS;
+  const minW = options.minW || JAM_DECK_WIDGET_MIN_W;
+  const minH = options.minH || JAM_DECK_WIDGET_MIN_H;
+  const layout = (Array.isArray(widgets) ? widgets : []).map((item) => ({ ...item }));
+  const widget = layout.find((item) => item && item.id === widgetId);
+  if (!widget) return null;
+  widget.w = Math.max(minW, Math.min(cols - widget.x + 1, widget.w + Math.round(Number(deltaX) || 0)));
+  widget.h = Math.max(minH, Math.min(rows - widget.y + 1, widget.h + Math.round(Number(deltaY) || 0)));
   if (!jamDeckWidgetLayoutCollisionFree(layout, cols, rows, minW, minH)) return null;
   return layout;
 }
@@ -5010,6 +5456,39 @@ function jamDeckApplyFillSlot(widgets, movingId, slot, options = {}) {
   return layout;
 }
 
+function jamDeckInsertWidgetByCompressingLargest(widgets, newWidget, options = {}) {
+  const cols = options.cols || GRID_COLS;
+  const rows = options.rows || GRID_ROWS;
+  const minW = options.minW || JAM_DECK_WIDGET_MIN_W;
+  const minH = options.minH || JAM_DECK_WIDGET_MIN_H;
+  const source = (Array.isArray(widgets) ? widgets : []).filter((item) => item && item.id).map((item) => ({ ...item }));
+  if (!newWidget || !newWidget.id || !jamDeckWidgetLayoutBoundsOk(newWidget, cols, rows, minW, minH)) return null;
+  const victims = source.map((item, index) => ({ item, index }))
+    .sort((left, right) => (right.item.w * right.item.h) - (left.item.w * left.item.h) || left.index - right.index || jamDeckCodeUnitCompare(left.item.id, right.item.id));
+
+  for (const victimEntry of victims) {
+    const victim = victimEntry.item;
+    const candidates = [];
+    if (victim.w >= newWidget.w + minW && victim.h >= newWidget.h) {
+      const nextVictim = { ...victim, w: victim.w - newWidget.w };
+      const inserted = { ...newWidget, x: victim.x + nextVictim.w, y: victim.y };
+      candidates.push({ axis: "x", loss: newWidget.w * victim.h, nextVictim, inserted });
+    }
+    if (victim.h >= newWidget.h + minH && victim.w >= newWidget.w) {
+      const nextVictim = { ...victim, h: victim.h - newWidget.h };
+      const inserted = { ...newWidget, x: victim.x, y: victim.y + nextVictim.h };
+      candidates.push({ axis: "y", loss: newWidget.h * victim.w, nextVictim, inserted });
+    }
+    candidates.sort((left, right) => left.loss - right.loss || left.axis.localeCompare(right.axis));
+    for (const candidate of candidates) {
+      const layout = source.map((item) => item.id === victim.id ? candidate.nextVictim : { ...item }).concat(candidate.inserted);
+      if (!jamDeckWidgetLayoutCollisionFree(layout, cols, rows, minW, minH)) continue;
+      return { layout, victimId: victim.id, axis: candidate.axis };
+    }
+  }
+  return null;
+}
+
 function jamDeckPreviewWidgetLayout(widgets, movingId, target, options = {}) {
   const cols = options.cols || GRID_COLS;
   const rows = options.rows || GRID_ROWS;
@@ -5029,6 +5508,39 @@ function jamDeckPreviewWidgetLayout(widgets, movingId, target, options = {}) {
     h: minH,
   };
 
+  const placementX = Number(target && target.placementX);
+  const placementY = Number(target && target.placementY);
+  let direct = null;
+  if (Number.isFinite(placementX) && Number.isFinite(placementY)) {
+    const directX = Math.max(1, Math.min(cols - moving.w + 1, Math.round(placementX)));
+    const directY = Math.max(1, Math.min(rows - moving.h + 1, Math.round(placementY)));
+    const directLayout = (Array.isArray(widgets) ? widgets : []).map((item) => item && item.id === movingId
+      ? { ...item, x: directX, y: directY }
+      : { ...item });
+    if (jamDeckWidgetLayoutCollisionFree(directLayout, cols, rows, minW, minH)) {
+      direct = {
+        ok: true,
+        canCommit: true,
+        mode: "direct",
+        widgets: directLayout,
+        ghost,
+        slot: {
+          axis: "free",
+          x: directX,
+          y: directY,
+          w: moving.w,
+          h: moving.h,
+          beforeId: null,
+          afterId: null,
+        },
+        seam: null,
+        slots: [],
+        solo: true,
+        includeEdgeSlots,
+      };
+    }
+  }
+
   const slots = jamDeckCollectFillSlots(widgets, movingId, { cols, rows, minW, minH, includeEdgeSlots });
   const floating = () => ({
     ok: true,
@@ -5042,6 +5554,10 @@ function jamDeckPreviewWidgetLayout(widgets, movingId, target, options = {}) {
     solo: true,
     includeEdgeSlots,
   });
+
+  // A free area that fits the selected widget wins over gap filling and seam pushing.
+  // Holding Shift remains the explicit request to stretch into an edge fill slot.
+  if (direct && !options.shiftKey) return direct;
 
   const slot = jamDeckPickFillSlot(slots, col, row);
   if (slot) {
@@ -5068,6 +5584,8 @@ function jamDeckPreviewWidgetLayout(widgets, movingId, target, options = {}) {
       includeEdgeSlots,
     };
   }
+
+  if (direct) return direct;
 
   const seam = jamDeckFindPushSeam(widgets, movingId, col, row, { cols, rows, minW, minH });
   if (seam) {
@@ -6223,6 +6741,16 @@ class JamDeckView extends ItemView {
 
   placeLayoutSashHandle(handle, node, sashMap, widgetEls, gridRect) {
     const pointFromVertical = (sash, atY) => {
+      if (sash && sash.edge === "end") {
+        const rects = (sash.beforeIds || []).map((id) => widgetEls.get(id)?.getBoundingClientRect()).filter(Boolean);
+        if (!rects.length) return null;
+        const edgeX = Math.max(...rects.map((rect) => rect.right));
+        const yRatio = (atY - 1) / Math.max(1, GRID_ROWS);
+        return {
+          x: edgeX - gridRect.left,
+          y: gridRect.height * Math.min(1, Math.max(0, yRatio)),
+        };
+      }
       const before = widgetEls.get(sash.beforeIds[0]);
       const after = widgetEls.get(sash.afterIds[0]);
       if (!before || !after) return null;
@@ -6238,6 +6766,16 @@ class JamDeckView extends ItemView {
       };
     };
     const pointFromHorizontal = (sash, atX) => {
+      if (sash && sash.edge === "end") {
+        const rects = (sash.beforeIds || []).map((id) => widgetEls.get(id)?.getBoundingClientRect()).filter(Boolean);
+        if (!rects.length) return null;
+        const edgeY = Math.max(...rects.map((rect) => rect.bottom));
+        const xRatio = (atX - 1) / Math.max(1, GRID_COLS);
+        return {
+          x: gridRect.width * Math.min(1, Math.max(0, xRatio)),
+          y: edgeY - gridRect.top,
+        };
+      }
       const before = widgetEls.get(sash.beforeIds[0]);
       const after = widgetEls.get(sash.afterIds[0]);
       if (!before || !after) return null;
@@ -6320,11 +6858,13 @@ class JamDeckView extends ItemView {
         attr: {
           "data-node-id": node.id,
           "data-axis": node.axis,
-          title: node.axis === "xy"
-            ? "拖动调整四周组件间距"
-            : node.axis === "x"
-              ? "左右拖动调整间距"
-              : "上下拖动调整间距",
+          title: node.widgetId
+            ? "拖动调整本组件大小"
+            : node.axis === "xy"
+              ? "拖动调整四周组件间距"
+              : node.axis === "x"
+                ? "左右拖动调整间距"
+                : "上下拖动调整间距",
           role: "slider",
           tabindex: "0",
         },
@@ -6354,12 +6894,15 @@ class JamDeckView extends ItemView {
       const dx = Math.round(((event.clientX - active.startX) / Math.max(1, rect.width)) * GRID_COLS);
       const dy = Math.round(((event.clientY - active.startY) / Math.max(1, rect.height)) * GRID_ROWS);
       let layout = baseline.map((item) => ({ ...item }));
-      if ((active.node.axis === "x" || active.node.axis === "xy") && dx) {
+      if (active.node.widgetId) {
+        const next = jamDeckResizeWidgetAtCorner(layout, active.node.widgetId, dx, dy);
+        if (next) layout = next;
+      } else if ((active.node.axis === "x" || active.node.axis === "xy") && dx) {
         const sash = sashMap.get(active.node.sashX);
         const next = jamDeckApplySashDelta(layout, sash, dx);
         if (next) layout = next;
       }
-      if ((active.node.axis === "y" || active.node.axis === "xy") && dy) {
+      if (!active.node.widgetId && (active.node.axis === "y" || active.node.axis === "xy") && dy) {
         const sash = sashMap.get(active.node.sashY);
         const next = jamDeckApplySashDelta(layout, sash, dy);
         if (next) layout = next;
@@ -6512,6 +7055,10 @@ class JamDeckView extends ItemView {
       const rect = grid.getBoundingClientRect();
       const startClientX = event.clientX;
       const startClientY = event.clientY;
+      const startCol = ((startClientX - rect.left) / Math.max(1, rect.width)) * GRID_COLS + 1;
+      const startRow = ((startClientY - rect.top) / Math.max(1, rect.height)) * GRID_ROWS + 1;
+      const grabOffsetX = startCol - widget.x;
+      const grabOffsetY = startRow - widget.y;
       const baseline = this.plugin.settings.widgets.map((item) => ({ ...item }));
       let lastCommitLayout = null;
       let lastPointer = { clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey };
@@ -6534,6 +7081,8 @@ class JamDeckView extends ItemView {
         const preview = jamDeckPreviewWidgetLayout(baseline, widget.id, {
           col: colFloat,
           row: rowFloat,
+          placementX: colFloat - grabOffsetX,
+          placementY: rowFloat - grabOffsetY,
         }, { shiftKey });
         this.setLayoutShiftHintVisible(shiftHint, !shiftKey);
         el.removeClass("is-collision");
@@ -9098,18 +9647,50 @@ class JamDeckPlugin extends Plugin {
       new Notice("Jam Deck：音乐播放器组件已经存在");
       return;
     }
-    const space = this.findSpace(this.settings.widgets, def.w, def.h, 1, 1);
-    if (!space) {
-      new Notice("Jam Deck：当前固定网格已满，请缩小或删除一个组件");
-      return;
-    }
     const id = `${type}-${Date.now()}`;
     const config = type === "browser" ? { url: "" }
       : type === "music" ? { mediaSourceId: "", musicSchemaVersion: 1 }
         : {};
-    this.settings.widgets.push({ id, type, x: space.x, y: space.y, w: def.w, h: def.h, config });
-    await this.saveSettings();
+    const minimum = jamDeckWidgetDisplayMinimum(type) || { w: JAM_DECK_WIDGET_MIN_W, h: JAM_DECK_WIDGET_MIN_H };
+    const fullSpace = this.findSpace(this.settings.widgets, def.w, def.h, 1, 1);
+    const minimumSpace = fullSpace ? null : this.findSpace(this.settings.widgets, minimum.w, minimum.h, 1, 1);
+    let nextWidgets = null;
+    let compressedVictim = null;
+    if (fullSpace) {
+      nextWidgets = this.settings.widgets.map((widget) => ({ ...widget })).concat({ id, type, ...fullSpace, config });
+    } else if (minimumSpace) {
+      nextWidgets = this.settings.widgets.map((widget) => ({ ...widget })).concat({ id, type, ...minimumSpace, config });
+    } else {
+      const inserted = jamDeckInsertWidgetByCompressingLargest(this.settings.widgets, {
+        id,
+        type,
+        x: 1,
+        y: 1,
+        w: minimum.w,
+        h: minimum.h,
+        config,
+      });
+      if (inserted) {
+        nextWidgets = inserted.layout;
+        compressedVictim = inserted.victimId;
+      }
+    }
+    if (!nextWidgets) {
+      new Notice("Jam Deck：没有组件能在机械最小尺寸内继续让位，布局未更改");
+      return;
+    }
+    const previous = this.settings.widgets;
+    this.settings.widgets = nextWidgets;
+    try {
+      await this.saveSettings();
+    } catch (error) {
+      this.settings.widgets = previous;
+      this.renderAllViews();
+      new Notice("Jam Deck：添加组件保存失败，布局已恢复");
+      return;
+    }
     this.renderAllViews();
+    if (compressedVictim) new Notice("Jam Deck：已压缩当前最大组件并插入新组件");
     if (type === "music") void this.pollMusicMedia(true);
   }
 
@@ -9887,6 +10468,14 @@ class JamDeckPlugin extends Plugin {
 }
 
 JamDeckPlugin.CanvasImageStackController = CanvasImageStackController;
+JamDeckPlugin.CanvasImageSearchController = CanvasImageSearchController;
+JamDeckPlugin.eagleImageSearchHelpers = {
+  buildBody: jamDeckEagleSearchBody,
+  topResults: jamDeckEagleTopResults,
+  metadataPath: jamDeckEagleMetadataPath,
+  itemPath: jamDeckEagleItemPath,
+  stackLayout: jamDeckEagleStackLayout,
+};
 JamDeckPlugin.CanvasRuntimeAdapter = CanvasRuntimeAdapter;
 JamDeckPlugin.CanvasReturnCoordinator = CanvasReturnCoordinator;
 JamDeckPlugin.CanvasLinkNavigationBridge = CanvasLinkNavigationBridge;
@@ -9939,12 +10528,14 @@ JamDeckPlugin.widgetLayoutHelpers = {
   collectSlots: jamDeckCollectFillSlots,
   pickSlot: jamDeckPickFillSlot,
   applySlot: jamDeckApplyFillSlot,
+  insertByLargest: jamDeckInsertWidgetByCompressingLargest,
   findSeam: jamDeckFindPushSeam,
   applySeam: jamDeckApplyPushSeam,
   scaleColumns: jamDeckScaleWidgetColumns,
   collectSashes: jamDeckCollectLayoutSashes,
   collectNodes: jamDeckCollectLayoutNodes,
   applySash: jamDeckApplySashDelta,
+  resizeCorner: jamDeckResizeWidgetAtCorner,
   preview: jamDeckPreviewWidgetLayout,
   minW: JAM_DECK_WIDGET_MIN_W,
   minH: JAM_DECK_WIDGET_MIN_H,

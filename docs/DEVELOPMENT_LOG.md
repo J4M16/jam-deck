@@ -1,5 +1,15 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-01 — 0.18.0 Canvas 图片 Eagle 以图搜图
+
+- 新增 `CanvasImageSearchController`（随 Canvas entry 挂载/销毁）：rAF 合并的 pointermove 命中 `.canvas-node`，经 `jamDeckCanvasStackKind` 确认图片节点后在节点右上角显示圆形按钮；堆叠预览、图片聚焦与拖拽期间隐藏；按钮 pointerdown/click 双拦截，不触发原生选中与拖动。
+- 搜索链路：`vault.readBinary` 读图片字节，`jamDeckEagleSearchBody` 手工构造 multipart（文件名消毒、limit 字段），`requestUrl` POST 到 ai-search 固定端口 `127.0.0.1:38766`。该服务有 DNS Rebinding 白名单与 CORS null，浏览器 fetch 不可达；requestUrl 走 Node 层天然绕过。
+- 结果解析：响应 `{success, results:[{id,score}]}` 截前 20（`jamDeckEagleTopResults`），逐一读 `JAM收集.library/images/{id}.info/metadata.json` 拼出 vault 相对路径与像素宽高比；软排除的文件 `adapter.read` 与 `getAbstractFileByPath` 仍可用；`isDeleted`、缺名/缺扩展名的结果跳过。
+- 插入布局：`jamDeckEagleStackLayout` 让全部结果落在原图右侧 40px 同一位置（与原图同宽、按各自宽高比定高），与既有 50% 重叠规则天然形成一个混合堆叠；`createFileNode` + `setData` 后一次 `requestPushHistory.run()` 合并为单次撤销，任一步失败移除已创建节点并重新保存。
+- 配套迁移（Jam 委托执行）：Eagle 库从 `D:\jam16\JAM收集.library` 迁入 vault `D:\jam16\Jamnote\JAM收集.library`，robocopy 分三轮合并（中途一次部分移动被完整收拢，13851 item 无丢失，仅一个 item 目录曾被拆半已拼回）；`.obsidian/app.json` 的 `userIgnoreFilters` 软排除库目录——不进入 Obsidian 索引，但 canvas 仍可按路径引用渲染；Eagle 侧资源库路径存在 leveldb 未直接改，首次打开需手动指向新位置。
+- 回归覆盖：控制器挂载/销毁、固定端口与 requestUrl、20 上限、multipart 构造与文件名消毒、metadata/item 路径、已删除过滤、堆叠布局（回退宽高比与同位成堆）、按钮样式作用域与暗色主题；`npm run verify` 通过。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-01 — Game Deck 0.3.0 32×18 正方形网格与 Blender 资产骨架
 
 - 网格从 24×16 改为 32×18，`CELL` 从 1.3 改为 1，使每格在世界与 Blender 里都是 1×1 正方形，整片地块宽高比正好 16:9，固定镜头取景与编辑态 `aspect-ratio` 一致。
