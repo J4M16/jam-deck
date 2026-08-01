@@ -1,5 +1,48 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-01 — Game Deck 0.3.0 32×18 正方形网格与 Blender 资产骨架
+
+- 网格从 24×16 改为 32×18，`CELL` 从 1.3 改为 1，使每格在世界与 Blender 里都是 1×1 正方形，整片地块宽高比正好 16:9，固定镜头取景与编辑态 `aspect-ratio` 一致。
+- `MIN_W/H` 降为 2；默认三件物件按新网格重排。`dataVersion` 升到 2：旧 24×16 不迁移坐标，加载时重置为默认布局并写回。
+- 用本机 `D:\Blender 5.2\blender.exe --background` 跑 `game-deck/assets/build_blend.py`，生成 `game-deck.blend`：集合 `GameDeck → grid/props/foliage/scenery/terrain/lighting`，子集合 `house/chest/musicbox/grass_blade/...`，各方块占位 + 参考太阳/补光/相机；约定与重建方式写在 `assets/README.md`。
+- 回归锁定 32×18、CELL=1、16:9，以及 `.blend` / 构建脚本中的集合与对象名。`npm run verify` 通过；Game Deck 0.3.0 受保护部署，`data.json` 保持 `AEFFF3A5…E37E97`（511 bytes），备份 `.game-deck-backup-20260801-230118-c1ea9c87`。下次打开会因 `dataVersion` 升到 2 重置为新网格默认排布。
+- 处理模型签名：Cursor Grok 4.5（主代理）
+
+## 2026-08-01 — Game Deck 0.2.0 固定镜头与首屏卡顿修复
+
+- Jam 反馈「刚打开非常卡」。定位到三处：`GROUND_SEGMENTS = 190` 让 36481 个顶点在启动时各跑一次 `heightAt`（多次三角函数）与 `Color.setHSL`（带色彩管理转换）；5.8 万草叶实例的矩阵合成；以及 `shadowMap` 每帧重烤。草本身一直是 `InstancedMesh`，不是实例化缺失的问题。
+- 地面细分降到 110；草叶降到 3.2 万且每叶顶点 10→8，改用向中心收拢的幂次采样（指数 1.35），实测地块区域仍是 15.3 根/㎡（原 5.8 万均匀分布为 15.8），地块后方降到 10 根/㎡ 交给雾过渡。
+- `renderer.shadowMap.autoUpdate = false`，改为布局变化 120 帧、悬停开合 45 帧的按需重烤；像素比上限 1.75→1.35；雾拉近到 45/118 让远处无草地带化入天色。
+- 镜头固定：新增 `frameDistance()`，以正前方 48° 俯视方向对地块 8 个角点（含 8 单位建筑净高）二分求最小距离，留 6% 边距，`resize` 时重算，移除 OrbitControls 与 `resetView`/`focusOn`。固定视角顺带让草叶可以一次性按由近到远排序命中 early-z。
+- 树冠与云各自 `mergeGeometries` 合成单个几何体（树冠双色靠烘焙顶点色保留）、石头改 `InstancedMesh`，场景 draw call 约 160→60。视图先画出「正在生成草原…」并隔两帧再建场景，配合 `renderer.compileAsync` 预编译 shader。
+- 新增回归：固定镜头在 1.9 / 1.6 / 1.1 三种宽高比下都要把地块 8 个角点收进 NDC 且贴边（最远角 > 0.85），窄窗口距离必须更远；另断言无 OrbitControls、阴影非逐帧、草叶排序、地面细分上限与几何体合并。`npm run verify` 通过，Game Deck 0.2.0 受保护部署，`data.json` 保持 `AEFFF3A5…E37E97`（511 bytes），备份 `.game-deck-backup-20260801-175546-be6863b2`。
+- 处理模型签名：Claude Opus 5（主代理）
+
+## 2026-08-01 — 0.17.3 单组件右下角独立缩放
+
+- 修正 0.17.2 把外边界交点统一解释为整条 sash 的问题：`jamDeckCollectLayoutNodes` 在 edge 交点精确查找右下角 owner，唯一命中时写入 `widgetId`。
+- 新增 `jamDeckResizeWidgetAtCorner`；带 owner 的 `xy` 节点直接以 pointer 增量修改该组件 `w/h`，不再调用横纵 sash，因此播放器、剪贴板和 Canvas 的右下角互不牵连。
+- 外边界中段节点继续走 `jamDeckApplySashDelta` 统一收缩贴边组件；没有 owner 的内部十字节点仍保持四周联动，视觉样式不增加新层级。
+- 回归覆盖截图对应三个 owner、播放器/剪贴板/Canvas 各自独立缩放、相邻组件完全不变以及 UI 分流；`npm run verify` 通过。0.17.3 受保护部署后 `data.json` 保持 `B36A116A…337FCB`（16892 bytes），回滚备份为 `.jam-deck-backup-20260801-180943-c3a4039c`。
+- 处理模型签名：Codex / GPT-5（主代理）
+
+## 2026-08-01 — 0.17.2 外边界圆点与最大组件自动切分
+
+- `jamDeckCollectLayoutSashes` 把当前布局包围盒的右边界、底边界建成 `edge:end` sash；与内部横/竖缝组合后自动生成右侧交点、底部交点和右下角三个 `xy` 节点，复用既有 9px 绿色圆点交互。
+- 外边界增量支持在机械 2×2 下限与画布上限之间双向夹紧；向内拖统一缩短所有贴边组件，重新收集节点时 sash 跟随新的最大占用边界，因此圆点不会在第一次收缩后消失。
+- 新增 `jamDeckInsertWidgetByCompressingLargest`：默认尺寸和最小完整尺寸均找不到独立空位时，按面积、持久化顺序和稳定 ID 选择最大可压缩组件，以损失面积较小的右切/下切方向插入新组件。
+- `addWidget` 改为原子生成下一布局；自动切分只改变目标最大组件，保存失败恢复旧数组，没有组件能保持机械下限时才提示无法让位。
+- 回归覆盖截图对应的三个外边界节点、右/底整体收缩、边界跟随与反向恢复，以及最大面积组件选择、最小完整尺寸插入、无关组件固定和全局无碰撞；`npm run verify` 通过。0.17.2 受保护部署后 `data.json` 保持 `E01AB589…F55AED`（18667 bytes），回滚备份为 `.jam-deck-backup-20260801-174437-3479c5ed`。
+- 处理模型签名：Codex / GPT-5（主代理）
+
+## 2026-08-01 — 0.17.1 编辑态空白区域自由放置
+
+- 修复编辑拖放只识别矩形填充槽和零缝推挤点的问题：新增 `direct` 落位，鼠标下方原尺寸矩形通过边界与碰撞校验后即可直接提交。
+- 自由放置保留组件原宽高，并根据 pointerdown 时组件内的抓取偏移计算目标坐标；同一空白区内拖动不会把组件强制居中到鼠标，也不会扰动无关组件。
+- 普通拖动按“原尺寸自由放置 → 填充槽 → 零缝推挤”决策；按住 Shift 时仍优先执行画布边缘延伸填充，避免破坏既有显式操作。
+- 新增回归夹具覆盖自由区域提交、尺寸保持、无关组件不动、完整尺寸预览与抓取偏移传递；`npm run verify`（双插件构建、语法检查与测试）通过。0.17.1 受保护部署后 `data.json` 保持 `FB2007AF…FAC8D7`（18561 bytes），回滚备份为 `.jam-deck-backup-20260801-172447-5ae179c1`。
+- 处理模型签名：Codex / GPT-5（主代理）
+
 ## 2026-08-01 — 0.17.0 / Game Deck 0.1.0：拆成两个插件，草原世界落地
 
 - Jam Deck 侧做减法：删除 `VIEW_TYPE_GAME_DECK`、`GameDeckWorldView`、骰子 ribbon、`openGameDeck`、`game-deck-world.js` 及其样式，`scripts/deploy.ps1` 的可选文件列表恢复为三件套；回归断言反过来锁定「主插件不得再出现 GameDeck 字样」。
