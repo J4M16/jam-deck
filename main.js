@@ -7,7 +7,6 @@ const readline = require("readline");
 const zlib = require("zlib");
 
 const VIEW_TYPE = "jam-deck-view";
-const VIEW_TYPE_GAME_DECK = "game-deck-world";
 // 40x36 keeps each cell near-square on a 1920x1080 deck (~37x23px).
 const GRID_COLS = 40;
 const GRID_ROWS = 36;
@@ -4370,6 +4369,81 @@ function jamDeckRestoreCandidateDirectionRank(candidate, original, trigger) {
   return 2;
 }
 
+function jamDeckRestoreChangedIds(before, after, targetId) {
+  const beforeById = new Map(before.map((item) => [item.id, item]));
+  return after.filter((item) => {
+    if (item.id === targetId) return false;
+    const original = beforeById.get(item.id);
+    return !original || original.x !== item.x || original.y !== item.y || original.w !== item.w || original.h !== item.h;
+  }).map((item) => item.id);
+}
+
+function jamDeckTryWidgetRestoreBySashes(widgets, widgetId, targetW, targetH, options = {}) {
+  const cols = options.cols || GRID_COLS;
+  const rows = options.rows || GRID_ROWS;
+  const original = (Array.isArray(widgets) ? widgets : []).filter((item) => item && item.id).map((item) => ({ ...item }));
+  const target = original.find((item) => item.id === widgetId);
+  if (!target) return null;
+  const neededAxes = [];
+  if (targetW > target.w) neededAxes.push("x");
+  if (targetH > target.h) neededAxes.push("y");
+  if (!neededAxes.length) return { status: "OK", layout: original, movedIds: [], mode: "sash" };
+  const orders = neededAxes.length === 2 ? [neededAxes, neededAxes.slice().reverse()] : [neededAxes];
+  const results = [];
+
+  for (const order of orders) {
+    let layout = original.map((item) => ({ ...item }));
+    let valid = true;
+    for (const axis of order) {
+      const current = layout.find((item) => item.id === widgetId);
+      const delta = axis === "x" ? targetW - current.w : targetH - current.h;
+      if (delta <= 0) continue;
+      const boundary = axis === "x" ? current.x + current.w : current.y + current.h;
+      const crossStart = axis === "x" ? current.y : current.x;
+      const crossEnd = axis === "x" ? current.y + current.h : current.x + current.w;
+      const candidates = jamDeckCollectLayoutSashes(layout, options)
+        .filter((sash) => sash.axis === axis && sash.line === boundary && sash.beforeIds.includes(widgetId))
+        .map((sash) => ({
+          sash,
+          coverage: Math.max(0, Math.min(crossEnd, sash.end) - Math.max(crossStart, sash.start)),
+          afterArea: sash.afterIds.reduce((sum, id) => {
+            const item = layout.find((entry) => entry.id === id);
+            return sum + (item ? item.w * item.h : 0);
+          }, 0),
+        }))
+        .filter((entry) => entry.coverage > 0)
+        .sort((left, right) => right.coverage - left.coverage || right.afterArea - left.afterArea || left.sash.start - right.sash.start || jamDeckCodeUnitCompare(left.sash.id, right.sash.id));
+      let applied = null;
+      for (const candidate of candidates) {
+        const next = jamDeckApplySashDelta(layout, candidate.sash, delta, options);
+        const nextTarget = next && next.find((item) => item.id === widgetId);
+        const reached = nextTarget && (axis === "x" ? nextTarget.w >= targetW : nextTarget.h >= targetH);
+        if (reached) {
+          applied = next;
+          break;
+        }
+      }
+      if (!applied) {
+        valid = false;
+        break;
+      }
+      layout = applied;
+    }
+    const restored = layout.find((item) => item.id === widgetId);
+    if (!valid || !restored || restored.w < targetW || restored.h < targetH || !jamDeckWidgetLayoutCollisionFree(layout, cols, rows)) continue;
+    const movedIds = jamDeckRestoreChangedIds(original, layout, widgetId);
+    const originalById = new Map(original.map((item) => [item.id, item]));
+    const distance = movedIds.reduce((sum, id) => {
+      const before = originalById.get(id);
+      const after = layout.find((item) => item.id === id);
+      return sum + Math.abs(after.x - before.x) + Math.abs(after.y - before.y) + Math.abs(after.w - before.w) + Math.abs(after.h - before.h);
+    }, 0);
+    results.push({ status: "OK", layout, movedIds, mode: "sash", distance });
+  }
+  results.sort((left, right) => left.movedIds.length - right.movedIds.length || left.distance - right.distance || jamDeckCodeUnitCompare(jamDeckRestoreLayoutSignature(left.layout), jamDeckRestoreLayoutSignature(right.layout)));
+  return results[0] || null;
+}
+
 function jamDeckResolveWidgetRestoreLayout(widgets, widgetId, options = {}) {
   const cols = options.cols || GRID_COLS;
   const rows = options.rows || GRID_ROWS;
@@ -4379,11 +4453,15 @@ function jamDeckResolveWidgetRestoreLayout(widgets, widgetId, options = {}) {
   const widget = list[targetIndex];
   const minimum = jamDeckWidgetDisplayMinimum(widget);
   if (!widget || !minimum) return { status: "INVALID", layout: null, movedIds: [] };
-  const originX = Math.max(1, Math.min(cols - minimum.w + 1, Math.round(Number(widget.x) || 1)));
-  const originY = Math.max(1, Math.min(rows - minimum.h + 1, Math.round(Number(widget.y) || 1)));
+  const targetW = Math.max(Number(widget.w) || 0, minimum.w);
+  const targetH = Math.max(Number(widget.h) || 0, minimum.h);
+  const sashResult = jamDeckTryWidgetRestoreBySashes(list, widgetId, targetW, targetH, options);
+  if (sashResult) return sashResult;
+  const originX = Math.max(1, Math.min(cols - targetW + 1, Math.round(Number(widget.x) || 1)));
+  const originY = Math.max(1, Math.min(rows - targetH + 1, Math.round(Number(widget.y) || 1)));
   const originalById = new Map(list.map((item) => [item.id, { x: item.x, y: item.y }]));
   const initialLayout = list.map((item, index) => index === targetIndex
-    ? { ...item, x: originX, y: originY, w: minimum.w, h: minimum.h }
+    ? { ...item, x: originX, y: originY, w: targetW, h: targetH }
     : { ...item });
   const initialLocked = new Set([widgetId]);
   const initialSignature = jamDeckRestoreLayoutSignature(initialLayout, initialLocked);
@@ -5065,11 +5143,13 @@ class JamDeckView extends ItemView {
       this._sashGrid.removeEventListener("pointermove", this._sashProbe);
       this._sashGrid.removeEventListener("pointerleave", this._sashLeave);
     }
+    if (this._sashFrame) window.cancelAnimationFrame(this._sashFrame);
     this._sashMove = null;
     this._sashUp = null;
     this._sashProbe = null;
     this._sashLeave = null;
     this._sashGrid = null;
+    this._sashFrame = 0;
   }
 
   render() {
@@ -5110,11 +5190,9 @@ class JamDeckView extends ItemView {
     for (const widget of this.plugin.settings.widgets) {
       this.renderWidget(grid, widget);
     }
-    if (!this.plugin.settings.editMode) {
-      this.enableLayoutSashes(grid);
-    }
+    this.enableLayoutSashes(grid);
     const liveCanvasIds = new Set(this.plugin.settings.widgets
-      .filter((widget) => widget.type === "canvas-embed" && !jamDeckWidgetIsCompact(widget))
+      .filter((widget) => widget.type === "canvas-embed")
       .map((widget) => widget.id));
     for (const id of Array.from(this.canvasRuntime.entries.keys())) {
       if (!liveCanvasIds.has(id)) void this.canvasRuntime.destroy(id);
@@ -5173,16 +5251,6 @@ class JamDeckView extends ItemView {
         }
       }
     });
-
-    if (compact) {
-      if (this.plugin.settings.editMode) {
-        el.addClass("is-editing");
-        this.enableDrag(el, el, widget);
-        const handle = el.createDiv({ cls: "jam-deck-resize-handle", attr: { title: "拖拽调整尺寸" } });
-        this.enableResize(handle, el, widget);
-      }
-      return;
-    }
 
     const header = el.createDiv({ cls: "jam-deck-widget-header" });
     header.createSpan({ text: def.icon, cls: "jam-deck-widget-icon" });
@@ -5251,10 +5319,12 @@ class JamDeckView extends ItemView {
 
     if (this.plugin.settings.editMode) {
       el.addClass("is-editing");
-      const hint = header.createSpan({ text: "拖动", cls: "jam-deck-drag-hint" });
-      this.enableDrag(header, el, widget);
-      const handle = el.createDiv({ cls: "jam-deck-resize-handle", attr: { title: "拖拽调整尺寸" } });
-      this.enableResize(handle, el, widget);
+      if (compact) {
+        this.enableDrag(el, el, widget);
+      } else {
+        header.createSpan({ text: "拖动", cls: "jam-deck-drag-hint" });
+        this.enableDrag(header, el, widget);
+      }
     }
   }
 
@@ -6206,7 +6276,7 @@ class JamDeckView extends ItemView {
   }
 
   enableLayoutSashes(grid) {
-    if (!grid || this.plugin.settings.editMode) return;
+    if (!grid) return;
     const layer = this.ensureLayoutSashLayer(grid);
     layer.empty();
     const baseline = this.plugin.settings.widgets.map((item) => ({ ...item }));
@@ -6228,7 +6298,10 @@ class JamDeckView extends ItemView {
         if (!next) continue;
         el.style.gridColumn = `${next.x} / span ${next.w}`;
         el.style.gridRow = `${next.y} / span ${next.h}`;
-        el.toggleClass("is-compact-preview", jamDeckWidgetIsCompact(next) && !el.hasClass("is-compact"));
+        const nextCompact = jamDeckWidgetIsCompact(next);
+        const committedCompact = el.hasClass("is-compact");
+        el.toggleClass("is-compact-preview", nextCompact && !committedCompact);
+        el.toggleClass("is-compact-live-full", !nextCompact && committedCompact);
       }
     };
 
@@ -6292,14 +6365,24 @@ class JamDeckView extends ItemView {
         if (next) layout = next;
       }
       active.lastLayout = layout;
-      applyLive(layout);
-      reposition();
+      if (!this._sashFrame) {
+        this._sashFrame = window.requestAnimationFrame(() => {
+          this._sashFrame = 0;
+          if (!active) return;
+          applyLive(active.lastLayout);
+          reposition();
+        });
+      }
     };
 
     const onUp = async (event) => {
       if (!active) return;
       const finished = active;
       active = null;
+      if (this._sashFrame) {
+        window.cancelAnimationFrame(this._sashFrame);
+        this._sashFrame = 0;
+      }
       grid.removeClass("is-sash-dragging");
       for (const handle of layer.querySelectorAll(".jam-deck-sash-handle.is-dragging")) {
         handle.removeClass("is-dragging");
@@ -6395,7 +6478,10 @@ class JamDeckView extends ItemView {
       if (!next) continue;
       node.style.gridColumn = `${next.x} / span ${next.w}`;
       node.style.gridRow = `${next.y} / span ${next.h}`;
-      node.toggleClass("is-compact-preview", jamDeckWidgetIsCompact(next) && !node.hasClass("is-compact"));
+      const nextCompact = jamDeckWidgetIsCompact(next);
+      const committedCompact = node.hasClass("is-compact");
+      node.toggleClass("is-compact-preview", nextCompact && !committedCompact);
+      node.toggleClass("is-compact-live-full", !nextCompact && committedCompact);
     }
   }
 
@@ -6502,111 +6588,6 @@ class JamDeckView extends ItemView {
     });
   }
 
-  enableResize(handle, el, widget) {
-    handle.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const grid = el.parentElement;
-      const rect = grid.getBoundingClientRect();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const start = { w: widget.w, h: widget.h };
-      el.addClass("is-moving");
-
-      const move = (e) => {
-        const dw = Math.round(((e.clientX - startX) / rect.width) * GRID_COLS);
-        const dh = Math.round(((e.clientY - startY) / rect.height) * GRID_ROWS);
-        const w = Math.max(JAM_DECK_WIDGET_MIN_W, Math.min(GRID_COLS - widget.x + 1, start.w + dw));
-        const h = Math.max(JAM_DECK_WIDGET_MIN_H, Math.min(GRID_ROWS - widget.y + 1, start.h + dh));
-        const others = this.plugin.settings.widgets.filter((item) => item.id !== widget.id);
-        if (this.plugin.hasCollision({ x: widget.x, y: widget.y, w, h }, others)) {
-          el.addClass("is-collision");
-          return;
-        }
-        el.removeClass("is-collision");
-        el.toggleClass("is-compact-preview", jamDeckWidgetIsCompact({ ...widget, w, h }) && !el.hasClass("is-compact"));
-        el.style.gridColumn = `${widget.x} / span ${w}`;
-        el.style.gridRow = `${widget.y} / span ${h}`;
-        el.dataset.previewW = String(w);
-        el.dataset.previewH = String(h);
-      };
-      const up = async () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        el.removeClass("is-moving");
-        el.removeClass("is-collision");
-        el.removeClass("is-compact-preview");
-        const w = Number(el.dataset.previewW || widget.w);
-        const h = Number(el.dataset.previewH || widget.h);
-        delete el.dataset.previewW;
-        delete el.dataset.previewH;
-        await this.plugin.placeWidget(widget.id, widget.x, widget.y, w, h);
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up, { once: true });
-    });
-  }
-}
-
-class GameDeckWorldView extends ItemView {
-  constructor(leaf, plugin) {
-    super(leaf);
-    this.plugin = plugin;
-    this.world = null;
-    this.handleResize = () => {
-      if (this.world && typeof this.world.resize === "function") this.world.resize();
-    };
-  }
-
-  getViewType() {
-    return VIEW_TYPE_GAME_DECK;
-  }
-
-  getDisplayText() {
-    return "Game Deck";
-  }
-
-  getIcon() {
-    return "dice";
-  }
-
-  async onOpen() {
-    const root = this.contentEl;
-    root.empty();
-    root.addClass("game-deck-root");
-
-    const toolbar = root.createDiv({ cls: "game-deck-toolbar" });
-    const title = toolbar.createDiv({ cls: "game-deck-title" });
-    title.createSpan({ text: "Game Deck", cls: "game-deck-title-main" });
-    title.createSpan({ text: "实验性 3D 世界", cls: "game-deck-title-sub" });
-    this.statusEl = toolbar.createDiv({ cls: "game-deck-status", text: "正在加载草地世界…" });
-
-    const stage = root.createDiv({ cls: "game-deck-stage" });
-    let worldApi = null;
-    try {
-      worldApi = require("./game-deck-world.js");
-    } catch (error) {
-      console.error("game-deck world bundle missing", error);
-      this.statusEl.setText("缺少 game-deck-world.js，请先运行 npm run build:world");
-      return;
-    }
-    const mount = worldApi && (worldApi.mountGameDeckWorld || (worldApi.default && worldApi.default.mountGameDeckWorld));
-    if (typeof mount !== "function") {
-      this.statusEl.setText("世界模块未导出 mountGameDeckWorld");
-      return;
-    }
-    this.world = mount(stage, {
-      onStatus: (text) => {
-        if (this.statusEl) this.statusEl.setText(text || "");
-      },
-    });
-    this.registerDomEvent(window, "resize", this.handleResize);
-  }
-
-  async onClose() {
-    if (this.world && typeof this.world.dispose === "function") this.world.dispose();
-    this.world = null;
-  }
 }
 
 class JamDeckPlugin extends Plugin {
@@ -6642,11 +6623,8 @@ class JamDeckPlugin extends Plugin {
     this.primeClipboard();
 
     this.registerView(VIEW_TYPE, (leaf) => new JamDeckView(leaf, this));
-    this.registerView(VIEW_TYPE_GAME_DECK, (leaf) => new GameDeckWorldView(leaf, this));
     this.addRibbonIcon("layout-dashboard", "Open Jam Deck", () => this.openDeck());
-    this.addRibbonIcon("dice", "Open Game Deck", () => this.openGameDeck());
     this.addCommand({ id: "open-jam-deck", name: "Open dashboard", callback: () => this.openDeck() });
-    this.addCommand({ id: "open-game-deck", name: "Open Game Deck world", callback: () => this.openGameDeck() });
     this.addCommand({ id: "toggle-edit-mode", name: "Toggle edit mode", callback: async () => {
       this.settings.editMode = !this.settings.editMode;
       await this.saveSettings();
@@ -6683,7 +6661,6 @@ class JamDeckPlugin extends Plugin {
     for (const owner of (this.canvasInkOwners || new Map()).values()) void owner.flush();
     void this.stopMusicMedia();
     this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => leaf.detach());
-    this.app.workspace.getLeavesOfType(VIEW_TYPE_GAME_DECK).forEach((leaf) => leaf.detach());
   }
 
   async loadSettings() {
@@ -8525,15 +8502,6 @@ class JamDeckPlugin extends Plugin {
     if (!leaf) {
       leaf = this.app.workspace.getLeaf("tab");
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
-    }
-    this.app.workspace.revealLeaf(leaf);
-  }
-
-  async openGameDeck() {
-    let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_GAME_DECK)[0];
-    if (!leaf) {
-      leaf = this.app.workspace.getLeaf("tab");
-      await leaf.setViewState({ type: VIEW_TYPE_GAME_DECK, active: true });
     }
     this.app.workspace.revealLeaf(leaf);
   }

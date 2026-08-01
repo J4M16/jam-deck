@@ -1,5 +1,31 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-01 — 0.17.0 / Game Deck 0.1.0：拆成两个插件，草原世界落地
+
+- Jam Deck 侧做减法：删除 `VIEW_TYPE_GAME_DECK`、`GameDeckWorldView`、骰子 ribbon、`openGameDeck`、`game-deck-world.js` 及其样式，`scripts/deploy.ps1` 的可选文件列表恢复为三件套；回归断言反过来锁定「主插件不得再出现 GameDeck 字样」。
+- Game Deck 侧独立成插件：`game-deck/`（manifest id `game-deck` + styles.css + esbuild 产物 main.js）与 `game-deck/src/`（ESM 源码），`scripts/build-game-deck.mjs` 打包、`scripts/deploy-game-deck.ps1` 部署；后者允许首次建目录，但仍校验目标 manifest id 并对 `data.json` 做前后哈希比对。
+- 布局引擎按同源算法移植为 `game-deck/src/layout.js`（24×16 网格、最小 3×3）：矩形填充、零缝隙推挤、Shift 贴边、缝隙合并与间距节点、单块缩放全部保留纯函数形态，直接被 `tests/game-deck-test.mjs` 覆盖。
+- 世界层：`terrain.js` 中心平坦四周丘陵的高度函数，`wind.js` 把风的位移注入到 `project_vertex` 之后（instanceMatrix 之后才位移，整片草才朝同一方向倒），`grass.js` 用 5.8 万草叶 + 900 朵野花的 InstancedMesh 并在建筑落地时剔除脚下草，`scenery.js` 提供树冠摇摆与飘云，`props.js` 程序化生成房屋（山墙屋顶 + 炊烟 + 暖光窗）、箱子（掀盖）、音乐盒（开盖转发条飘音符）。
+- 交互闭环：浏览态悬停抬起加名牌、点击选中出说明卡；「编辑地块」切到 2D 覆盖层（3D 停帧省电），完成后按新布局带动画归位。视觉沿用 Spatial 规范——细边、小圆点、绿色渐变缝隙提示，无厚重色块。
+- `npm run verify` 通过（打包 + 双插件语法检查 + jam-deck fixture + game-deck 断言）。
+- 处理模型签名：Claude Opus 5（主代理）
+
+## 2026-08-01 — 0.16.2 紧凑组件恢复改为共享边界压缩
+
+- 修复水印恢复只会移动整块组件、锁死邻居尺寸而误报“没有足够空间”的问题：优先复用现有横/竖 sash，把目标组件与下方或右侧组件的公共边界直接推开。
+- 恢复只补齐未达到完整显示阈值的轴；例如音乐播放器宽度已经足够、仅高度被压扁时，保留宽度并向下扩高，同时保持下方 Canvas 底边不动、压缩其高度。
+- sash 压缩受机械最小尺寸、网格边界和全局碰撞校验约束；无法完整恢复时再进入原有确定性整块让位，提交失败仍原子回滚。
+- 新增上下相邻音乐播放器 / 原生 Canvas 回归夹具，覆盖共享边界恢复、既有宽度保留、下方组件压缩及无碰撞约束；完成 `npm run verify`。0.16.2 受保护部署后 `data.json` 保持 `98FC6765…321F3F`（19134 bytes），回滚备份为 `.jam-deck-backup-20260801-152656-2641e2ab`。
+- 处理模型签名：Codex / GPT-5（主代理）
+
+## 2026-08-01 — 0.16.1 编辑态圆点缩放与即时内容恢复
+
+- 移除编辑态组件右下角 `jam-deck-resize-handle` 斜杠及独立 resize 事件，编辑态和浏览态统一挂载间距绿色圆点。
+- sash 的高频样式写入、紧凑状态切换和圆点重定位改为每个动画帧合并一次，pointermove 只更新最新布局快照。
+- 紧凑组件保留已挂载的标题、正文和 Canvas/浏览器等内容；CSS 仅隐藏显示。拖动尺寸一旦达到该类型完整显示阈值，立即切换 `is-compact-live-full` 显示真实内容，松手仅原子保存。
+- 更新回归断言并完成 `npm run verify`（含 GameDeck 构建、语法检查和全部 fixture）；0.16.1 受保护部署后源/运行文件哈希一致，`data.json` 保持 `7C78F9E8…126742`（18013 bytes），备份为 `.jam-deck-backup-20260801-145819-248075be`。Obsidian 已重新启动并实机确认编辑态无右下角斜杠，随后恢复浏览态。
+- 处理模型签名：Codex / GPT-5（主代理）
+
 ## 2026-08-01 — 0.16.0 GameDeck 分支启动：Three.js 草地世界
 
 - Git：在 `GameDeck` 分支提交 Jam Deck 0.15.0 基线后开始分叉；3D 实验只在此分支推进。

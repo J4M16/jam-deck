@@ -147,8 +147,13 @@
 }
 .jam-deck-widget.is-compact > .jam-deck-widget-compact-restore,
 .jam-deck-widget.is-compact-preview > .jam-deck-widget-compact-restore { display: grid; }
+.jam-deck-widget.is-compact > .jam-deck-widget-header,
+.jam-deck-widget.is-compact > .jam-deck-widget-body,
 .jam-deck-widget.is-compact-preview > .jam-deck-widget-header,
 .jam-deck-widget.is-compact-preview > .jam-deck-widget-body { visibility: hidden; pointer-events: none; }
+.jam-deck-widget.is-compact.is-compact-live-full > .jam-deck-widget-compact-restore { display: none; }
+.jam-deck-widget.is-compact.is-compact-live-full > .jam-deck-widget-header,
+.jam-deck-widget.is-compact.is-compact-live-full > .jam-deck-widget-body { visibility: visible; pointer-events: auto; }
 .jam-deck-widget-compact-icon {
   display: grid;
   place-items: center;
@@ -353,16 +358,6 @@
   flex: 1 1 auto;
   overflow: auto;
   padding: 8px;
-}
-
-.jam-deck-resize-handle {
-  width: 12px;
-  height: 12px;
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 45%, var(--interactive-accent) 46%, var(--interactive-accent) 55%, transparent 56%);
 }
 
 .jam-deck-clock-time { margin-top: 4px; font-family: var(--font-monospace); font-size: clamp(22px, 4vw, 45px); font-weight: 600; letter-spacing: -2px; line-height: 1.1; }
@@ -1979,49 +1974,4 @@
 .jam-deck-root .jam-deck-calendar-month {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "kern" 1, "tnum" 1;
-}
-
-/* Game Deck — experimental Three.js world */
-.workspace-leaf-content[data-type="game-deck-world"] .view-content {
-  padding: 0;
-}
-.game-deck-root {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: #d7ebff;
-  color: #1d2418;
-  overflow: hidden;
-}
-.game-deck-toolbar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgb(20 30 18 / 0.1);
-  background: color-mix(in srgb, #f7faf4 88%, #fff);
-}
-.game-deck-title { display: flex; align-items: baseline; gap: 8px; }
-.game-deck-title-main { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
-.game-deck-title-sub { font-size: 11px; color: rgb(40 50 36 / 0.62); }
-.game-deck-status {
-  margin-left: auto;
-  font-size: 11px;
-  color: rgb(40 50 36 / 0.72);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.game-deck-stage {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.game-deck-stage canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
 }

@@ -1,9 +1,9 @@
 {
   "id": "jam-deck",
   "name": "Jam Deck",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "minAppVersion": "1.7.2",
-  "description": "Jam Deck workbench plus experimental Game Deck Three.js world (GameDeck branch).",
+  "description": "Jam 的副屏工作台：待办、时钟、音乐、剪贴板与画布组件的自适应网格。",
   "author": "Jam",
   "authorUrl": "",
   "isDesktopOnly": true

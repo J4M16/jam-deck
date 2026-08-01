@@ -6,8 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $requiredFiles = @("main.js", "styles.css", "manifest.json")
-$optionalFiles = @("game-deck-world.js")
-$files = @($requiredFiles + $optionalFiles)
+$files = @($requiredFiles)
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..")).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $target = [IO.Path]::GetFullPath($TargetPluginDir).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $separator = [IO.Path]::DirectorySeparatorChar

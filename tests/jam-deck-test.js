@@ -165,13 +165,7 @@ assert(pluginSource.includes("jam-deck-music-transport-stage") && styleSource.in
 assert(styleSource.includes("color-mix(in srgb, var(--jd-surface) 94%, transparent)") && styleSource.includes("justify-self: start") && styleSource.includes("text-align: left"), "hover transport must veil the timeline and metadata must follow the screenshot's left-aligned beside-disc layout");
 assert(styleSource.includes("@container (max-width: 270px)"), "the music widget must adapt to narrow dashboard columns");
 assert(styleSource.includes(".jam-deck-music-disc,") && styleSource.includes("animation: none !important;"), "reduced motion must stop CD rotation");
-assert(pluginSource.includes('VIEW_TYPE_GAME_DECK = "game-deck-world"'), "GameDeck branch must register a dedicated world view type");
-assert(pluginSource.includes("class GameDeckWorldView"), "GameDeck must expose a Three.js world ItemView");
-assert(pluginSource.includes("openGameDeck"), "GameDeck must be openable from a command or ribbon action");
-assert(fs.existsSync(path.join(__dirname, "..", "game-deck", "world.js")), "GameDeck source world module must exist");
-assert(fs.existsSync(path.join(__dirname, "..", "game-deck-world.js")), "GameDeck bundled world must be built before verify");
-assert(fs.readFileSync(path.join(__dirname, "..", "game-deck-world.js"), "utf8").includes("mountGameDeckWorld"), "bundled world must export mountGameDeckWorld");
-assert(styleSource.includes(".game-deck-root") && styleSource.includes(".game-deck-stage"), "GameDeck world view must have dedicated layout styles");
+assert(!pluginSource.includes("GameDeck") && !styleSource.includes(".game-deck-"), "Game Deck now ships as its own plugin; Jam Deck must stay 2D only");
 assert(pluginSource.includes("function jamDeckCollectFillSlots"), "dashboard insert must collect fillable gaps");
 assert(pluginSource.includes("function jamDeckPickFillSlot"), "dashboard insert must pick the hovered gap slot");
 assert(pluginSource.includes("function jamDeckApplyFillSlot"), "dashboard insert must apply the fill rectangle size");
@@ -184,8 +178,9 @@ assert(pluginSource.includes("JAM_DECK_WIDGET_MIN_W") && pluginSource.includes("
 assert(pluginSource.includes("ensureLayoutShiftHint") && pluginSource.includes("setLayoutShiftHintVisible"), "drag must surface a Shift fill hint while floating");
 assert(pluginSource.includes("按住 Shift 可延伸填充到画布边缘"), "the drag hint must tell the user about Shift edge fill");
 assert(styleSource.includes(".jam-deck-layout-shift-hint") && styleSource.includes("linear-gradient"), "the Shift hint must use a bottom white gradient");
-assert(pluginSource.includes("function jamDeckCollectLayoutNodes") && pluginSource.includes("function jamDeckApplySashDelta"), "browse mode must expose gap-node sash helpers");
-assert(pluginSource.includes("enableLayoutSashes") && pluginSource.includes("!this.plugin.settings.editMode"), "gap nodes must only mount outside edit mode");
+assert(pluginSource.includes("function jamDeckCollectLayoutNodes") && pluginSource.includes("function jamDeckApplySashDelta"), "the shared layout must expose gap-node sash helpers");
+assert(pluginSource.includes("this.enableLayoutSashes(grid);"), "gap nodes must mount in both browse and edit modes");
+assert(!pluginSource.includes("jam-deck-resize-handle") && !styleSource.includes(".jam-deck-resize-handle"), "the legacy diagonal corner resize handle must be removed");
 assert(styleSource.includes(".jam-deck-sash-dot") && styleSource.includes(".jam-deck-sash-handle"), "gap nodes must render as small hover dots");
 assert(pluginSource.includes("canCommit"), "floating drag must separate hover preview from commit eligibility");
 assert(pluginSource.includes("translate3d(") && pluginSource.includes("scale(1.02)"), "dragged widgets must float with a lifted transform");
@@ -212,7 +207,9 @@ Module._load = originalLoad;
 const widgetLayout = JamDeckPlugin.widgetLayoutHelpers;
 assert(widgetLayout, "widget layout helpers must be exported for deterministic fixtures");
 assert(styleSource.includes(".jam-deck-widget.is-compact") && styleSource.includes(".jam-deck-widget-compact-icon"), "undersized widgets must render the shared watermark surface");
-assert(pluginSource.includes("!jamDeckWidgetIsCompact(widget)"), "compact Canvas widgets must be excluded from the live runtime set");
+assert(pluginSource.includes('el.toggleClass("is-compact-live-full", !nextCompact && committedCompact)'), "compact widgets must reveal their already-mounted body as soon as sash preview crosses the display threshold");
+assert(styleSource.includes(".jam-deck-widget.is-compact.is-compact-live-full"), "live full-size preview must override the committed watermark state");
+assert(pluginSource.includes("window.requestAnimationFrame(() =>") && pluginSource.includes("this._sashFrame"), "sash DOM updates must be coalesced to animation frames");
 assert(pluginSource.includes('restore.addEventListener("pointerdown", (event) => event.stopPropagation())'), "the compact restore icon must not start widget dragging");
 assert(pluginSource.includes('restore.setAttribute("aria-busy", "true")') && pluginSource.includes('restore.setAttribute("aria-disabled", "true")'), "restore transactions must expose their busy and disabled state");
 
@@ -248,6 +245,26 @@ assert.strictEqual(pushed.movedIds[0], "large", "the largest colliding widget fo
 assert.deepStrictEqual(pushed.layout.find((item) => item.id === "untouched"), pushFixture[3], "widgets outside the causal collision chain must stay fixed");
 assert(widgetLayout.collisionFree(pushed.layout, 14, 12), "pushed restore output must remain in bounds and collision free");
 assert.deepStrictEqual(widgetLayout.resolveRestore(pushFixture, "target", { cols: 14, rows: 12, maxStates: 6000 }), pushed, "identical persisted order must produce an identical restore layout");
+
+const compressBelowFixture = [
+  { id: "music", type: "music", x: 1, y: 1, w: 7, h: 2 },
+  { id: "canvas", type: "canvas-embed", x: 1, y: 3, w: 7, h: 8 },
+];
+const compressedBelow = widgetLayout.resolveRestore(compressBelowFixture, "music", { cols: 10, rows: 10 });
+assert.strictEqual(compressedBelow.status, "OK", "compact restore must move a shared boundary before reporting no space");
+assert.strictEqual(compressedBelow.mode, "sash", "an adjacent lower widget must be compressed through the shared sash");
+assert.deepStrictEqual(
+  compressedBelow.layout.find((item) => item.id === "music"),
+  { id: "music", type: "music", x: 1, y: 1, w: 7, h: 4 },
+  "restore must preserve an already sufficient width and recover only the missing height",
+);
+assert.deepStrictEqual(
+  compressedBelow.layout.find((item) => item.id === "canvas"),
+  { id: "canvas", type: "canvas-embed", x: 1, y: 5, w: 7, h: 6 },
+  "the lower component must keep its bottom edge while its top edge is pushed down",
+);
+assert.deepStrictEqual(compressedBelow.movedIds, ["canvas"], "only the component sharing the pushed boundary should change");
+assert(widgetLayout.collisionFree(compressedBelow.layout, 10, 10), "sash restore must remain in bounds and collision free");
 
 const clamped = widgetLayout.resolveRestore([
   { id: "edge", type: "browser", x: 4, y: 4, w: 2, h: 2 },
