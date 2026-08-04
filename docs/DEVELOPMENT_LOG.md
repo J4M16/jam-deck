@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.27.1 修复空预览条占位
+
+- Jam 反馈：预览条在没内容时仍显示。
+- 根因：`.jam-deck-ai-image-dock` 显式 `display: flex` 优先级高于 HTML `hidden` 属性（与 imageSearch 工具栏按钮的 `[hidden]` 被 `.clickable-icon` 覆盖是同一类坑），空 dock 一直占位。
+- 修复：`.jam-deck-root .jam-deck-ai-image-dock[hidden] { display: none; }`。
+- 回归：新增 1 条 styleSource 断言；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.27.0 AI 助手拖图进对话框
 
 - Jam 反馈：不能把剪贴板的图直接拖进 AI 助手对话框，体验不流畅（之前只有 canvas 节点右键打开图片这条路径）。

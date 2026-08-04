@@ -2246,6 +2246,8 @@
   border-radius: 9px;
   background: color-mix(in srgb, var(--jd-accent) 8%, transparent);
 }
+/* display:flex 会覆盖 HTML [hidden]，未载入图片时显式隐藏预览条 */
+.jam-deck-root .jam-deck-ai-image-dock[hidden] { display: none; }
 .jam-deck-root .jam-deck-ai-image-dock img {
   flex: 0 0 44px;
   width: 44px;
