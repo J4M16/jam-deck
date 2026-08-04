@@ -7523,7 +7523,7 @@ class CanvasRuntimeAdapter {
     const canvas = entry.leaf && entry.leaf.view && entry.leaf.view.canvas;
     if (!item || item.type !== "image" || !item.filename || !canvas || canvas.readonly) return null;
     if (typeof canvas.posFromEvt !== "function" || typeof canvas.createFileNode !== "function" || typeof canvas.requestSave !== "function") return null;
-    return { item, canvas };
+    return { item, canvas, items: [item] };
   }
 
   getCanvasExternalImageDrop(entry, transfer) {
@@ -7533,39 +7533,49 @@ class CanvasRuntimeAdapter {
     const types = Array.from(transfer.types || []);
     if (!types.includes("Files") && !types.includes("text/uri-list")) return null;
     const imageExtensions = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
+    const sources = [];
+    const seen = new Set();
     const files = Array.from(transfer.files || []);
-    const file = files.find((candidate) => {
-      if (!candidate) return false;
+    for (const candidate of files) {
+      if (!candidate) continue;
       const name = String(candidate.name || "");
       const ext = name.toLowerCase().split(".").pop();
-      return (typeof candidate.type === "string" && candidate.type.startsWith("image/")) || imageExtensions.has(ext);
-    });
-    if (file) {
-      return {
+      const isImage = (typeof candidate.type === "string" && candidate.type.startsWith("image/")) || imageExtensions.has(ext);
+      if (!isImage) continue;
+      const path = typeof candidate.path === "string" ? candidate.path : null;
+      const key = path || name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sources.push({
         canvas,
-        file: typeof file.arrayBuffer === "function" ? file : null,
-        path: typeof file.path === "string" ? file.path : null,
-        name: String(file.name || "image.png"),
-        size: Number(file.size) || 0,
-      };
+        file: typeof candidate.arrayBuffer === "function" ? candidate : null,
+        path,
+        name,
+        size: Number(candidate.size) || 0,
+      });
     }
+    // 补充纯 file:// uri（拖拽文件常同时出现在 files 与 uri-list，按 path 去重）
     let uriList = "";
     try { uriList = transfer.getData("text/uri-list"); } catch (error) {}
-    const uri = String(uriList || "").split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith("#") && /^file:\/\//i.test(line));
-    if (!uri || !this.deckView.plugin.externalFilePathFromUrl) return null;
-    const filePath = this.deckView.plugin.externalFilePathFromUrl(uri);
-    if (!filePath) return null;
-    const name = filePath.split(/[\\/]/).pop() || "image.png";
-    const ext = name.toLowerCase().split(".").pop();
-    if (!imageExtensions.has(ext)) return null;
-    return { canvas, path: filePath, name, size: 0 };
+    const uris = String(uriList || "").split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && /^file:\/\//i.test(line));
+    for (const uri of uris) {
+      const filePath = this.deckView.plugin.externalFilePathFromUrl(uri);
+      if (!filePath) continue;
+      if (seen.has(filePath)) continue;
+      const name = filePath.split(/[\\/]/).pop() || "image.png";
+      const ext = name.toLowerCase().split(".").pop();
+      if (!imageExtensions.has(ext)) continue;
+      seen.add(filePath);
+      sources.push({ canvas, file: null, path: filePath, name, size: 0 });
+    }
+    return sources.length ? sources : null;
   }
 
   getCanvasImageDrop(entry, transfer) {
     const clipboard = this.getClipboardCanvasDrop(entry, transfer);
-    if (clipboard) return { ...clipboard, kind: "clipboard" };
+    if (clipboard) return { kind: "clipboard", canvas: clipboard.canvas, items: clipboard.items };
     const external = this.getCanvasExternalImageDrop(entry, transfer);
-    return external ? { ...external, kind: "external" } : null;
+    return external ? { kind: "external", canvas: external[0].canvas, sources: external } : null;
   }
 
   installClipboardCanvasDrop(entry) {
@@ -7573,7 +7583,7 @@ class CanvasRuntimeAdapter {
     const target = entry.leaf.containerEl;
     const dragover = (event) => {
       const context = this.getCanvasImageDrop(entry, event.dataTransfer);
-      if (!context || entry.activeDropOperation) return;
+      if (!context) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       event.dataTransfer.dropEffect = "copy";
@@ -7583,10 +7593,6 @@ class CanvasRuntimeAdapter {
       if (!context) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (entry.activeDropOperation) {
-        new Notice("Jam Deck：上一张图片仍在写入 Canvas");
-        return;
-      }
       let pos;
       try {
         const raw = context.canvas.posFromEvt(event);
@@ -7596,29 +7602,72 @@ class CanvasRuntimeAdapter {
         new Notice("Jam Deck：无法确定图片在 Canvas 中的位置");
         return;
       }
-      const operation = {
-        id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        entryToken: entry.token,
-        controller: new AbortController(),
-        inserted: false,
-        committed: false,
-        node: null,
-        createdPath: null,
-        createdFile: null,
-      };
-      entry.activeDropOperation = operation;
-      entry.dropOperations.set(operation.id, operation);
-      const commit = context.kind === "clipboard"
-        ? this.commitClipboardImageDrop(entry, context.canvas, context.item, pos, operation)
-        : this.commitExternalImageDrop(entry, context.canvas, context, pos, operation);
-      operation.promise = Promise.resolve(commit);
-      void operation.promise;
+      const items = context.kind === "clipboard" ? (context.items || []) : (context.sources || []);
+      if (!items.length) return;
+      const jobs = [];
+      for (const source of items) {
+        const operation = {
+          id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          entryToken: entry.token,
+          controller: new AbortController(),
+          inserted: false,
+          committed: false,
+          node: null,
+          createdPath: null,
+          createdFile: null,
+        };
+        entry.dropOperations.set(operation.id, operation);
+        const commit = context.kind === "clipboard"
+          ? () => this.commitClipboardImageDrop(entry, context.canvas, source.item, pos, operation)
+          : () => this.commitExternalImageDrop(entry, context.canvas, source, pos, operation);
+        jobs.push({ operation, commit });
+      }
+      this.enqueueCanvasDrop(entry, jobs);
     };
     target.addEventListener("dragover", dragover, true);
     target.addEventListener("drop", drop, true);
     entry.dropDisposers.push(() => target.removeEventListener("dragover", dragover, true));
     entry.dropDisposers.push(() => target.removeEventListener("drop", drop, true));
     entry.dropInstalled = true;
+  }
+
+  enqueueCanvasDrop(entry, jobs) {
+    if (!entry || entry.closing || !Array.isArray(jobs) || !jobs.length) return;
+    if (!Array.isArray(entry.dropQueue)) entry.dropQueue = [];
+    for (const job of jobs) entry.dropQueue.push(job);
+    void this.drainCanvasDropQueue(entry);
+  }
+
+  async drainCanvasDropQueue(entry) {
+    if (!entry || !Array.isArray(entry.dropQueue)) entry.dropQueue = [];
+    if (entry.dropQueueRunning) return;
+    entry.dropQueueRunning = true;
+    let okCount = 0;
+    let failCount = 0;
+    try {
+      while (entry.dropQueue.length) {
+        const job = entry.dropQueue.shift();
+        if (!job || !job.operation) continue;
+        entry.activeDropOperation = job.operation;
+        job.operation.batchTail = entry.dropQueue.length === 0;
+        job.operation.promise = Promise.resolve(job.commit()).catch((error) => {
+          // commit 内部已处理 rollback 与失败提示，这里只做计数
+          failCount += 1;
+          return null;
+        });
+        await job.operation.promise;
+        if (job.operation.committed) okCount += 1;
+        entry.activeDropOperation = null;
+      }
+    } finally {
+      entry.dropQueueRunning = false;
+      if (okCount > 0 || failCount > 0) {
+        const parts = [];
+        if (okCount) parts.push(`成功 ${okCount} 张`);
+        if (failCount) parts.push(`失败 ${failCount} 张`);
+        new Notice(`Jam Deck：图片写入 Canvas 完成 · ${parts.join("，")}`);
+      }
+    }
   }
 
   canvasReferencesPath(canvas, path) {
@@ -7685,21 +7734,26 @@ class CanvasRuntimeAdapter {
         return;
       }
       canvas.requestSave();
-      const view = entry.leaf && entry.leaf.view;
-      if (view && typeof view.saveImmediately === "function") {
-        if (operation.controller.signal.aborted || entry.closing || entry.nativeConflictSuspended) return;
-        operation.savePromise = Promise.resolve(view.saveImmediately());
-        await operation.savePromise;
-        if (operation.controller.signal.aborted || entry.closing || entry.nativeConflictSuspended) return;
+      // 批量拖入时只对队列尾强制同步落盘（Obsidian 会合并中间 requestSave），
+      // 避免连续多张时反复全量序列化保存造成卡顿。
+      if (operation.batchTail) {
+        const view = entry.leaf && entry.leaf.view;
+        if (view && typeof view.saveImmediately === "function") {
+          if (operation.controller.signal.aborted || entry.closing || entry.nativeConflictSuspended) return;
+          operation.savePromise = Promise.resolve(view.saveImmediately());
+          await operation.savePromise;
+          if (operation.controller.signal.aborted || entry.closing || entry.nativeConflictSuspended) return;
+        }
       }
       operation.committed = true;
       if (operation.controller.signal.aborted || entry.closing || entry.nativeConflictSuspended) return;
-      try {
-        if (typeof canvas.deselectAll === "function") canvas.deselectAll();
-        if (typeof canvas.select === "function") canvas.select(operation.node);
-        if (canvas.wrapperEl && typeof canvas.wrapperEl.focus === "function") canvas.wrapperEl.focus();
-      } catch (error) {}
-      new Notice("Jam Deck：图片已保存为 Canvas 附件");
+      if (operation.batchTail) {
+        try {
+          if (typeof canvas.deselectAll === "function") canvas.deselectAll();
+          if (typeof canvas.select === "function") canvas.select(operation.node);
+          if (canvas.wrapperEl && typeof canvas.wrapperEl.focus === "function") canvas.wrapperEl.focus();
+        } catch (error) {}
+      }
     } catch (error) {
       const rolledBack = await this.rollbackCanvasDropNode(entry, canvas, operation);
       if (!operation.inserted && rolledBack) await this.removeOwnedCanvasAttachment(operation, canvas);
@@ -7782,6 +7836,8 @@ class CanvasRuntimeAdapter {
         dropDisposers: [],
         dropOperations: new Map(),
         activeDropOperation: null,
+        dropQueue: [],
+        dropQueueRunning: false,
         dropInstalled: false,
         interactionInstalled: false,
         returnCoordinator: null,

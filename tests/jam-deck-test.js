@@ -116,6 +116,12 @@ assert(pluginSource.includes("externalPreviewClusters"), "stack previews must re
 assert(pluginSource.includes("!this.externalPreviewClusters.has(this.previewClusterId)"), "stack reconciliation must preserve an open explicit folder preview");
 assert(pluginSource.includes("this.externalPreviewClusters.clear()"), "stack destroy must clear external preview cluster registrations");
 assert(pluginSource.includes("Math.hypot(next.clientX - drag.startClientX, next.clientY - drag.startClientY) >= 5"), "stack clicks must yield to image drags after a movement threshold");
+assert(pluginSource.includes("jam-deck-ai-chat-actions"), "archive/clear/close must group together at the header's right end beside the close button");
+assert(pluginSource.includes("enqueueCanvasDrop(entry, jobs)"), "Canvas image drops must enqueue a work queue instead of rejecting while a previous image is still being written");
+assert(pluginSource.includes("drainCanvasDropQueue(entry)"), "Canvas image drops must drain sequentially so multiple images land one after another");
+assert(pluginSource.includes("batchTail"), "batched Canvas drops must mark the tail image for the single flush save");
+assert(pluginSource.includes("const sources = [];") && pluginSource.includes("sources.length ? sources : null"), "external Canvas drops must collect every image file in the transfer");
+assert(!pluginSource.includes("上一张图片仍在写入 Canvas"), "the single-slot drop lock must be gone so queued images are never rejected");
 assert(pluginSource.includes("看图需要千问（多模态）"), "Canvas image context must require qwen when the provider is not multimodal");
 assert(pluginSource.includes("openAiChatWithCanvasImage"), "Canvas image nodes must open the AI chat with an image context");
 assert(pluginSource.includes("图片上下文已移除"), "switching to DeepSeek must drop the image context so plain text continues without a false qwen guard");

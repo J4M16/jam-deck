@@ -1,5 +1,17 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.25.2 Canvas 多图拖入队列化
+
+- Jam 反馈：不能一口气拖几张图进 Canvas，且问是不是该"轮询"；之前为单开同步卡顿做过限制。
+- 根因：① `getCanvasExternalImageDrop` 用 `files.find` 只取第一个图片文件（一次多选拖入只进一张）；② `entry.activeDropOperation` 是单槽锁——上一张还在写（每张都 `saveImmediately` 全量序列化保存）时，新 drop 直接拒绝「上一张图片仍在写入」。
+- 修复：
+  - `getCanvasExternalImageDrop` 改为收集 transfer 全部图片文件 + file:// uri 去重补充，返回 `sources[]`；clipboard 分支统一成 `items[]`。
+  - drop 为每个图片建 operation 入队（`enqueueCanvasDrop`），`drainCanvasDropQueue` 串行执行；dragover 不再因 activeDropOperation 拒绝。`activeDropOperation` 退化为"当前正在跑的 operation"（destroy/回滚语义保留）。
+  - 保存优化：`commitCanvasImageDrop` 只在 `operation.batchTail`（队列尾）执行 `saveImmediately` 与 select/focus，中间张仅 `requestSave`（Obsidian 合并保存），单张场景行为不变。
+  - 成功 Notice 移出逐张，由队列层汇总「成功 X 张 / 失败 Y 张」；失败细节仍逐张提示。
+- 回归：新增 6 条断言（队列入队/串行、batchTail、外部全量收集、旧单槽锁文案移除）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.25.1 标题栏操作按钮右侧分组
 
 - Jam 反馈：0.25.0 的「归档」「清理」按钮位置奇怪——header 是 `justify-content: space-between`，我直接把按钮插在 provider 按钮与关闭按钮之间，四个子项被均匀分散，按钮散在标题栏中部且显得像消失。
