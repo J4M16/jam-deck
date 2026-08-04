@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.27.2 — 2026-08-04
+
+- AI 助手贴回画布不再堆叠：新增 `findFreeCanvasRect`——目标位置被现有文本/图片节点占据时，自动向右下方扫描（最多 4 行 × 8 列，带 24px 安全间距）找空位落点。
+- 新节点创建后**自动聚焦**：取消全选 → 选中新节点 → `zoomToSelection` 视野拉过去（无该方法时回退 focus）。
+- 翻译贴文与 AI 的 `addCanvasText` 操作共用同一路径，一并受益。
+
 ## 0.27.1 — 2026-08-04
 
 - 修复 AI 助手图片预览条未载入图片时仍占位显示：`.jam-deck-ai-image-dock` 的 `display: flex` 覆盖了 HTML `[hidden]` 属性，空预览条一直显示。补 `[hidden] { display: none }` 规则，未载入图片时彻底隐藏。

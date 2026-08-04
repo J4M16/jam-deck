@@ -12044,6 +12044,40 @@ class JamDeckPlugin extends Plugin {
     return result;
   }
 
+  findFreeCanvasRect(canvas, baseCenter, width, height, excludeId) {
+    if (!canvas || !canvas.nodes || typeof canvas.nodes.values !== "function") {
+      return { x: baseCenter.x, y: baseCenter.y };
+    }
+    const occupied = [];
+    for (const node of canvas.nodes.values()) {
+      if (!node || (excludeId && node.id === excludeId)) continue;
+      let d = null;
+      try { d = typeof node.getData === "function" ? node.getData() : null; } catch (error) { d = null; }
+      if (!d || !Number.isFinite(Number(d.x)) || !Number.isFinite(Number(d.y))) continue;
+      occupied.push({ x: Number(d.x), y: Number(d.y), w: Number(d.width) || 0, h: Number(d.height) || 0 });
+    }
+    if (!occupied.length) return { x: baseCenter.x, y: baseCenter.y };
+    const pad = 24;
+    const hit = (cx, cy) => {
+      const left = cx - width / 2 - pad;
+      const right = cx + width / 2 + pad;
+      const top = cy - height / 2 - pad;
+      const bottom = cy + height / 2 + pad;
+      return occupied.some((o) => !(left > o.x + o.w || right < o.x || top > o.y + o.h || bottom < o.y));
+    };
+    if (!hit(baseCenter.x, baseCenter.y)) return { x: baseCenter.x, y: baseCenter.y };
+    const stepX = width + 80;
+    const stepY = height + 80;
+    for (let row = 0; row < 4; row += 1) {
+      const cy = baseCenter.y + row * stepY;
+      for (let col = 1; col <= 8; col += 1) {
+        const cx = baseCenter.x + col * stepX;
+        if (!hit(cx, cy)) return { x: cx, y: cy };
+      }
+    }
+    return { x: baseCenter.x, y: baseCenter.y };
+  }
+
   async createCanvasTextNode(canvasContext, text, position) {
     const canvas = canvasContext && canvasContext.canvas;
     const content = String(text || "").trim();
@@ -12058,9 +12092,11 @@ class JamDeckPlugin extends Plugin {
     const width = Math.min(480, Math.max(200, Math.ceil(content.length * 14)));
     const height = Math.max(48, lines * 22 + 20);
     const down = position === "down";
-    const pos = down
+    const basePos = down
       ? { x: Number(data.x) + width / 2, y: Number(data.y) + Number(data.height || 0) + gap + height / 2 }
       : { x: Number(data.x) + Number(data.width || 0) + gap + width / 2, y: Number(data.y) + height / 2 };
+    // 目标位置被现有文本/图片节点占据时，自动向右下找空位，避免堆叠
+    const pos = this.findFreeCanvasRect(canvas, basePos, width, height, canvasContext.nodeId);
     let created = null;
     try {
       created = canvas.createTextNode({
@@ -12085,6 +12121,13 @@ class JamDeckPlugin extends Plugin {
     }
     try {
       if (typeof canvas.requestSave === "function") await canvas.requestSave();
+    } catch (error) {}
+    // 自动聚焦到新节点：选中 + 视野拉过去
+    try {
+      if (typeof canvas.deselectAll === "function") canvas.deselectAll();
+      if (typeof canvas.select === "function") canvas.select(created);
+      if (typeof canvas.zoomToSelection === "function") canvas.zoomToSelection();
+      else if (canvas.wrapperEl && typeof canvas.wrapperEl.focus === "function") canvas.wrapperEl.focus();
     } catch (error) {}
     return true;
   }

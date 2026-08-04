@@ -1,5 +1,17 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.27.2 AI 贴回画布自动找空位 + 聚焦
+
+- Jam 反馈：AI 返回内容触发自动贴画布时会融入/堆叠到现有文本或图片节点，希望能自己找空位放并自动聚焦过去。
+- 根因：`createCanvasTextNode` 按 target 右侧/下方固定偏移计算 pos，不检查该区域是否已有节点。
+- **新增** `findFreeCanvasRect(canvas, baseCenter, width, height, excludeId)`：
+  - 收集画布全部节点 rect（world 坐标），矩形相交判断（24px 安全间距）；
+  - 目标位置空闲 → 直接用；被占 → 向右扫描（步长 = 新节点宽 + 80，每行 8 步），一行放不下就下移一行（步长 = 高 + 80，最多 4 行）；全满兜底回原位置（保证至少创建成功）。
+- **聚焦**：创建成功后 deselectAll → select(created) → `canvas.zoomToSelection()`（视图拉过去），无该方法回退 wrapperEl.focus()。
+- 复用：翻译（sendAiQuick）与 applyAiOperations 的 addCanvasText 都走 createCanvasTextNode，统一受益。
+- 回归：新增 3 条断言（finder 存在、放置走 finder、zoomToSelection 聚焦）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.27.1 修复空预览条占位
 
 - Jam 反馈：预览条在没内容时仍显示。

@@ -138,6 +138,9 @@ assert(pluginSource.includes("async loadAiImageIntoChat("), "the AI chat must ac
 assert(pluginSource.includes("jam-deck-ai-image-dock"), "the AI chat must show a removable preview dock for the loaded image");
 assert(pluginSource.includes("clipboardData.files"), "pasting a screenshot into the AI input must load it as an image");
 assert(pluginSource.includes("is-jam-deck-ai-drop-target"), "the AI chat must highlight itself while an image is dragged over it");
+assert(pluginSource.includes("findFreeCanvasRect("), "the AI assistant must scan for a free canvas spot instead of stacking onto existing nodes");
+assert(pluginSource.includes("const pos = this.findFreeCanvasRect(canvas, basePos, width, height, canvasContext.nodeId)"), "canvas text placement must run through the free-spot finder");
+assert(pluginSource.includes("zoomToSelection"), "the newly placed canvas node must be selected and the viewport must follow it");
 assert(styleSource.includes(".jam-deck-ai-image-dock[hidden]") && styleSource.includes("display: none"), "the empty image dock must be hidden even though its base rule uses display:flex");
 assert(pluginSource.includes("看图需要千问（多模态）"), "Canvas image context must require qwen when the provider is not multimodal");
 assert(pluginSource.includes("openAiChatWithCanvasImage"), "Canvas image nodes must open the AI chat with an image context");
