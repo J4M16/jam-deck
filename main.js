@@ -9932,7 +9932,8 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.disabled = true;
       this.aiSendBtn.textContent = "…";
     }
-    this.addAiMessage("assistant", `${imageCtx ? "千问" : "DeepSeek"} 处理中…`);
+    const providerLabel = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+    this.addAiMessage("assistant", `${providerLabel} 处理中…`);
     try {
       if (imageCtx) {
         const bubble = this.aiChat && !this.aiChat.hidden ? this.aiMessagesEl.lastElementChild : null;

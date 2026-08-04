@@ -141,6 +141,8 @@ assert(pluginSource.includes("is-jam-deck-ai-drop-target"), "the AI chat must hi
 assert(pluginSource.includes("findFreeCanvasRect("), "the AI assistant must scan for a free canvas spot instead of stacking onto existing nodes");
 assert(pluginSource.includes("const pos = this.findFreeCanvasRect(canvas, basePos, width, height, canvasContext.nodeId)"), "canvas text placement must run through the free-spot finder");
 assert(pluginSource.includes("zoomToSelection"), "the newly placed canvas node must be selected and the viewport must follow it");
+assert(pluginSource.includes('const providerLabel = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek"'), "the busy indicator must follow the active provider, not the image context");
+assert(!pluginSource.includes('imageCtx ? "千问"'), "the busy indicator must never infer the model from whether an image is attached");
 assert(styleSource.includes(".jam-deck-ai-image-dock[hidden]") && styleSource.includes("display: none"), "the empty image dock must be hidden even though its base rule uses display:flex");
 assert(pluginSource.includes("看图需要千问（多模态）"), "Canvas image context must require qwen when the provider is not multimodal");
 assert(pluginSource.includes("openAiChatWithCanvasImage"), "Canvas image nodes must open the AI chat with an image context");

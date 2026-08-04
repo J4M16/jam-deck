@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.27.3 修复"处理中"提示模型错标
+
+- Jam 反馈：切到千问后聊天窗提示仍显示"DeepSeek 处理中"。
+- 根因：`sendAiMessage` 的占位提示 `${imageCtx ? "千问" : "DeepSeek"} 处理中…` 用"是否挂图片"推断模型——切到千问后发纯文本（无图片上下文）就错标成 DeepSeek，实际请求走的是 qwen。
+- 修复：改为 `${this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek"} 处理中…`（跟随模型按钮状态）。
+- 回归：新增 2 条断言（providerLabel 跟随 provider + 旧推断写法禁止再出现）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.27.2 AI 贴回画布自动找空位 + 聚焦
 
 - Jam 反馈：AI 返回内容触发自动贴画布时会融入/堆叠到现有文本或图片节点，希望能自己找空位放并自动聚焦过去。
