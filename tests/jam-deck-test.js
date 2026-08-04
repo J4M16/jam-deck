@@ -121,6 +121,8 @@ assert(pluginSource.includes("enqueueCanvasDrop(entry, jobs)"), "Canvas image dr
 assert(pluginSource.includes("drainCanvasDropQueue(entry)"), "Canvas image drops must drain sequentially so multiple images land one after another");
 assert(pluginSource.includes("batchTail"), "batched Canvas drops must mark the tail image for the single flush save");
 assert(pluginSource.includes("const sources = [];") && pluginSource.includes("sources.length ? sources : null"), "external Canvas drops must collect every image file in the transfer");
+assert(pluginSource.includes("items: [item]"), "clipboard drops must put the item object itself in the items array so the source is the item");
+assert(!pluginSource.includes("source.item, pos, operation"), "drop commit must not read source.item for clipboard source — the item IS the source");
 assert(!pluginSource.includes("上一张图片仍在写入 Canvas"), "the single-slot drop lock must be gone so queued images are never rejected");
 assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the pointer is down so panning a large Canvas does not rescan every node per move");
 assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");

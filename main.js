@@ -7656,7 +7656,7 @@ class CanvasRuntimeAdapter {
         };
         entry.dropOperations.set(operation.id, operation);
         const commit = context.kind === "clipboard"
-          ? () => this.commitClipboardImageDrop(entry, context.canvas, source.item, pos, operation)
+          ? () => this.commitClipboardImageDrop(entry, context.canvas, source, pos, operation)
           : () => this.commitExternalImageDrop(entry, context.canvas, source, pos, operation);
         jobs.push({ operation, commit });
       }

@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.25.4 — 2026-08-04
+
+- 修复从剪贴板拖图片到 Canvas 失败：0.25.2 队列化重构时把 clipboard 拖拽源多取了一层 `.item`（`source.item`），但 `getClipboardCanvasDrop` 返回的 `items` 数组元素就是剪贴板条目对象本身，再 `.item` 就是 `undefined`，导致 `createCanvasAttachmentFromClipboard` 抛「剪贴板图片无效」。改为直接传 `source`。external 路径不受影响。
+
 ## 0.25.3 — 2026-08-04
 
 - 大幅降低大图量 Canvas 平移卡顿：选中工具栏同步在鼠标按下（平移/拖拽）期间暂停，松手再补一次；选中节点检测从两次全量遍历合并为一次。图片/节点很多的画布（如 S5 赛季 guide）拖动明显更顺。

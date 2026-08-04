@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.25.4 修复剪贴板拖入 Canvas 失败
+
+- Jam 反馈：拖剪贴板图片到 canvas 提示「图片加入 Canvas 失败 · 剪贴板图片无效」。
+- 根因：0.25.2 队列化重构时 drop 处理器对 clipboard 源多取了一层 `.item`（`source.item`），但 `getClipboardCanvasDrop` 返回的 `items: [item]` 元素就是 item 对象本身，再 `.item` 等于 `undefined`，被 `createCanvasAttachmentFromClipboard` 的守卫直接拒绝。external 路径（`source.file/path/name`）不受影响。
+- 修复：drop 处理器 clipboard 分支直接传 `source`（即 item）。一行改动。
+- 回归：新增 2 条断言（`items: [item]` 形态 + `source.item` 不可再次出现）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.25.3 大图量平移卡顿优化 + 多图拖入自动排布
 
 - Jam 反馈：S5 赛季 guide 启用中，画布移动卡；希望多图拖入自动排列开。
