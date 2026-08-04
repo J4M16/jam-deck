@@ -45,6 +45,8 @@ const EAGLE_LIBRARY_ROOT = "JAM收集.library";
 const EAGLE_SEARCH_RESULT_LIMIT = 10;
 const EAGLE_SEARCH_GRID_COLUMNS = 5;
 const EAGLE_SEARCH_GRID_GAP = 40;
+// 多图拖入 canvas 时相邻两张的世界坐标间距（同一行横排）。
+const CANVAS_DROP_AUTO_GAP = 28;
 const MEDIA_LAUNCH_POLL_MS = 500;
 const MEDIA_LAUNCH_TIMEOUT_MS = 12000;
 
@@ -6871,6 +6873,7 @@ class CanvasImageSearchController {
     this.selectedAiNode = null;
     this.toolbarFrame = 0;
     this.toolbarObserver = null;
+    this.suppressSync = false;
     this.searching = false;
     this.generation = 0;
     this.abortController = null;
@@ -6883,12 +6886,24 @@ class CanvasImageSearchController {
   install() {
     if (!this.canvas || !this.root || !this.ownerWindow || this.destroyed) return false;
     const sync = () => this.scheduleToolbarSync();
-    this.root.addEventListener("pointerdown", sync, true);
-    this.root.addEventListener("focusin", sync, true);
-    this.root.addEventListener("pointermove", sync, true);
-    this.disposers.push(() => this.root.removeEventListener("pointerdown", sync, true));
-    this.disposers.push(() => this.root.removeEventListener("focusin", sync, true));
-    this.disposers.push(() => this.root.removeEventListener("pointermove", sync, true));
+    // 按下（平移/拖拽）期间暂停同步，松手恢复并补一次——避免 pointermove
+    // 高频触发两次全量节点遍历导致大图量画布平移卡顿。
+    const press = (event) => {
+      if (this.toolbarButton && (event.target === this.toolbarButton || this.toolbarButton.contains(event.target))) return;
+      if (this.aiToolbarButton && (event.target === this.aiToolbarButton || this.aiToolbarButton.contains(event.target))) return;
+      this.suppressSync = true;
+      this.scheduleToolbarSync();
+    };
+    const release = () => {
+      this.suppressSync = false;
+      this.scheduleToolbarSync();
+    };
+    this.root.addEventListener("pointerdown", press, true);
+    this.ownerWindow.addEventListener("pointerup", release, true);
+    this.ownerWindow.addEventListener("pointercancel", release, true);
+    this.disposers.push(() => this.root.removeEventListener("pointerdown", press, true));
+    this.disposers.push(() => this.ownerWindow.removeEventListener("pointerup", release, true));
+    this.disposers.push(() => this.ownerWindow.removeEventListener("pointercancel", release, true));
     const MutationObserverCtor = this.ownerWindow.MutationObserver;
     if (typeof MutationObserverCtor === "function") {
       this.toolbarObserver = new MutationObserverCtor(() => this.scheduleToolbarSync());
@@ -6899,11 +6914,29 @@ class CanvasImageSearchController {
   }
 
   scheduleToolbarSync() {
-    if (this.destroyed || !this.ownerWindow || this.toolbarFrame) return;
+    if (this.destroyed || this.suppressSync || !this.ownerWindow || this.toolbarFrame) return;
     this.toolbarFrame = this.ownerWindow.requestAnimationFrame(() => {
       this.toolbarFrame = 0;
       this.syncToolbar();
     });
+  }
+
+  findSelectedNodes() {
+    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return { image: null, text: null };
+    let image = null;
+    let text = null;
+    let count = 0;
+    for (const node of this.canvas.nodes.values()) {
+      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
+      count += 1;
+      if (count > 1) return { image: null, text: null };
+      let data = null;
+      try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+      const kind = data ? jamDeckCanvasStackKind(data) : null;
+      if (kind === "image") image = node;
+      else if (kind === "text") text = node;
+    }
+    return { image, text };
   }
 
   findSelectedImageNode() {
@@ -7032,8 +7065,9 @@ class CanvasImageSearchController {
     const aiButton = this.ensureAiToolbarButton(menu);
     const stack = this.entry.imageStackController;
     const blocked = !!(stack && (stack.previewWrapper || stack.imageFocus || stack.drag));
-    this.selectedNode = blocked ? null : this.findSelectedImageNode();
-    this.selectedAiNode = blocked ? null : this.findSelectedAiNode();
+    const selected = this.findSelectedNodes();
+    this.selectedNode = blocked ? null : selected.image;
+    this.selectedAiNode = blocked ? null : (selected.text || selected.image);
     if (button) {
       // 内联 display 而非 hidden：原生 .canvas-menu 的 clickable-icon 样式
       // 可能覆盖 [hidden] 属性，导致非图片节点选中时按钮仍然可见。
@@ -7604,8 +7638,11 @@ class CanvasRuntimeAdapter {
       }
       const items = context.kind === "clipboard" ? (context.items || []) : (context.sources || []);
       if (!items.length) return;
+      // 本次拖入批次从鼠标位置重新开始排布
+      entry.dropCursorRect = null;
       const jobs = [];
-      for (const source of items) {
+      for (let index = 0; index < items.length; index += 1) {
+        const source = items[index];
         const operation = {
           id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           entryToken: entry.token,
@@ -7615,6 +7652,7 @@ class CanvasRuntimeAdapter {
           node: null,
           createdPath: null,
           createdFile: null,
+          dropIndex: index,
         };
         entry.dropOperations.set(operation.id, operation);
         const commit = context.kind === "clipboard"
@@ -7726,6 +7764,35 @@ class CanvasRuntimeAdapter {
       operation.node = canvas.createFileNode({ pos, position: "center", file: created.file });
       if (!operation.node) throw new Error("Canvas did not create an image node");
       operation.inserted = true;
+      // 多图拖入自动排布：第 2 张起横排到上一张右侧（同宽高、世界坐标 + 间距）
+      if (operation.dropIndex > 0 && entry.dropCursorRect) {
+        const prev = entry.dropCursorRect;
+        try {
+          const nextData = typeof operation.node.getData === "function" ? operation.node.getData() : null;
+          if (nextData && typeof operation.node.setData === "function") {
+            operation.node.setData({
+              ...nextData,
+              x: prev.x + prev.width + CANVAS_DROP_AUTO_GAP,
+              y: prev.y,
+              width: prev.width,
+              height: prev.height,
+            });
+            if (typeof canvas.markMoved === "function") canvas.markMoved(operation.node);
+            if (typeof operation.node.render === "function") operation.node.render();
+          }
+        } catch (error) {}
+      }
+      try {
+        const placedData = typeof operation.node.getData === "function" ? operation.node.getData() : null;
+        if (placedData) {
+          entry.dropCursorRect = {
+            x: Number(placedData.x) || 0,
+            y: Number(placedData.y) || 0,
+            width: Math.max(1, Number(placedData.width) || 1),
+            height: Math.max(1, Number(placedData.height) || 1),
+          };
+        }
+      } catch (error) {}
       if (operation.controller.signal.aborted || entry.closing || entry.nativeConflictSuspended || this.entries.get(entry.widgetId) !== entry) {
         try { if (typeof canvas.removeNode === "function") canvas.removeNode(operation.node); } catch (error) {}
         operation.node = null;

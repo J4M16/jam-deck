@@ -122,6 +122,10 @@ assert(pluginSource.includes("drainCanvasDropQueue(entry)"), "Canvas image drops
 assert(pluginSource.includes("batchTail"), "batched Canvas drops must mark the tail image for the single flush save");
 assert(pluginSource.includes("const sources = [];") && pluginSource.includes("sources.length ? sources : null"), "external Canvas drops must collect every image file in the transfer");
 assert(!pluginSource.includes("上一张图片仍在写入 Canvas"), "the single-slot drop lock must be gone so queued images are never rejected");
+assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the pointer is down so panning a large Canvas does not rescan every node per move");
+assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");
+assert(pluginSource.includes("CANVAS_DROP_AUTO_GAP"), "multi-image drops must lay out beside the previous image with a fixed world gap");
+assert(pluginSource.includes("dropCursorRect"), "multi-image drops must track the previous placed rect for automatic row layout");
 assert(pluginSource.includes("看图需要千问（多模态）"), "Canvas image context must require qwen when the provider is not multimodal");
 assert(pluginSource.includes("openAiChatWithCanvasImage"), "Canvas image nodes must open the AI chat with an image context");
 assert(pluginSource.includes("图片上下文已移除"), "switching to DeepSeek must drop the image context so plain text continues without a false qwen guard");

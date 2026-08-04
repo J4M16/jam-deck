@@ -1,5 +1,14 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.25.3 大图量平移卡顿优化 + 多图拖入自动排布
+
+- Jam 反馈：S5 赛季 guide 启用中，画布移动卡；希望多图拖入自动排列开。
+- **卡顿根因**：`CanvasImageSearchController` 在 root 上每帧 pointermove 都 rAF 同步工具栏，`syncToolbar` 每次跑 `findSelectedImageNode` + `findSelectedAiNode` 两次全量遍历 `canvas.nodes`（每节点 `nodeEl.matches(".is-selected")`）——平移时高频 O(n)，图越多越卡（ink overlay 的 move 非绘制时直接 return，排除）。
+- **优化**：① pointerdown 起 `suppressSync` 暂停同步，pointerup/pointercancel 恢复并补一次（平移/拖拽期间完全不扫节点）；② 合并成 `findSelectedNodes()` 单次遍历同时归类 image/text，多选（count>1）仍按原语义返回空；③ 移除 pointermove 直连 sync（选中态变化由 class MutationObserver 兜底）。
+- **自动排布**：drop 批次重置 `entry.dropCursorRect`；每个 operation 记 `dropIndex`；`commitCanvasImageDrop` 中第 2 张起按上一张真实 rect `x = prev.x + prev.width + CANVAS_DROP_AUTO_GAP(28)`、同宽高 setData 排布（markMoved + render），随后更新 dropCursorRect 供下一张；单张拖入/剪贴板单卡行为不变。
+- 回归：新增 5 条断言（suppressSync、findSelectedNodes 合并、AUTO_GAP、dropCursorRect 排布）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.25.2 Canvas 多图拖入队列化
 
 - Jam 反馈：不能一口气拖几张图进 Canvas，且问是不是该"轮询"；之前为单开同步卡顿做过限制。
