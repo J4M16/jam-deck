@@ -1,5 +1,18 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.27.0 AI 助手拖图进对话框
+
+- Jam 反馈：不能把剪贴板的图直接拖进 AI 助手对话框，体验不流畅（之前只有 canvas 节点右键打开图片这条路径）。
+- **新增**：
+  - `setAiImageContext(buf, mime, path, name)`：核心加载（≤15MB 校验 → 压缩至 2048 → 强制切千问 → 设 `aiCanvasContext.kind="image"` → push 图片消息+提示 → 渲染 → 更新预览条），拖/粘/文件三入口共用。
+  - `loadAiImageIntoChat(path, name)`：读文件（vault 优先，外部路径走 fs）→ setAiImageContext。
+  - `updateAiImageDock` / `clearAiImageDock`：输入框上方预览条（缩略图 44px + 文件名 + × 移除）；重渲染窗口时按 context 恢复。
+  - renderAiChat：chat 加 dragover/dragenter/dragleave/drop（CLIPBOARD_DRAG_MIME 剪贴板条目 → CLIPBOARD_DIR 文件；Files → path 或 arrayBuffer；拖拽悬停高亮 `is-jam-deck-ai-drop-target`）；input 加 paste（clipboardData.files 截图 → FileReader → base64）。
+- **同步**：toggleAiProvider 切 DeepSeek 降级图片上下文时清 dock；clearAiChat 清 dock；对话里图片消息可被归档（appendAiLog 的 `[图片：文件名]`）。
+- 样式：`.jam-deck-ai-image-dock`（accent 虚线条）+ drop 高亮 outline。
+- 回归：新增 6 条断言（loader 三入口、dock、paste、drop 高亮）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.26.0 落盘通用守卫
 
 - 背景：0.25.5 归档 ENOENT 暴露了「`vault.create` 不自动建父目录」这一类问题，决定做成通用守卫强制走，防止再次裸奔。

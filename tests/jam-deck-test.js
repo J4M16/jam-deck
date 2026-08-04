@@ -133,6 +133,11 @@ assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the
 assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");
 assert(pluginSource.includes("CANVAS_DROP_AUTO_GAP"), "multi-image drops must lay out beside the previous image with a fixed world gap");
 assert(pluginSource.includes("dropCursorRect"), "multi-image drops must track the previous placed rect for automatic row layout");
+assert(pluginSource.includes("async setAiImageContext("), "the AI chat must own an image loader shared by drag, drop and paste");
+assert(pluginSource.includes("async loadAiImageIntoChat("), "the AI chat must accept dropped clipboard or filesystem images");
+assert(pluginSource.includes("jam-deck-ai-image-dock"), "the AI chat must show a removable preview dock for the loaded image");
+assert(pluginSource.includes("clipboardData.files"), "pasting a screenshot into the AI input must load it as an image");
+assert(pluginSource.includes("is-jam-deck-ai-drop-target"), "the AI chat must highlight itself while an image is dragged over it");
 assert(pluginSource.includes("看图需要千问（多模态）"), "Canvas image context must require qwen when the provider is not multimodal");
 assert(pluginSource.includes("openAiChatWithCanvasImage"), "Canvas image nodes must open the AI chat with an image context");
 assert(pluginSource.includes("图片上下文已移除"), "switching to DeepSeek must drop the image context so plain text continues without a false qwen guard");

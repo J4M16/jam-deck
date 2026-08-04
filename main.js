@@ -9242,7 +9242,8 @@ class JamDeckView extends ItemView {
       // 纯文本对话可以继续，避免“看图需要千问”误拦截。
       const ctx = this.aiCanvasContext;
       this.aiCanvasContext = { canvas: ctx.canvas || null, nodeId: ctx.nodeId || null, rect: ctx.rect || null };
-      this.addAiMessage("assistant", "已切换到 DeepSeek：图片上下文已移除，纯文本对话继续；需要再看图请重新对图片节点打开 AI 助手。");
+      this.clearAiImageDock();
+      this.addAiMessage("assistant", "已切换到 DeepSeek：图片上下文已移除，纯文本对话继续；需要再看图请重新对图片节点打开 AI 助手或把图片拖进对话框。");
     }
     if (this.aiChat) this.renderAiChat(this.aiChat);
   }
@@ -9324,6 +9325,7 @@ class JamDeckView extends ItemView {
     this.aiMessages = [];
     this.aiArchivedCount = 0;
     this.aiInputValue = "";
+    this.clearAiImageDock();
     if (this.aiChat) {
       const input = this.aiChat.querySelector("textarea");
       if (input) input.value = "";
@@ -9488,6 +9490,105 @@ class JamDeckView extends ItemView {
     }
   }
 
+  async setAiImageContext(buf, mime, path, name) {
+    if (!buf || !buf.byteLength) {
+      this.addAiMessage("assistant", "图片读取失败。");
+      return false;
+    }
+    if (buf.byteLength > 15 * 1024 * 1024) {
+      this.addAiMessage("assistant", "图片超过 15MB，无法发送（多模态模型限制）。");
+      return false;
+    }
+    const base64 = Buffer.from(buf).toString("base64");
+    let sendMime = mime;
+    let sendBase64 = base64;
+    let displaySrc = `data:${mime};base64,${base64}`;
+    try {
+      const compressed = await this.plugin.compressImageDataUrl(`data:${mime};base64,${base64}`, mime);
+      if (compressed && compressed.dataUrl && compressed.dataUrl.length < displaySrc.length) {
+        sendMime = compressed.mime || mime;
+        sendBase64 = compressed.dataUrl.slice(compressed.dataUrl.indexOf(",") + 1);
+        displaySrc = compressed.dataUrl;
+      }
+    } catch (error) {}
+    if (this.plugin.settings.aiProvider !== "qwen") {
+      this.plugin.settings.aiProvider = "qwen";
+      void this.plugin.saveSettings();
+    }
+    this.aiCanvasContext = { canvas: null, nodeId: null, kind: "image", image: { path, mime: sendMime, base64: sendBase64 } };
+    this.aiQuickDone = true;
+    const displayName = name || String(path || "").split("/").pop() || "图片";
+    this.aiMessages.push({ role: "user", image: { src: displaySrc, alt: displayName }, text: "[图片]" });
+    this.aiMessages.push({ role: "assistant", content: "已载入图片（千问 · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
+    if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
+      this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 2]);
+      this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 1]);
+      this.scrollAiMessages();
+    }
+    this.updateAiImageDock(displaySrc, displayName);
+    new Notice(`Jam Deck：已载入图片「${displayName}」`);
+    return true;
+  }
+
+  async loadAiImageIntoChat(path, name) {
+    const app = this.plugin.app;
+    const mimeMap = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", bmp: "image/bmp", avif: "image/avif" };
+    const ext = String(path || "").toLowerCase().split(".").pop();
+    if (!mimeMap[ext]) {
+      this.addAiMessage("assistant", "不支持的图片格式：只能 PNG/JPG/WebP/GIF/BMP/AVIF。");
+      return false;
+    }
+    const mime = mimeMap[ext];
+    let buf = null;
+    if (app && app.vault && app.vault.getAbstractFileByPath) {
+      const vfile = app.vault.getAbstractFileByPath(path);
+      if (vfile) {
+        try { buf = await app.vault.readBinary(vfile); } catch (error) { buf = null; }
+      }
+    }
+    if (!buf) {
+      try {
+        const fs = require("fs");
+        const stat = await fs.promises.stat(path);
+        if (!stat.isFile()) throw new Error("不是文件");
+        buf = await fs.promises.readFile(path);
+      } catch (error) {
+        this.addAiMessage("assistant", `图片读取失败：${error.message || "未知错误"}`);
+        return false;
+      }
+    }
+    return this.setAiImageContext(buf, mime, path, name);
+  }
+
+  updateAiImageDock(displaySrc, name) {
+    const dock = this.aiImageDockEl;
+    if (!dock) return;
+    dock.empty();
+    dock.createEl("img", { attr: { src: displaySrc, alt: name || "图片" } });
+    const label = dock.createSpan({ text: name || "图片", cls: "jam-deck-ai-image-dock-name" });
+    label.title = name || "图片";
+    const remove = dock.createEl("button", {
+      text: "×",
+      cls: "jam-deck-ai-image-dock-remove",
+      attr: { type: "button", title: "移除图片", "aria-label": "移除图片" },
+    });
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.clearAiImageDock();
+    });
+    dock.hidden = false;
+  }
+
+  clearAiImageDock() {
+    if (this.aiCanvasContext && this.aiCanvasContext.kind === "image") {
+      this.aiCanvasContext = { canvas: null, nodeId: null };
+    }
+    if (this.aiImageDockEl) {
+      this.aiImageDockEl.empty();
+      this.aiImageDockEl.hidden = true;
+    }
+  }
+
   renderAiChat(chat) {
     chat.empty();
     const header = chat.createDiv({ cls: "jam-deck-ai-chat-header" });
@@ -9556,6 +9657,10 @@ class JamDeckView extends ItemView {
       this.renderAiQuickOptions(messages);
     }
 
+    const dock = chat.createDiv({ cls: "jam-deck-ai-image-dock" });
+    dock.hidden = true;
+    this.aiImageDockEl = dock;
+
     const row = chat.createDiv({ cls: "jam-deck-ai-row" });
     const input = row.createEl("textarea", {
       cls: "jam-deck-ai-input",
@@ -9579,10 +9684,80 @@ class JamDeckView extends ItemView {
         void this.sendAiMessage();
       }
     });
+    input.addEventListener("paste", (event) => {
+      const files = Array.from((event.clipboardData && event.clipboardData.files) || []);
+      const img = files.find((f) => f && typeof f.type === "string" && f.type.startsWith("image/"));
+      if (!img) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const mime = img.type || "image/png";
+        const base64 = String(reader.result || "").replace(/^data:[^;]+;base64,/, "");
+        await this.setAiImageContext(Buffer.from(base64, "base64"), mime, img.name || "粘贴图片.png", img.name || "粘贴图片");
+      };
+      reader.readAsDataURL(img);
+    });
     const send = row.createEl("button", { text: "发送", cls: "jam-deck-ai-send", attr: { type: "button" } });
     send.addEventListener("click", () => void this.sendAiMessage());
     this.aiSendBtn = send;
     this.aiInputEl = input;
+    // 拖图进对话框：剪贴板条目 / 系统文件 / file uri
+    const dropHasImage = (event) => {
+      const transfer = event.dataTransfer;
+      if (!transfer) return false;
+      const types = Array.from(transfer.types || []);
+      return types.includes(CLIPBOARD_DRAG_MIME) || types.includes("Files") || types.includes("text/uri-list");
+    };
+    const dropMark = (event) => {
+      if (!dropHasImage(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      chat.addClass("is-jam-deck-ai-drop-target");
+    };
+    const dropLeave = (event) => {
+      if (chat.contains(event.relatedTarget)) return;
+      chat.removeClass("is-jam-deck-ai-drop-target");
+    };
+    chat.addEventListener("dragover", dropMark);
+    chat.addEventListener("dragenter", dropMark);
+    chat.addEventListener("dragleave", dropLeave);
+    chat.addEventListener("drop", async (event) => {
+      chat.removeClass("is-jam-deck-ai-drop-target");
+      if (!dropHasImage(event)) return;
+      const transfer = event.dataTransfer;
+      const item = this.plugin.getClipboardItemFromTransfer(transfer) || this.plugin.activeClipboardDragItem;
+      if (item && item.type === "image" && item.filename) {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.loadAiImageIntoChat(`${CLIPBOARD_DIR}/${item.filename}`, item.filename);
+        return;
+      }
+      const files = Array.from((transfer && transfer.files) || []);
+      for (const f of files) {
+        if (!f) continue;
+        const ext = String(f.name || "").toLowerCase().split(".").pop();
+        if (!ext || !["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"].includes(ext)) continue;
+        event.preventDefault();
+        event.stopPropagation();
+        const path = typeof f.path === "string" ? f.path : null;
+        if (path) {
+          await this.loadAiImageIntoChat(path, f.name);
+        } else {
+          const buf = Buffer.from(await f.arrayBuffer());
+          const mime = (typeof f.type === "string" && f.type) || "image/png";
+          await this.setAiImageContext(buf, mime, f.name || "图片.png", f.name || "图片");
+        }
+        break;
+      }
+    });
+    // 重建窗口后恢复已载入图片的 dock
+    if (this.aiCanvasContext && this.aiCanvasContext.kind === "image" && this.aiCanvasContext.image) {
+      this.updateAiImageDock(
+        `data:${this.aiCanvasContext.image.mime};base64,${this.aiCanvasContext.image.base64}`,
+        String(this.aiCanvasContext.image.path || "").split("/").pop() || "图片",
+      );
+    }
     this.scrollAiMessages();
   }
 
