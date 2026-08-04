@@ -1,5 +1,252 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.24.2 切换 DeepSeek 时降级图片上下文
+
+- Jam 反馈：对图片节点打开 AI（千问看图）对话几轮后，点标题旁模型按钮切到 DeepSeek，发纯文本仍报「看图需要千问（多模态）」。
+- 根因：`openAiChatWithCanvasImage` 设置的 `aiCanvasContext.kind === "image"`（含 base64）没有释放机制；`sendAiMessage` 的拦截只看 context 是否非空，不看本轮是否真的传图——纯文本也被当作看图请求拦下。
+- 修复：`toggleAiProvider()` 切到 deepseek 且当前为图片上下文时，降级为纯节点上下文 `{canvas, nodeId, rect}`（保留 askDeckAi 的选中节点操作能力），追加一条 assistant 提示说明图片上下文已移除；`sendAiMessage` 拦截逻辑不变（有图时仍必须千问）。
+- 回归：新增 4 条断言（看图拦截存在、canvas 图片入口、切 DeepSeek 降级提示、降级判定条件）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
+## 2026-08-03 — 0.24.1 对话记录落盘 + 浮钮/窗口双向联动
+
+- Jam 需求：① 聊天记录清得快，专门记录到文档便于回溯；② 聊天窗口跟随悬浮按钮；③ 拖窗口同步移动按钮。
+- **记录落盘**：`appendAiLog(role, content, provider)` 追加到 `Work/AI对话记录.md`（时间戳+角色+内容，AI 标注模型；vault.create/modify，不存在自动建；失败不影响对话）。写入时机：sendAiMessage 完成（文字问答、图片问答）与 sendAiQuick 完成（翻译）。
+- **双向联动**：位置状态统一存 `settings.aiFabPos`（持久化，DEFAULT_SETTINGS.aiFabPos=null 兼容旧数据）。`updateAiFabPos(x,y)` clamp 后更新 + `layoutAiFabChat()` 重排：FAB 按 pos 定位；chat 贴在 FAB 右侧（右侧放不下自动换左侧、垂直 clamp），`toggleAiChat` 打开时重排。FAB 拖拽与 chat header 拖拽（`is-dragging` 光标，排除按钮点击）共用 updateAiFabPos，pointerup 时 saveSettings。
+- `npm run verify` 通过；版本 0.24.0 → 0.24.1。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.24.0 AI 浮钮可拖拽 + 消息可选中/复制
+
+- Jam 需求：① 千问能否出图（答复：不能，出图需通义万相 Wanx 独立异步接口，另行排期）；② AI 悬浮按钮自由移动；③ 对话内容可选中复制。
+- **FAB 拖拽**：pointerdown 记录起点 + setPointerCapture，pointermove 边界约束（相对 root，52px 尺寸）更新 left/top（right/bottom 置 auto），pointerup 结束；拖动 >5px 视为移动（click 忽略，避免误开关）；位置存 `aiFabPos`（view 字段），render 重建时恢复；`touch-action: none` + `is-dragging` 样式。
+- **消息选中/复制**：`.jam-deck-ai-message-text` 显式 `user-select: text; cursor: text`；气泡 hover 显示复制按钮（copy 图标，`copyAiText` 用 plugin.clipboard.writeText / navigator 兜底），图片消息不显示。
+- `npm run verify` 通过；版本 0.23.4 → 0.24.0。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.23.4 流式 fetch 改为 requestUrl（图片对话真正根因）
+
+- Jam 反馈：0.23.3 后图片对话仍 failed to fetch，且纯文字一度也失败。排查线索：**FAB 直接开 AI 对话千问正常（走 askDeckAi→requestUrl），发图片失败（走 streamChatWithImage→fetch）** → 定位到 **Obsidian 渲染进程的 fetch 流式不可用**（此前 0.22.0 流式翻译同样一直受影响，只是未被注意）。
+- 修复：`streamChat` 内部从 fetch+SSE 改为 **requestUrl 非流式**（Obsidian 主进程网络栈），`onChunk` 一次回调全文——streamTranslate / streamChatWithImage 及所有调用方接口不变、增量渲染写法兼容。代价：失去流式打字机效果，换取稳定。
+- 部署流程验证：本次首次由我 **CloseMainWindow 优雅关闭 Obsidian**（Jam 已授权）→ 部署 → 完成，全程无需 Jam 手动关。
+- `npm run verify` 通过；版本 0.23.3 → 0.23.4。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.23.3 修复图片对话 failed to fetch
+
+- Jam 反馈：图片发到对话报 `failed to fetch`。排查：用最小 base64 图实测 Token Plan 端点——返回 400（仅因 1x1 尺寸 <10px 限制），证明**端点、key、多模态格式全部正常**；问题在 Jam 的原图 base64 body（10MB+）导致 fetch 上传超时中断。
+- 修复：`compressImageDataUrl`（canvas 缩放最长边 2048px；PNG/WebP 保持格式、JPEG 白底 + 0.85；压缩结果更小时才替换）——body 通常 <2MB；`streamChat` 加 AbortController 90s 超时，超时/网络错误给出明确提示。
+- `npm run verify` 通过；版本 0.23.2 → 0.23.3。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.23.2 千问 Token Plan 专属端点自动路由
+
+- Jam 反馈：千问 401 `Incorrect API key provided`。排查：直接实测 API 确认 401 invalid_api_key；key 格式（sk-、114 位、含 -._）正常。查证阿里云官方 FAQ：**Token Plan 个人版专属 API Key 以 `sk-sp-` 开头，与百炼通用 key（sk-）格式不同不可混用；Base URL 专属 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；官方报错表明确 `401 Incorrect API key provided` = 误用百炼通用 Base URL**。
+- Jam 是 Token Plan 用户，填了 `sk-` 开头的通用 key + 通用端点 → 必然 401。
+- 修复：`getAiConfig()` 千问分支**按 key 前缀自动路由**——`sk-sp-` → Token Plan 专属端点，`sk-` → dashscope 通用端点；设置面板 desc 说明两类 key 的来源与格式。
+- `npm run verify` 通过；版本 0.23.1 → 0.23.2。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.23.1 千问默认 qwen3.8-max + AI 身份认知
+
+- Jam 反馈：千问问"你是什么模型"答"未公开"，且要用 qwen3.8-max。查证：**Qwen3.8-Max 2026-08-03 当天发布**，2.4T MoE 旗舰、原生多模态视觉、OpenAI 兼容，API 名 `qwen3.8-max`（百炼预览名 qwen3.8-max-preview）。
+- 千问模型下拉更新：qwen3.8-max（默认，推荐）/ qwen3.8-max-preview / qwen-vl-max / qwen-vl-plus / qwen3-vl-plus；DEFAULT_SETTINGS.qwenModel 默认改 qwen3.8-max。
+- **AI 身份认知**：askDeckAi 与 streamChatWithImage 的 system prompt 注入 `你运行在 {label}，当前模型是 {model}`——问"你是什么模型"如实回答，不再"未公开"。
+- `npm run verify` 通过；版本 0.23.0 → 0.23.1。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.23.0 千问多模态接入 + 模型切换 + 图片对话
+
+- Jam 需求：① 加千问 API（多模态识别），DS 栏位保留；② AI 对话窗加模型切换按钮；③ AI 助手支持发送图片到对话。
+- **Provider 路由**：`getAiConfig()` 返回 {baseUrl, apiKey, model, label}——DeepSeek `https://api.deepseek.com` / 千问 `https://dashscope.aliyuncs.com/compatible-mode/v1`（OpenAI 兼容，已查证）。`chatCompletion`（非流式 JSON 通道）与 `streamChat`（流式 SSE 公共方法）统一走 config；`streamTranslate`、`streamChatWithImage`（多模态，user content 数组 image_url base64 + text）复用。
+- **设置**：DEFAULT_SETTINGS 加 `qwenApiKey/qwenModel(默认 qwen-vl-max)/aiProvider(默认 deepseek)`；设置面板分三块：DeepSeek（key+模型）、千问（key+模型，视觉）、当前默认模型下拉。
+- **模型切换按钮**：对话窗标题旁 `.jam-deck-ai-provider-btn` 胶囊（显示 DS/千问），`toggleAiProvider()` 切换 + Notice + 重渲染 chat。
+- **图片对话**：Canvas AI 按钮扩展——`findSelectedAiNode` 接受 text 或 image；图片节点点击 → `openAiChatWithCanvasImage`：vault `readBinary` → `Buffer.toString("base64")`（≤15MB 限制），**自动切千问**（多模态必需），aiCanvasContext.kind="image"，消息区渲染 base64 缩略图；`sendAiMessage` 图片分支走 `streamChatWithImage` 流式问答（描述/配色/构图/风格）。provider 非 qwen 时提示切换。
+- `npm run verify` 通过；版本 0.22.1 → 0.23.0。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.22.1 修复间隔悬停绿点失效
+
+- Jam 反馈：悬停组件间隔出现的小绿点经常失效，进编辑模式触发过后才在常态出现。
+- 根因：`enableLayoutSashes` 在 render 时用 `placeLayoutSashHandle` 计算 handle 的 `left/top`（基于 widget 的 getBoundingClientRect），此后不更新。窗口/面板缩放、图片加载、canvas-embed 挂载、compact 切换等都会改变 widget 实际矩形 → handle 坐标过期 → probe 的 18px 判定永远不命中。编辑模式切换会触发 `renderAllViews` → 重建 handles（坐标刷新），所以"激活"后正常。
+- 修复：`enableLayoutSashes` 增加 `ResizeObserver`（观察 grid + 每个 widget 元素）+ `window.resize` 监听，统一走 rAF 防抖 `scheduleReposition` → `reposition()` 重算所有 handle 位置；`cleanupLayoutSashes` 同步清理 observer/listener/frame。
+- `npm run verify` 通过；版本 0.22.0 → 0.22.1。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.22.0 翻译流式提速 + 联网搜索（function calling）
+
+- Jam 需求：① 翻译速度偏慢要优化；② 增加联网搜索，AI 觉得需要搜或用户说"搜索"时触发。
+- **翻译流式**：`streamTranslate(text, lang, onChunk)` 新通道——原生 `fetch` + `stream:true`，SSE 逐块解析 delta.content 增量渲染（渲染进程 Electron fetch 支持流式，requestUrl 不支持）。语种按钮走该通道：system prompt 极简（只输出翻译结果，不包 JSON）、**不注入待办上下文**（输入更小、首字更快）、temperature 0.3。`sendAiQuick` 流式填充气泡，完成后 `createCanvasTextNode` 创建节点。
+- **createCanvasTextNode 抽取**：applyAiOperations 的 addCanvasText 分支与流式翻译共用（size {width,height}、创建后 getData 校验、save:false 统一 requestSave、幽灵节点清理）。
+- **联网搜索**：askDeckAi 请求加 `tools: [{web_search}]` + `tool_choice: "auto"`，system prompt 说明"需要最新/实时信息或用户要求搜索时调用"。`chatCompletion(payload)` 公共请求方法；有 tool_calls 时执行 `webSearch(query)`（**DuckDuckGo HTML 主源**、cn.bing.com 兜底，UA 伪装，正则提取标题/链接/摘要，最多 5 条）→ 结果作为 tool 消息回填 → 第二轮请求出最终 reply。**注意：加 tools 后去掉 response_format json_object（避免与 function calling 互斥），JSON 输出靠 system prompt 约束 + fallback 解析**。
+- 端到端实测（真实 API Key）：tools 请求返回 `tool_calls=["web_search:{query:深圳今天天气}"]` ✓；流式返回 145 chunks ✓；DuckDuckGo 抓取 10 条结果 ✓（Bing 当前反爬返回 0 块，仅作兜底）。
+- `npm run verify` 通过；版本 0.21.3 → 0.22.0。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.21.3 修复 AI 翻译长文本截断
+
+- Jam 实机反馈：翻译一段约 800 字符的英文，结果只翻译了开头几句（"为什么少了这么多字"）。根因：`openAiChatWithCanvasText` 注入 AI 的 `canvasContext.text` 做了 `slice(0, 300)`——AI 只看到原文前 300 字符，自然只翻译了开头。对话消息里虽展示了完整文本，但 askDeckAi 的上下文独立构建，不含消息历史。
+- 修复：上下文文本上限 300 → **8000 字符**（DeepSeek 1M 上下文无压力）；payload 增加 `max_tokens: 8192` 防止长翻译输出被模型默认上限截断。
+- 注意：Canvas 文本节点 text 由 `getData().text` 读取，展示与注入用同一份（展示不截断，注入截 8000 防爆上下文）。
+- `npm run verify` 通过；版本 0.21.2 → 0.21.3。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.21.2 AI 翻译语种快捷选项
+
+- Jam 反馈：翻译语种做成选项更快。实现：选中文本节点点 AI 按钮后，`renderAiChat` 在消息列表底部渲染 `.jam-deck-ai-quick` 行（`渲染为：中文 / 英文 / 韩文 / 日文` 四个胶囊按钮）。
+- 点击按钮 → `sendAiQuick(lang)`：预填输入框"把选中文本翻译成X"→ 复用 `sendAiMessage` 完整发送链路 → 移除选项行（`aiQuickDone = true` 防止重建后重复出现）。
+- 显示条件：`aiCanvasContext.nodeId` 存在且 `!aiQuickDone`；`openAiChatWithCanvasText` 重置 `aiQuickDone = false`。普通 FAB 打开对话（无节点上下文）不显示快捷选项。其他要求仍走输入框。
+- `npm run verify` 通过；版本 0.21.1 → 0.21.2。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.21.1 修复 addCanvasText 幽灵节点（0,0,0,0）
+
+- Jam 实机反馈：翻译后 Canvas 卡了一下，重载后看不到结果（测试板 S5赛季Guide.canvas）。排查：`.canvas` 文件里 4 个新文本节点中 1 个正常（ecee9a21，含 x/y/width/height），3 个为 `x:0,y:0,width:0,height:0` 幽灵节点（0299af42、4e282770、4f408570）。
+- 根因：`canvas.createTextNode` 的 `size` 参数格式错误——我传了 `{x, y}`，Obsidian 内部（解包 obsidian-1.13.4.asar 确认 `createTextNode` → `moveAndResize(L8(pos, size, position))`）期望 `{width, height}`（`defaultTextNodeDimensions` 即 `{width,height}`）。size 读取 undefined → 节点落位 NaN/0；部分节点渲染时按内容自适应出尺寸（英文那个正常），其余留在 0 尺寸。连续创建 + 内部自动 requestSave 也造成卡顿。
+- 修复：`size: { width, height }`；`save: false` 统一由外部 `requestSave()` 保存；**创建后 `getData()` 校验 width/height > 0**，不合法立即 `canvas.nodes.delete` + `destroy` 清理，绝不留下幽灵节点。
+- 遗留：测试板的 3 个幽灵节点在 `.canvas` 文件里（Obsidian 运行中不可直接改），下次 Jam 关 Obsidian 部署时一并脚本清理（备份后删 0 尺寸 text 节点）。
+- `npm run verify` 通过；版本 0.21.0 → 0.21.1。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.21.0 Canvas 选中工具栏：Eagle 仅图片 + 文本节点 AI 翻译
+
+- Jam 反馈：① 选中文本节点时 Eagle 搜图按钮也出现；② 希望选中文本节点时有 AI 按钮，把文本送进 AI 对话、补充语种后翻译，结果以文本节点贴在原文右/下方。
+- ① 修复：`CanvasImageSearchController.syncToolbar` 原来用 `button.hidden` 控制 Eagle 按钮，但 Obsidian 原生 `.canvas-menu .clickable-icon` 样式会覆盖 `[hidden]`（按钮常驻显示）。改为**内联 `style.display`** 控制（`this.selectedNode ? "" : "none"`），优先级最高，文本节点选中时正确隐藏。
+- ② 新增：`findSelectedTextNode()`（单选 + `jamDeckCanvasStackKind(data) === "text"`）+ `ensureAiToolbarButton()`（同 `.canvas-menu`，`message-circle` 图标，`.jam-deck-canvas-ai-toolbar` 类）。点击调用 `deckView.openAiChatWithCanvasText(node, canvas)`：读取节点 `getData().text`，重置对话（清空 aiMessages/aiInputValue），把文本作为 user 消息 + 引导语加入，打开对话窗并 focus 输入框；同时记录 `aiCanvasContext = {canvas, nodeId, text, rect}`。
+- 新操作 `addCanvasText`：`askDeckAi` 注入 Canvas 目标节点上下文（id/type/text/rect 世界坐标），system prompt 增加该 action（text 必填、targetNodeId 必填、position right/down）；`applyAiOperations` 新增分支——`canvas.nodes.get(nodeId)` 取目标，按 right（x+w+gap）/ down（y+h+gap）算新节点中心，`canvas.createTextNode({pos, position:"center", size, text})` + `requestSave()`，尺寸按文本长度/行数估算（宽 200–480、行高 22）。
+- `sendAiMessage` 把 `this.aiCanvasContext` 透传给 askDeckAi / applyAiOperations；普通待办对话时该字段为 undefined，行为不变。
+- `npm run verify` 通过；版本 0.20.2 → 0.21.0。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.20.2 AI 对话窗放大与能力边界说明
+
+- Jam 实机反馈：① 对话窗太小，② 在聊天窗口让它"继续开发 JamDeck"表现不符合预期。处理：
+- 对话窗 340×480 → **680×780**（`max-width/max-height` 约束保留，副屏空间不足时自动收缩）。
+- system prompt 追加能力边界：AI 助手只操作待办；开发/写代码/跑命令类请求不编造，reply 引导"请用 WorkBuddy 会话完成"并可将需求转述为待办（如「开发 JamDeck：XXX」）。避免模型对越界请求产生无效操作或幻觉回复。
+- `npm run verify` 通过；版本 0.20.1 → 0.20.2。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.20.1 AI 助手重构为悬浮对话窗
+
+- Jam 实机反馈 0.20.0 两个问题：① 只有输入框、看不到 AI 输出，不像 chatbot；② 主功能栏下方展开面板位置尴尬。重构为**右下角悬浮 AI 胶囊按钮（FAB）+ 悬浮对话窗**。
+- 对话窗：340×480、`position: absolute` 相对 `.jam-deck-root`（root 已有 `position: relative`），圆角 `--jd-radius-lg`、柔和阴影；头部标题 + 关闭按钮；消息列表（用户右对齐墨色 9% 底、AI 左对齐纸面底 + 细边框气泡，hint 低对比）；底部 auto-grow 输入 + 发送。消息历史 `aiMessages` 存 view 实例字段，`renderAllViews` 重建时恢复；`aiMessagesEl` 自动滚动到底。
+- 发送流：追加用户气泡 → 追加"处理中…"气泡 → `askDeckAi` 返回 `{reply, operations}`（system prompt 增加 reply 字段与"纯提问返回空 operations"规则）→ `applyAiOperations` 执行（空数组不再抛错，返回全 0）→ 把"处理中"气泡原位替换为 `reply + 执行统计`。错误同样原位替换为错误消息。`applyAiOperations` 签名保持数组。
+- 悬浮按钮可键盘操作（tabindex=0，Enter/Space 开合），`is-user` 用 `--jd-ink` 9% 混合不引入新色板；荧光绿仅 input focus 细环。
+- 移除 0.20.0 的 toolbar AI 按钮、`.jam-deck-ai-panel`/`.jam-deck-ai-status` 及其方法（toggleAiPanel/renderAiPanel/setAiBusy/renderAiStatus）。`npm run verify` 通过；版本 0.20.0 → 0.20.1。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-03 — 0.20.0 AI 对话助手（DeepSeek V4）
+
+- 起因：外部脚本直接改 `data.json` 会被运行中插件的内存副本定时保存覆盖（2026-08-03 连续两次踩坑：Obsidian 定时自动保存 + 关闭时保存都会整份写回旧数据）。结论是不再走外部写盘，改在插件内部原生修改。
+- 主功能栏新增 AI 入口（第五入口，`jam-deck-action`）：点击展开/收起极简输入面板（`.jam-deck-ai-panel`），输入框 auto-grow（scrollHeight 自适应，上限 160px），Enter 发送、Shift+Enter 换行，发送中按钮变 `…` 且禁用。面板状态（展开/输入内容/上次结果）存在 view 实例字段，`renderAllViews` 重建时恢复，不丢内容。
+- 接入 DeepSeek Chat Completions（OpenAI 兼容，`https://api.deepseek.com/chat/completions`，`requestUrl` 调用，桌面端无 CORS）：`askDeckAi` 注入当前进行中/已完成待办 + 本地日期作上下文，`response_format: json_object` + temperature 0.2，system prompt 限定只返回 `{"operations":[...]}`（addTask / completeTask / deleteTask，≤20 条，text≤120 字，dueDate 必须 YYYY-MM-DD，category 限 work/life）。
+- `applyAiOperations` 直接操作内存 `settings.deckTasks`（addTask 用 `makeDeckTask` 支持 dueDate/category；completeTask 仅 active；deleteTask 按 id），统一一次 `saveSettings` + `renderAllViews`，与手点按钮同路径，无外部写盘竞态。归档（写日记）涉及日记同步，第一版不开放，避免误写。
+- 设置面板新增 `JamDeckSettingTab`：DeepSeek API Key（password 输入，仅存本地 data.json）+ 模型下拉（deepseek-v4-flash 默认 / deepseek-v4-pro）。`DEFAULT_SETTINGS` 增加 `aiApiKey: ""`、`aiModel: "deepseek-v4-flash"`（`loadSettings` 的 Object.assign 天然兼容旧数据）。
+- 测试：`tests/jam-deck-test.js` 的 obsidian mock 补齐 `PluginSettingTab/Setting/normalizePath/requestUrl`。`npm run verify` 通过（build:game-deck + check + 全部回归）。
+- 版本同步 0.19.6 → 0.20.0（manifest / package / CHANGELOG 一致）。
+- 处理模型签名：具体模型标识不可见（主代理/实现与验证）
+
+## 2026-08-02 — 0.19.6 背板实机渲染与固定层序
+
+- 实机截图确认 0.19.5 只有图片和前片，CSS `background-image` 背板没有实际渲染。背板改为 `createFolderView` 直接生成 Figma 240×181.79 路径的内联 SVG，不再依赖插件资源 URL 或缓存。
+- 背板、真实代表图、前片和 header 分别锁定 39、40–43、45、46 层，代表图层使用 `!important` 抵抗 Obsidian 原生节点内联 z-index 变化；无独立遮罩，旧堆叠开合路径不变。`npm run verify` 通过。受保护部署备份为 `.jam-deck-backup-20260802-222943-e9d0f920`，`data.json` 保持 `63CD4774…57474`（18860 bytes）；Obsidian 1.13.4 深色主题实机确认灰色背板页签已出现在图片后、前片前。
+- 处理模型签名：GPT-5（主代理/实现与验证）
+
+## 2026-08-02 — 0.19.5 Figma 底板、圆角链与无遮罩层序修正
+
+- 再次读取 Figma `NZS4 / 102:6`，确认设计层级没有独立遮罩；`createFolderView` 删除 mask DOM，折叠层序固定为 backboard → 真实 representatives → front → header，旧堆叠展开、悬停抬起、拖出和颜色列表不变。
+- 找到“底板缺失”的几何根因：此前把含透明阴影边距的 240×181.79 SVG 压缩进 200×141.79 容器，使可见路径仅约 166.7px 宽。现在以 120%×128.21% 和 50%/40% 定位恢复 Figma 原始溢出；移除矩形 CSS 阴影并使用 SVG 自带路径阴影，底部圆角不再被方形阴影削平。
+- 图片节点、`.canvas-node-container`、`media-embed` 与图片本体逐层复用 10px 圆角，容器和媒体层强制裁切；前片最终级联保持 x=0/y=50/w=200/h=100、四角 10px。回归测试锁定无遮罩 DOM/CSS、底板溢出几何、圆角裁切链和原有预览生命周期。
+- 版本同步为 0.19.5，`npm run verify` 通过；受保护部署后源码与运行副本的 `main.js`、`styles.css`、`manifest.json`、底板 SVG 哈希一致，个人 `data.json` 部署前后保持 `79627102…97D80`（18664 bytes），备份为 `.jam-deck-backup-20260802-215449-68fd5f8a`。
+- Obsidian 1.13.4 实机视觉检查已在原测试 Canvas 完成：200×150 文件夹的完整底板比例、代表图圆角、前片四角与右下双凹槽均可见；只改变 Canvas 视口缩放/平移，没有编辑节点。继续自动点击检查开合时 Windows 控制返回 `0x80070005`，未重复抢占；开合与收拢路径由既有 DOM/生命周期回归通过。
+- 处理模型签名：GPT-5（主代理/集成）、gpt-5.6-luna（Executor：CSS/底板/圆角）、gpt-5.6-luna（Executor：DOM/回归测试）、gpt-5.6-luna（实现审计）
+
+## 2026-08-02 — 0.19.4 Figma 文件夹完成态、磨砂开合与原生 Canvas 安静让渡
+
+- 重新读取 Figma `NZS4 / 102:6` 的节点层级而不依赖中文 frame 名称，建立 0/2/3/4 代表图 fixture：200×150 壳体内显式使用背板 SVG、x=2/y=41/w=196/h=98 遮罩、四组真实代表图坐标/尺寸/旋转、x=0/y=50/w=200/h=100 前片、数量/“编组”文字和两道凹槽。装饰层全部 pointer-transparent，SVG 透明角不再被矩形底色填平。
+- 前片材质参考 `fayazara/portfolio-site-template/src/components/Folder.astro`：小面积固定 16px blur/180% saturate、半透白色渐变、内侧白环与柔和多层阴影；点击文件夹继续打开旧 stack preview，前片翻开后卡片散开，关闭时先等卡片 260ms 回位再用 600ms 合拢。drag-out、pointercancel、viewport 变化、Esc、空白点击、销毁和 reduced-motion 均清理状态，不解散编组。
+- 原生 Canvas 卡住的生命周期闭环改为 quiet teardown：owned detached leaf 有明确 ownership，原生扫描排除自有 leaf；冲突集合规范化并以单 timer/串行 promise 调和。暂停只销毁 Jam Deck 自有控制器/监听器并卸载 owned leaf，跳过 `saveImmediately`、`view.close` 和 workspace 激活/布局操作；同路径最后一个原生 leaf 关闭后 fresh mount 一次。
+- 图片 drop 和 Eagle 搜索纳入 entry 的异步销毁屏障：冲突暂停先 closing/abort，再等待在途任务结算，任何后续节点创建、保存和 Notice 都以 entry/token/signal 校验为前提；画笔 owner 只在这些任务停止后完成一次独立 sidecar 安全落盘，不写原生 `.canvas`。回归覆盖 100 事件 burst、双 native leaf、owned leaf 排除、路径规范化、敏感 API 零调用、异步穿透、文件夹层序/材质/预览开合与 timer 清理。
+- 版本同步为 0.19.4，`npm run verify` 最终通过。Obsidian 主窗口正常退出后完成受保护部署并重新启动；源码与运行副本的 `main.js`、`styles.css`、`manifest.json`、背板 SVG 哈希一致，个人 `data.json` 保持 `2CB26771…59C1DD2`（17974 bytes），备份为 `.jam-deck-backup-20260802-203120-e9edeee3`。
+- Obsidian 1.13.4 实机检查：原生 `Study/灵感感念.canvas` 打开时 Jam Deck 显示暂停态，关闭最后一个原生标签后约 1 秒只恢复一次；折叠文件夹点击可散开 6 张旧 stack preview 卡片，点击空白后卡片先回位并完成前片合拢；颜色圆钮可展开横向 6 色圆点列表。检查仅改变临时视口/选择状态，结束时关闭预览、色值列表和选区，没有编辑 Canvas 节点。
+- 处理模型签名：GPT-5（主代理/集成）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-luna（Executor：Figma 视觉与动效、Canvas 生命周期与异步 teardown、独立代码审查）
+
+## 2026-08-02 — 0.19.3 按 Figma 重做文件夹外观并恢复旧堆叠交互
+
+- 以 Figma `NZS4` 节点 `102:6` 为唯一视觉基准：折叠壳体固定为 200×150 世界尺寸并随 Canvas 缩放，以锚点中心定位；使用 Figma 导出的背板 SVG，前片按 200×100、10px 圆角、`#e7e7e7 → #f2f2f2` 渐变与 `0 -4px 8px rgba(0,0,0,.05)` 实现。节点数与“编组”分别使用 8px/20% 和 12px/50% 的文字层级，只保留右下颜色圆钮与两道凹槽。
+- 明确文件夹只是旧堆叠的折叠皮肤，不引入第二套展开语义：点击文件夹壳体代理到既有 stack preview，原有卡片展开、点击聚焦、拖出及周边节点避让继续工作；移除壳体上的展开、聚焦和解散常驻按钮，避免再次把一次点击解释为取消编组。
+- 修复 `CanvasImageStackController.onPointerDown` 中误插入的未定义 `shell` 访问，该异常曾让任意节点 pointerdown 都中断，从而造成按住悬浮、点击展开和手拖自动成组同时消失。显式文件夹预览以 `folder:*` 外部 cluster 注册，在 reconcile 时保活并于收拢/销毁时清理。
+- 多选工具栏“网格排列”改用 Obsidian 内置并已核验存在的 `layout-grid` 图标；新增真实 pointer 事件、文件夹预览代理、外部 cluster 生命周期、200×150 几何、Figma CSS/资产及部署白名单回归。版本同步为 0.19.3，`npm run verify` 通过。
+- 已关闭 Obsidian 后受保护部署并重新启动 Jamnote；`main.js`、`styles.css`、`manifest.json` 与 Figma SVG 资产均与源码哈希一致，个人 `data.json` 保持 `2CB26771…59C1DD2`（17974 bytes），备份为 `.obsidian/plugins/.jam-deck-backup-20260802-181952-e9bbd798`。Obsidian 1.13.4 主窗口运行且响应；Windows 截图助手因 `0x80070005` / `0x80070057` 无法完成视觉点击冒烟，未以自动截图替代人工界面验收。
+- 处理模型签名：GPT-5（主代理/集成）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-luna（Executor：堆叠交互恢复、网格图标、Figma 视觉与折叠几何）
+
+## 2026-08-02 — 0.19.2 修复文件夹缩略图遮挡与启动恢复
+
+- 实机复现 0.19.1 折叠文件夹只剩彩色封面：紧凑节点高度下 `min-height: 52px` 会盖住整个上方缩略图区。封面改为下方 58% 且最多占 `100% - 28px`，单列/双列真实代表成员可继续从封面上方露出并保留轻微旋转。
+- `CanvasFolderController` 在代表成员应用展示 transform 前捕获其屏幕矩形；折叠、展开、收拢阶段壳体优先使用该稳定矩形，展开恢复时清理，避免已缩放/旋转几何反馈进下一帧边界。新增源码契约回归测试。
+- 启动恢复期间先临时禁用 Jam Deck 验证 Jamnote Vault 可稳定打开，再恢复原测试 Canvas 与插件；重新启用后可持续加载并写回新的编组操作，未改写个人 `data.json`。版本同步为 0.19.2，`npm run verify` 通过。
+- 处理模型签名：GPT-5（主代理/集成）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-luna（Executor：核心动效、视觉、测试、实机视觉审计与修复）
+
+## 2026-08-02 — 0.19.1 Canvas 文件夹动效与运行时收口
+
+- Canvas 文件夹展开/收拢改为五态 runtime 状态机：展开 300ms、收拢 260ms，成员错峰 18ms（最多 72ms），同时插值标准 `transform` 与 `opacity`；减少动态效果或 WAAPI 不可用时直接落到最终布局。
+- 文件夹壳体按稳定 ID 使用 keyed view，移除全量 overlay 清空；只保留真实 Canvas 成员作为代表，不 clone、不 reparent。展开 2–4 个成员使用两列，5 个及以上使用三列，6 个即 3×2；颜色菜单使用 leaf 内单一 popover 与 6 个可访问 radio。
+- `anchorNodeId` 仅作为 runtime group 别名，schema v1 的八个可持久化字段和 `jamdeck.folderId`/`jamdeck.folder` 边界不变。聚焦只由显式按钮设置 `focusRequestToken`，展开完成后消费一次并按最新成员过滤，空集合不 zoom、不写数据；事务 rollback、销毁清理、拖拽阈值与原生 Canvas 交互保持回归覆盖。
+- 版本同步为 0.19.1（`manifest.json`、`package.json`、`package-lock.json`、`CHANGELOG.md`）；更新 README、架构说明和 Spatial 视觉规范，`npm run verify` 通过。
+- 处理模型签名：GPT-5（主代理/集成）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-luna（Executor：核心动效、视觉、测试与文档）
+
+## 2026-08-02 — 0.19.0 Canvas 文件夹编组
+
+- 新增 `CanvasFolderController`：支持手拖节点在严格超过较小节点面积 50% 时自动建组；多选工具栏提供“堆叠编组”和“网格排列”，新组默认折叠。
+- 文件夹关系写入 Canvas 节点 `jamdeck.folderId` 与锚点 `jamdeck.folder` schema v1，不触碰插件 `data.json`；折叠壳体可整体移动、展开、循环 6 色、聚焦和取消编组，预览最多 4 个真实代表成员，单个居中、多个双列并带稳定轻旋转，非代表隐藏且无常驻 clone。
+- 显式文件夹与旧隐式混合堆叠分开处理；每次编组、整组移动、网格布局、颜色/折叠状态和取消编组共用一次 Canvas history/save 事务，失败时逐节点回滚。原生 group 未作为权威，因为 Obsidian 1.12.7 的 group 没有可靠 `memberIds`，移动只按包围盒包含关系推断。
+- 版本同步为 0.19.0（`manifest.json`、`package.json`、`package-lock.json`、`CHANGELOG.md`）；更新 README、架构说明和 Spatial 视觉规范，`npm run verify` 通过。
+- 处理模型签名：GPT-5（主代理/集成）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-luna（Executor：核心、视觉、能力调查、测试、代表成员集成、文档）
+
+## 2026-08-02 — 0.18.5 修复 Eagle 图片拖入卡死
+
+- 复核 Eagle 拖图后渲染进程升至约 2GB，发现 `.canvas` 曾被截断为 0 字节；新增嵌入 Canvas 专属外部图片 drop handler，拦截 `Files` / `file://` 图片，先受控复制到 `attachments/jam-deck-canvas-assets/`，再创建单一图片节点。
+- 外部图片读取上限为 64MB，避免异常大图直接进入 Canvas 解码；空 Canvas 文件返回暂停状态，不再启动原生视图重试循环。
+- 保留剪贴板拖图链路，新增路径解析、附件队列和完整回滚；`npm run verify` 通过。
+- 本轮处理模型签名：GPT-5（主代理）
+
+## 2026-08-02 — 0.18.4 修复原生 Canvas 切换卡死
+
+- 复核发现 Obsidian 1.13 的工作区 `children` 可能不是普通数组，0.18.3 的 `Array.isArray(children)` 判断会把已打开的原生 Canvas 误判为未挂载，导致 Jam Deck 与原生页面同时渲染同一 `.canvas`。
+- Canvas 叶节点识别现在先排除 Jam Deck 自有叶；`getLeavesOfType("canvas")` 返回的其余叶都按原生候选处理，不依赖数组形状、活动状态或 DOM 是否连接，同一路径的原生 Canvas 会可靠触发冲突保护。
+- 冲突变化不再调用 `renderAllViews()`，而是只销毁/恢复对应的 Canvas 嵌入壳，避免 workspace 事件、Canvas open/close 和整页重建互相触发形成渲染循环。
+- 曾出现的渲染进程约 1.24GB 占用已通过命令行停止并重启；当前 Canvas 已先备份到 `D:\Project\JamDeck\debug-backups\灵感感念.canvas.20260802-113125.bak`。
+- `npm run verify` 通过；本轮部署前后仍执行受保护备份并保留个人 `data.json`。
+- 处理模型签名：GPT-5（主代理）、GPT-5.6-sol（分析代理）
+
+## 2026-08-02 — 0.18.3 避免 Canvas 双实例并行渲染
+
+- 定位到同一 `.canvas` 文件在 Jam Deck 与 Obsidian 原生页面各有一套完整 CanvasView；两套视图同时监听文件变化、维护节点与重绘，会让原生拖动明显卡顿，极端情况下互相等待造成假死。
+- Canvas 运行适配器现在识别已挂载的原生 Canvas leaf；检测到同一路径时不创建第二个嵌入实例，已存在的嵌入实例也会被关闭并显示“原生页面编辑中，已暂停渲染”的轻量状态。
+- 工作区 `layout-change` / `active-leaf-change` 经过 120ms 防抖后检查冲突集合；原生 Canvas 关闭后自动重建 Jam Deck 嵌入视图，避免需要手动刷新。
+- `npm run check`、`npm test` 通过；受保护部署完成后个人 `data.json` 保持 `84377798…E9BB0BB3`（17271 bytes），最新备份为 `D:\jam16\Jamnote\.obsidian\plugins\.jam-deck-backup-20260802-112528-f7fedf9b`。
+- 处理模型签名：GPT-5（主代理）
+
+## 2026-08-02 — 0.18.2 修正以图搜图入口位置
+
+- 根据界面复核确认 0.18.1 实际挂到了 Canvas 底部 `.canvas-card-menu` 新建节点工具栏，已改为使用 Obsidian 原生 `canvas.menu.menuEl` / `.canvas-menu` 选中节点工具栏；底部主工具栏不再出现以图搜图按钮。
+- 搜索按钮使用原生 `clickable-icon` 类，并由 `.canvas-menu` 的原生布局负责按钮大小、间距、投影与明暗主题；控制器只在单选图片节点时插入、选区变化时同步并在销毁时移除。
+- 保留前一版前 10 个结果、5×2 网格和源图尺寸布局；新增静态回归断言，确保搜索入口不再解析 `cardMenuEl`。
+- `npm run verify` 通过后受保护部署到 Vault 运行副本；部署前关闭 Obsidian，部署后重新启动；个人 `data.json` 保持 `E4F94068…DFDA892`（17051 bytes）未覆盖，最新备份为 `D:\jam16\Jamnote\.obsidian\plugins\.jam-deck-backup-20260802-111133-54b8259a`。
+- 处理模型签名：GPT-5（主代理）、GPT-5.6-sol（分析代理）
+
+## 2026-08-02 — 0.18.1 Canvas 以图搜图工具栏与 5×2 结果网格
+
+- 复核 0.18.0 后将以图搜图入口从图片节点右上角的临时悬浮按钮迁移到原生 Canvas 上方悬浮工具栏；仅单选图片节点时显示，复用画笔入口的工具栏底板、按钮尺寸、阴影和明暗主题，工具栏重建后自动补回且不重复。
+- Eagle 搜索请求和结果解析上限统一收敛为 10 张；结果按 API 返回顺序保留，不改变素材本体与 Eagle 管理边界。
+- 结果节点沿用源图的 Canvas 宽高，按 5 列×2 行、40 世界单位间距排在源图下方；移除原图右侧同位堆叠路径，搜索结果不会再被通用堆叠识别覆盖。
+- 批量创建继续以一次 Canvas 历史提交，发生异常时移除本次已创建节点并保存回滚；成功提示改为“原图下方”。
+- 更新 README、CHANGELOG、版本号至 0.18.1；补充 `resultGridLayout` 导出并保留旧 `stackLayout` 兼容别名。
+- `npm run verify` 通过（Game Deck 构建、两份语法检查、Jam Deck 与 Game Deck fixture 全部通过）；补充了以图搜图上限、5×2 网格和工具栏作用域回归断言。
+- Obsidian 运行副本已通过命令行关闭后受保护部署，`main.js`、`styles.css`、`manifest.json` 与项目源一致；个人 `data.json` 保持 `43FDD778…0BA7942`（16785 bytes），备份为 `D:\jam16\Jamnote\.obsidian\plugins\.jam-deck-backup-20260802-105300-e84c3558`。
+- 部署后已重新启动 Obsidian；本轮未使用 Computer Use，未做界面截图冒烟，待 Jam 在 Canvas 中选中图片确认工具栏按钮和网格位置。
+- 处理模型签名：GPT-5（主代理）、GPT-5.6-sol（分析代理）
+
 ## 2026-08-01 — 0.18.0 Canvas 图片 Eagle 以图搜图
 
 - 新增 `CanvasImageSearchController`（随 Canvas entry 挂载/销毁）：rAF 合并的 pointermove 命中 `.canvas-node`，经 `jamDeckCanvasStackKind` 确认图片节点后在节点右上角显示圆形按钮；堆叠预览、图片聚焦与拖拽期间隐藏；按钮 pointerdown/click 双拦截，不触发原生选中与拖动。

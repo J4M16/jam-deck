@@ -6,7 +6,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $requiredFiles = @("main.js", "styles.css", "manifest.json")
-$files = @($requiredFiles)
+$assetFiles = @("assets/jam-deck-folder-shell.svg")
+$files = @($requiredFiles + $assetFiles)
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..")).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $target = [IO.Path]::GetFullPath($TargetPluginDir).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $separator = [IO.Path]::DirectorySeparatorChar
@@ -61,7 +62,12 @@ $replaced = [Collections.Generic.List[string]]::new()
 $success = $false
 try {
   foreach ($name in $files) {
-    Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination (Join-Path $staging $name)
+    $stagePath = Join-Path $staging $name
+    $stageParent = Split-Path -Parent $stagePath
+    if (-not (Test-Path -LiteralPath $stageParent -PathType Container)) {
+      New-Item -ItemType Directory -Path $stageParent -Force | Out-Null
+    }
+    Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination $stagePath
   }
   & node --check (Join-Path $staging "main.js")
   if ($LASTEXITCODE -ne 0) { throw "Staged main.js syntax check failed." }
@@ -74,15 +80,25 @@ try {
     if ($sourceHash -ne $stageHash) { throw "Staging hash mismatch: $name" }
     $targetPath = Join-Path $target $name
     if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-      Copy-Item -LiteralPath $targetPath -Destination (Join-Path $backup $name)
+      $backupPath = Join-Path $backup $name
+      $backupParent = Split-Path -Parent $backupPath
+      if (-not (Test-Path -LiteralPath $backupParent -PathType Container)) {
+        New-Item -ItemType Directory -Path $backupParent -Force | Out-Null
+      }
+      Copy-Item -LiteralPath $targetPath -Destination $backupPath
     }
   }
 
   foreach ($name in $files) {
-    Copy-Item -LiteralPath (Join-Path $staging $name) -Destination (Join-Path $target $name) -Force
+    $targetPath = Join-Path $target $name
+    $targetParentPath = Split-Path -Parent $targetPath
+    if (-not (Test-Path -LiteralPath $targetParentPath -PathType Container)) {
+      New-Item -ItemType Directory -Path $targetParentPath -Force | Out-Null
+    }
+    Copy-Item -LiteralPath (Join-Path $staging $name) -Destination $targetPath -Force
     $replaced.Add($name)
     $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repoRoot $name)).Hash
-    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $target $name)).Hash
+    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $targetPath).Hash
     if ($sourceHash -ne $targetHash) { throw "Deployed hash mismatch: $name" }
   }
   $dataAfter = Get-DataState $target
@@ -97,17 +113,23 @@ try {
   foreach ($name in $replaced) {
     $backupPath = Join-Path $backup $name
     if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
-      Copy-Item -LiteralPath $backupPath -Destination (Join-Path $target $name) -Force
+      $targetPath = Join-Path $target $name
+      $targetParentPath = Split-Path -Parent $targetPath
+      if (-not (Test-Path -LiteralPath $targetParentPath -PathType Container)) {
+        New-Item -ItemType Directory -Path $targetParentPath -Force | Out-Null
+      }
+      Copy-Item -LiteralPath $backupPath -Destination $targetPath -Force
+    } else {
+      $targetPath = Join-Path $target $name
+      if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+        Remove-Item -LiteralPath $targetPath -Force
+      }
     }
   }
   Write-Error "Deploy failed and replaced files were restored. Backup: $backup. $($_.Exception.Message)"
   exit 1
 } finally {
-  foreach ($name in $files) {
-    $stagedPath = Join-Path $staging $name
-    if (Test-Path -LiteralPath $stagedPath -PathType Leaf) { Remove-Item -LiteralPath $stagedPath -Force }
-  }
-  if (Test-Path -LiteralPath $staging -PathType Container) { Remove-Item -LiteralPath $staging -Force }
+  if (Test-Path -LiteralPath $staging -PathType Container) { Remove-Item -LiteralPath $staging -Recurse -Force }
 }
 
 if (-not $success) { exit 1 }

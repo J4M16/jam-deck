@@ -67,6 +67,36 @@ Canvas 适配器使用 Obsidian 桌面端内部视图能力。它不把临时 le
 
 混合堆叠由 Canvas 世界坐标实时推导：图片、`type:"text"` 文本和解析成功的 `.md` 文件节点之间，交集面积严格大于较小节点面积的 50% 时连接，连通分量即为堆叠。链接、嵌套 Canvas、PDF、音视频、分组和未解析文件不参与。
 
+### Canvas 文件夹编组
+
+文件夹是 Canvas 节点 `jamdeck` 元数据中的显式关系，不写入插件 `data.json`，也不把 DOM 层的临时分组当成权威。每个成员节点带 `jamdeck.folderId`；锚点成员额外带 `jamdeck.folder` 记录。schema v1 的版本号用于迁移识别，除此之外固定八个可持久化字段：
+
+```text
+{
+  version: 1,
+  id,
+  anchorId,
+  memberIds,
+  collapsed,
+  color,
+  layoutMode: "stack" | "grid",
+  representativeIds,
+  representativeColumns
+}
+```
+
+`memberIds` 去重并稳定排序，`anchorId` 固定代表携带完整记录的成员；运行时 group 会提供同义的 `anchorNodeId`，但不会写回 schema。`collapsed` 新组默认为 `true`。折叠代表成员最多 4 个，由锚点优先、再按 ID 稳定排序；1 个代表居中，2–4 个使用双列。展开布局由不持久化的 `jamDeckCanvasFolderExpansionColumns` 独立计算：2–4 个为 2 列，5 个及以上为 3 列，6 个即 3×2，因此不会把展开列数混入 schema。`color` 只接受 6 个低饱和预设，未知值回退到第一色。读取时若只有旧式 `folderId`，会推导单成员兼容记录，但显式文件夹收集会要求实际成员至少两个。路径节点的 `file`/`subpath` 仅用于稳定识别和相等比较，不会把链接、嵌套 Canvas 等不支持类型加入文件夹。
+
+`CanvasFolderController` 只挂载在 `jam-deck-canvas-leaf` 的 owned Canvas leaf：它复用混合堆叠的节点发现和 `>50%` 世界矩形命中规则，排除已有显式文件夹成员，处理手拖自动编组、选中工具栏的“堆叠编组”和“网格排列”，并重建轻量文件夹壳体。壳体按 folder ID 使用 keyed `folderViews` 复用；折叠态按 Figma `102:6` 显式建立 backboard、representatives、front、header 层，不建立独立 mask，其中真实代表节点位于完整 SVG 底板与磨砂前片之间，所有装饰层不命中 pointer。颜色圆钮通过 leaf 内 popover 提供六个 radio。点击壳体调用 `CanvasImageStackController` 的外部 `folder:*` cluster，保留旧预览、点击聚焦和拖出，不改变 `collapsed` 元数据，也不提供点击解散。
+
+旧 stack preview 通过可选状态桥通知文件夹前片：打开时前片绕顶部翻至 -80°并淡出；普通关闭先等待卡片 260ms 返回，再执行 600ms 合拢。cleanup 不抢先取消合拢动画；drag-out、pointercancel、viewport 变化、Esc、空白点击、销毁和 reduced-motion 都会清理 timer、WAAPI 与外部 cluster。
+
+展开/收拢使用原生节点容器的 WAAPI：展开 300ms、收拢 260ms，成员按 18ms 错峰并封顶 72ms，同时插值 `transform` 与 `opacity`。减少动态效果或容器不支持 WAAPI 时直接应用最终状态，生命周期仍维护 `collapsed → opening → expanded → closing → collapsed`，销毁时进入 `destroyed`。聚焦按钮才会创建 runtime-only `focusRequestToken`；展开完成后只消费一次，并按最新仍属于该 folder 的成员过滤，空集合不缩放也不修改节点，`reconcile()` 本身不会触发聚焦。
+
+文件夹写入共用一个 `mutateNodes(changes)` 事务：先为全部成员 fresh-read 数据快照，再逐个 `setData`、`markMoved`、`render`，最后只调用一次 `requestPushHistory.run()` 和一次 `requestSave()`。任一节点失败时逐个恢复原快照并执行一次安全保存，错误继续上抛给通知层；因此编组、整组移动、网格重排、颜色/折叠状态和取消编组不会留下半组或多条撤销记录。
+
+没有采用 Obsidian 原生 Canvas group 作为权威：在 Obsidian 1.12.7 中原生 group 数据不提供可靠的 `memberIds`，移动行为只按包围盒包含关系推断成员，无法表达锚点、代表预览、显式取消编组或跨形状网格布局。原生选择/缩放能力仍可被文件夹的“聚焦”动作调用，但成员关系与可逆持久化完全由上述 `jamdeck` schema 管理。
+
 若拖入图片或文本相对目标组明显过大，控制器在 pointer-up 快照中排除候选自身，计算目标现有成员当前 Canvas 宽高的算术平均并按原宽高比例缩小，绝不放大或调整已有成员。首次缩小分别写入 `jamdeck.stackImageNormalization` 或 `jamdeck.stackTextNormalization` v1；安全拖出时围绕最终落点中心恢复原尺寸。位置、尺寸和元数据以一次 fresh `getData` → full-data `setData` → `markMoved` → `requestSave` 提交，Obsidian 1.12.7 实测可由一次原生撤销/重做完整处理。
 
 单击展开会克隆清理过的图片、Canvas 文本或 Markdown 笔记渲染表面；载入失败使用无交互占位。缩小图片与文本都以保存的首次原 Canvas 尺寸作为逻辑预览尺寸，整个组合只在超出安全视口时统一做临时显示缩放。每张 FLIP 卡从对应源节点精确屏幕矩形出发，收起时返回最新源矩形；纯展开/收起不改变真实节点世界坐标和持久尺寸。
@@ -82,6 +112,8 @@ Canvas 适配器使用 Obsidian 桌面端内部视图能力。它不把临时 le
 聚焦 wrapper 使用 `pointer-events: auto` 并位于原生 Canvas 控件之上；根捕获阶段消费蒙版内 pointer、wheel、contextmenu 和 keydown。leaf-local 图片复制桥在执行 `Ctrl/Cmd+C` 前检查 stack preview 状态，确保更早注册的监听器也不能穿透。蒙版关闭动画完成前持续隔离，点击任意蒙版区域或按 Esc 触发收起。
 
 剪贴板图片 drop 在 owned Canvas host 的 capture 阶段处理：同步记录 Canvas 坐标，复制为持久附件，创建图片节点并立即保存。未提交失败只清理本操作创建且未被引用的附件；已经插入节点后不会盲删文件。
+
+同路径原生 Canvas 冲突由纯路径集合驱动：扫描明确排除带 ownership 标记的 detached leaf，高频 workspace 事件只保留一个 timer 并串行 reconcile。冲突时 `CanvasRuntimeAdapter` 先标记 entry closing，停止控制器并 abort/等待图片 drop 与 Eagle 搜索等在途任务，再 quiet 卸载 Jam Deck 自有 leaf；该路径不调用原生 Canvas 的 `saveImmediately`、`view.close`、workspace active-leaf 或 layout API。最后一个原生 leaf 关闭后才 fresh mount 一次。
 
 标注层使用 Pointer Events，鼠标与数位笔都只记录 Canvas 世界坐标 `[x, y]`，并以用户选择的固定粗细渲染；不读取压力、倾角或合并采样。旧笔迹中的扩展点字段会在读取时忽略。画笔模式只拦截主按钮鼠标或笔输入，`Space` 临时让出平移，右键、滚轮和触控保持原生行为。
 

@@ -749,8 +749,15 @@
   padding: 0 !important;
   border: 0 !important;
   border-radius: var(--jd-canvas-image-radius) !important;
+  overflow: hidden !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+.jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img),
+.jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img) > .canvas-node-container,
+.jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img) .canvas-node-content.media-embed,
+.jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img) .canvas-node-content.media-embed > img {
+  border-radius: var(--jd-canvas-image-radius) !important;
 }
 .jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img).is-selected .canvas-node-container,
 .jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img).is-focused .canvas-node-container {
@@ -758,7 +765,7 @@
 }
 .jam-deck-canvas-leaf .canvas-node-content.media-embed:has(> img) {
   padding: 0 !important;
-  overflow: hidden;
+  overflow: hidden !important;
   border-radius: var(--jd-canvas-image-radius) !important;
   background: transparent !important;
 }
@@ -836,70 +843,187 @@
   opacity: 0;
   transition: none;
 }
-/* Embedded Canvas Eagle image search hover button */
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search {
-  position: absolute;
-  z-index: 55;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  background: rgb(255 255 255 / 0.92);
-  color: var(--text-muted);
-  cursor: pointer;
-  opacity: 0.92;
-  box-shadow:
-    inset 0 0 0 1px rgb(15 23 42 / 0.08),
-    0 1px 3px rgb(15 23 42 / 0.14),
-    0 6px 16px rgb(15 23 42 / 0.12);
-  transition: opacity 160ms cubic-bezier(.22, 1, .36, 1), box-shadow 180ms cubic-bezier(.22, 1, .36, 1), background 160ms cubic-bezier(.22, 1, .36, 1);
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar {
+  position: relative;
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search:hover,
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search:focus-visible {
-  opacity: 1;
-  color: var(--text-normal);
-  box-shadow:
-    inset 0 0 0 1px rgb(15 23 42 / 0.12),
-    0 2px 5px rgb(15 23 42 / 0.16),
-    0 10px 22px rgb(15 23 42 / 0.14);
+.jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar {
+  position: relative;
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search svg {
-  width: 15px;
-  height: 15px;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search.is-loading {
+.jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar.is-loading {
   pointer-events: none;
-  color: var(--color-accent);
+  color: var(--jd-accent);
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search.is-loading svg {
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar.is-loading {
+  pointer-events: none;
+  color: var(--jd-accent);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar.is-loading svg {
   animation: jam-deck-canvas-image-search-pulse 900ms ease-in-out infinite;
 }
 @keyframes jam-deck-canvas-image-search-pulse {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
 }
-.theme-dark .jam-deck-canvas-leaf .jam-deck-canvas-image-search {
-  background: rgb(30 34 40 / 0.92);
-  box-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 0.10),
-    0 1px 3px rgb(0 0 0 / 0.42),
-    0 6px 16px rgb(0 0 0 / 0.38);
-}
 @media (prefers-reduced-motion: reduce) {
-  .jam-deck-canvas-leaf .jam-deck-canvas-image-search {
+  .jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar {
     transition: none;
   }
-  .jam-deck-canvas-leaf .jam-deck-canvas-image-search.is-loading svg {
+  .jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar.is-loading svg {
     animation: none;
     opacity: 1;
+  }
+}
+
+/* Canvas folder v4: one scene-local shell with sanitized thumbnail proxies.
+ * The native nodes no longer cross stacking contexts to sit between two
+ * overlay surfaces; the complete folder is ordered like one Canvas item. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder {
+  z-index: var(--jd-folder-scene-z, auto);
+  isolation: isolate;
+  contain: layout style;
+  overflow: visible;
+  transform: none;
+  transform-style: preserve-3d;
+  will-change: auto;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder[hidden],
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-layer-unsafe {
+  display: none !important;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-backboard { z-index: 0 !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives {
+  z-index: 2 !important;
+  inset: 0;
+  overflow: visible;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front { z-index: 10 !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header { z-index: 12 !important; }
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-proxy {
+  position: absolute;
+  top: 7%;
+  left: 24%;
+  width: 54%;
+  height: 53%;
+  z-index: calc(2 + var(--jd-folder-proxy-index, 0));
+  overflow: hidden;
+  border-radius: var(--jd-canvas-image-radius, 10px);
+  background: color-mix(in srgb, var(--background-primary) 88%, var(--jd-folder-color) 12%);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.12);
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  transition: transform 300ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, filter 180ms ease;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="2"] > .jam-deck-canvas-folder-proxy:nth-child(1) { left: 14%; top: 10%; transform: rotate(-6deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="2"] > .jam-deck-canvas-folder-proxy:nth-child(2) { left: 34%; top: 5%; transform: rotate(5deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="3"] > .jam-deck-canvas-folder-proxy:nth-child(1) { left: 8%; top: 12%; transform: rotate(-8deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="3"] > .jam-deck-canvas-folder-proxy:nth-child(2) { left: 25%; top: 6%; transform: rotate(-1deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="3"] > .jam-deck-canvas-folder-proxy:nth-child(3) { left: 43%; top: 9%; transform: rotate(7deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="4"] > .jam-deck-canvas-folder-proxy:nth-child(1) { left: 3%; top: 13%; transform: rotate(-9deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="4"] > .jam-deck-canvas-folder-proxy:nth-child(2) { left: 20%; top: 7%; transform: rotate(-3deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="4"] > .jam-deck-canvas-folder-proxy:nth-child(3) { left: 37%; top: 5%; transform: rotate(3deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives[data-representative-count="4"] > .jam-deck-canvas-folder-proxy:nth-child(4) { left: 52%; top: 11%; transform: rotate(9deg); }
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-proxy-surface,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-proxy-surface > :is(img, canvas, svg),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-proxy .canvas-node-content,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-proxy .canvas-node-content.media-embed > img {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: inherit !important;
+  object-fit: cover !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) > .jam-deck-canvas-folder-front {
+  transform: perspective(420px) rotateX(-30deg);
+  transform-origin: 50% 0%;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) .jam-deck-canvas-folder-proxy:nth-child(1) { transform: translateY(-9px) rotate(-9deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) .jam-deck-canvas-folder-proxy:nth-child(2) { transform: translateY(-14px) rotate(-3deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) .jam-deck-canvas-folder-proxy:nth-child(3) { transform: translateY(-12px) rotate(4deg); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) .jam-deck-canvas-folder-proxy:nth-child(4) { transform: translateY(-8px) rotate(10deg); }
+
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-proxy-hidden {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+  z-index: 15 !important;
+  right: 10px;
+  bottom: 26px;
+  display: inline-flex;
+  width: auto;
+  height: 24px;
+  gap: 3px;
+  padding: 2px;
+  border: 1px solid rgb(0 0 0 / 0.09);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.72);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.10);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none !important;
+  transform: translateY(3px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color) { display: grid !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(:hover, :focus-within) .jam-deck-canvas-folder-controls {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto !important;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls .jam-deck-canvas-folder-control {
+  display: grid;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  border: 0;
+  border-radius: 7px;
+  pointer-events: auto !important;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-ungroup:hover,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-ungroup:focus-visible {
+  color: color-mix(in srgb, var(--text-error) 68%, var(--jd-folder-label-ink) 32%);
+  background: color-mix(in srgb, var(--text-error) 9%, transparent);
+}
+
+/* Canvas controls are a UI branch above the transformed scene. */
+.jam-deck-canvas-leaf .canvas-controls,
+.jam-deck-canvas-leaf .canvas-card-menu,
+.jam-deck-canvas-leaf .canvas-menu,
+.jam-deck-canvas-leaf .jam-deck-drawing-palette {
+  z-index: 100 !important;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+    opacity: 0.94;
+    visibility: visible;
+    pointer-events: auto !important;
+    transform: none;
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-front,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-proxy,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+    transition: none !important;
   }
 }
 .jam-deck-canvas-stack-overlay {
@@ -1162,6 +1286,488 @@
   }
 }
 
+/* Embedded Canvas folders: restrained paper fronts with real Canvas representatives behind them. */
+.jam-deck-canvas-leaf {
+  /* Neutral Figma default plus five low-saturation colour presets. */
+  --jd-canvas-folder-color-1: #dddcdc;
+  --jd-canvas-folder-color-2: #9dbb8e;
+  --jd-canvas-folder-color-3: #c69cb8;
+  --jd-canvas-folder-color-4: #d9b36c;
+  --jd-canvas-folder-color-5: #d58c78;
+  --jd-canvas-folder-color-6: #a9a9a9;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-layer {
+  position: absolute;
+  /* Deliberately stay in the leaf's root stacking context.  Native
+   * representatives occupy z=40..43, so a single high overlay would put every
+   * folder surface above them and break the authored layer order. */
+  z-index: auto;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform: none;
+  transform-origin: 0 0;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder {
+  --jd-folder-color: var(--jd-canvas-folder-color-1);
+  --jd-folder-panel: color-mix(in srgb, var(--jd-folder-color) 78%, #edf3f5 22%);
+  --jd-folder-panel-edge: color-mix(in srgb, var(--jd-folder-color) 54%, #fff 46%);
+  --jd-folder-panel-ink: color-mix(in srgb, #28343d 84%, var(--jd-folder-color) 16%);
+  --jd-folder-control-ink: color-mix(in srgb, #28343d 76%, var(--jd-folder-color) 24%);
+  --jd-folder-shadow: 0 2px 5px rgb(18 27 34 / 0.14), 0 11px 24px rgb(18 27 34 / 0.16);
+  position: absolute;
+  /* No isolated/transform stacking context at rest: backboard (39), native
+   * Canvas representatives (40..43), front (45), and header (46) can
+   * interleave in the leaf root as authored by the Figma layer order. */
+  z-index: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+  pointer-events: none;
+  isolation: auto;
+  transform: none;
+  transform-origin: 50% 50%;
+  will-change: auto;
+}
+
+/* Existing controller uses the folder itself as the hit target; keyed DOM may
+ * add a dedicated shell or hit-area.  Keep the expanded surface transparent
+ * to native Canvas input while collapsed folders remain draggable as one unit. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-shell,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-hit-area {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: visible;
+  border-radius: var(--jd-radius-md, 14px);
+  pointer-events: none;
+  cursor: default;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-collapsed, [aria-expanded="false"]),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-collapsed, [aria-expanded="false"]) > :is(.jam-deck-canvas-folder-shell, .jam-deck-canvas-folder-hit-area) {
+  pointer-events: auto;
+  cursor: grab;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-opening, .is-closing),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-opening, .is-closing) > :is(.jam-deck-canvas-folder-shell, .jam-deck-canvas-folder-hit-area) {
+  pointer-events: none !important;
+  cursor: default;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-collapsed, [aria-expanded="false"]):active,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-collapsed, [aria-expanded="false"]) > :is(.jam-deck-canvas-folder-shell, .jam-deck-canvas-folder-hit-area):active {
+  cursor: grabbing;
+}
+
+/* The front is the only painted folder surface.  Header remains an alias for
+ * the current controller DOM, while new keyed views may name it front. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 58%;
+  /* Keep a real thumbnail reveal even when Canvas has zoomed the node down.
+   * Controls/metadata stay in the full-height header overlay below. */
+  min-height: 0;
+  max-height: calc(100% - 28px);
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--jd-folder-panel-edge);
+  border-radius: var(--jd-radius-md, 14px);
+  background: var(--jd-folder-panel);
+  box-shadow: var(--jd-folder-shadow);
+  pointer-events: none;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transform-origin: 50% 100%;
+  transition:
+    opacity 300ms cubic-bezier(.22, 1, .36, 1),
+    transform 300ms cubic-bezier(.22, 1, .36, 1),
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+/* Keyed views keep header/meta as a transparent interaction overlay above the
+ * empty front panel.  The no-front branch below preserves the old header-only
+ * controller DOM without painting two stacked surfaces. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header {
+  z-index: 44;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 44;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  transition: opacity 300ms cubic-bezier(.22, 1, .36, 1);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-meta {
+  top: calc(42% + 11px);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-controls {
+  top: calc(42% + 7px);
+}
+
+/* Metadata is decorative; the actual shell/hit-area keeps drag and click input. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta {
+  position: absolute;
+  z-index: 1;
+  inset: 11px 12px 10px;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+  pointer-events: none;
+  user-select: none;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta > .jam-deck-canvas-folder-kicker {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta > .jam-deck-canvas-folder-count {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta:has(> .jam-deck-canvas-folder-label) > .jam-deck-canvas-folder-count {
+  bottom: 17px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta > .jam-deck-canvas-folder-label {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-kicker {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in srgb, var(--jd-folder-panel-ink) 86%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: 0.015em;
+  white-space: nowrap;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-kicker :is(svg, .svg-icon, .jam-deck-canvas-folder-icon, .jam-deck-canvas-folder-kicker-icon) {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  opacity: 0.76;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--jd-folder-panel-ink);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-count {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--jd-folder-panel-ink) 70%, transparent);
+  font-size: 10px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Legacy header children and keyed direct metadata both keep the same quiet
+ * lower-left hierarchy when no metadata wrapper is present. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front > .jam-deck-canvas-folder-kicker,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-kicker {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front > .jam-deck-canvas-folder-count,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-count {
+  position: absolute;
+  bottom: 27px;
+  left: 12px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front > .jam-deck-canvas-folder-label,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-label {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+}
+
+/* Controls stay understated until hover, focus, or selected state. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  right: 7px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  pointer-events: auto;
+  opacity: 0.46;
+  transition: opacity 140ms ease;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(:hover, :focus-within, .is-focused, .is-selected) .jam-deck-canvas-folder-controls {
+  opacity: 0.92;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-control {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--jd-folder-control-ink);
+  box-shadow: none;
+  opacity: 0.86;
+  pointer-events: auto !important;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, opacity 140ms ease;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-control :is(svg, .svg-icon) {
+  width: 13px;
+  height: 13px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-control:is(:hover, :focus-visible, .is-active, [aria-pressed="true"]) {
+  opacity: 1;
+  color: var(--jd-folder-panel-ink);
+  background: color-mix(in srgb, var(--jd-folder-panel-ink) 10%, transparent);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-control:focus-visible {
+  outline: 1px solid var(--jd-accent);
+  outline-offset: 1px;
+}
+
+/* The representative container is only a positioning reference; it never
+ * paints clone cards.  Native Canvas nodes provide every visible preview. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+/* Screen-space portal for the horizontal color row; it lives inside the leaf
+ * but remains outside the scaled Canvas scene. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-popover-layer {
+  position: absolute;
+  z-index: 46;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform: none;
+  transform-origin: 0 0;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-menu,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-popover {
+  position: absolute;
+  z-index: 47;
+  inset: auto;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 168px;
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 9px;
+  background: rgb(30 33 37 / 0.96);
+  box-shadow: 0 4px 10px rgb(0 0 0 / 0.24), 0 12px 24px rgb(0 0 0 / 0.24);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-menu:is(.is-open, .is-visible, [data-open="true"], [data-state="open"], [aria-expanded="true"], [aria-hidden="false"]),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-popover:is(.is-open, .is-visible, [data-open="true"], [data-state="open"], [aria-expanded="true"], [aria-hidden="false"]) {
+  display: flex;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-popover-layer > .jam-deck-canvas-folder-popover:not([hidden]):not([aria-hidden="true"]):not([data-open="false"]) {
+  display: flex;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front > .jam-deck-canvas-folder-color-menu,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-color-menu {
+  right: 7px;
+  bottom: calc(100% + 7px);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-menu[hidden],
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-popover[hidden] {
+  display: none !important;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch {
+  flex: 0 0 17px;
+  width: 17px;
+  min-width: 17px;
+  height: 17px;
+  min-height: 17px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--jd-folder-swatch-color, var(--jd-canvas-folder-color-1));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 0 0 1px rgb(0 0 0 / 0.28);
+  appearance: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is([data-color="1"], [data-folder-color="1"], [data-color="sky"], [data-folder-color="sky"], [data-color="blue-gray"], [data-folder-color="blue-gray"]) { --jd-folder-swatch-color: var(--jd-canvas-folder-color-1); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is([data-color="2"], [data-folder-color="2"], [data-color="sage"], [data-folder-color="sage"]) { --jd-folder-swatch-color: var(--jd-canvas-folder-color-2); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is([data-color="3"], [data-folder-color="3"], [data-color="lilac"], [data-folder-color="lilac"]) { --jd-folder-swatch-color: var(--jd-canvas-folder-color-3); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is([data-color="4"], [data-folder-color="4"], [data-color="sand"], [data-folder-color="sand"]) { --jd-folder-swatch-color: var(--jd-canvas-folder-color-4); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is([data-color="5"], [data-folder-color="5"], [data-color="rose"], [data-folder-color="rose"]) { --jd-folder-swatch-color: var(--jd-canvas-folder-color-5); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is([data-color="6"], [data-folder-color="6"], [data-color="slate"], [data-folder-color="slate"], [data-color="graphite"], [data-folder-color="graphite"]) { --jd-folder-swatch-color: var(--jd-canvas-folder-color-6); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is(:hover, :focus-visible) {
+  filter: brightness(1.08);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:is(.is-active, [aria-checked="true"], [aria-pressed="true"], [aria-current="true"], [data-selected="true"]) {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 0 0 1px rgb(245 247 248 / 0.92);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color-swatch:focus-visible {
+  outline: 1px solid var(--jd-accent);
+  outline-offset: 2px;
+}
+
+/* Color presets can be addressed by either data attributes or legacy state classes. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-color-1, [data-color="1"], [data-folder-color="1"], [data-color="sky"], [data-folder-color="sky"], [data-color="blue-gray"], [data-folder-color="blue-gray"]) { --jd-folder-color: var(--jd-canvas-folder-color-1); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-color-2, [data-color="2"], [data-folder-color="2"], [data-color="sage"], [data-folder-color="sage"]) { --jd-folder-color: var(--jd-canvas-folder-color-2); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-color-3, [data-color="3"], [data-folder-color="3"], [data-color="lilac"], [data-folder-color="lilac"]) { --jd-folder-color: var(--jd-canvas-folder-color-3); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-color-4, [data-color="4"], [data-folder-color="4"], [data-color="sand"], [data-folder-color="sand"]) { --jd-folder-color: var(--jd-canvas-folder-color-4); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-color-5, [data-color="5"], [data-folder-color="5"], [data-color="rose"], [data-folder-color="rose"]) { --jd-folder-color: var(--jd-canvas-folder-color-5); }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-color-6, [data-color="6"], [data-folder-color="6"], [data-color="slate"], [data-folder-color="slate"], [data-color="graphite"], [data-folder-color="graphite"]) { --jd-folder-color: var(--jd-canvas-folder-color-6); }
+
+/* Front lifecycle: opening fades away, closing restores it. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-opening) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-shell:is(.is-opening) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header) {
+  opacity: 0;
+  visibility: visible;
+  transform: translateY(2px) scale(.98);
+  transition-duration: 300ms;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-closing) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-shell:is(.is-closing) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header) {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transition-duration: 260ms;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-expanded, [aria-expanded="true"]):not(.is-opening):not(.is-closing) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-shell:is(.is-expanded, [aria-expanded="true"]):not(.is-opening):not(.is-closing) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header) {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(0) scale(1);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-collapsed, [aria-expanded="false"]):not(.is-opening):not(.is-closing) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-shell:is(.is-collapsed, [aria-expanded="false"]):not(.is-opening):not(.is-closing) :is(.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header) {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Only a thin green ring indicates focus/selection; focus failure stays quiet. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-focused, .is-selected, :focus-visible),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-shell:is(.is-focused, .is-selected, :focus-visible, :focus-within),
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-hit-area:is(.is-focused, .is-selected, :focus-visible, :focus-within) {
+  outline: 1px solid var(--jd-accent);
+  outline-offset: 2px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-focus-failed) {
+  outline: 1px solid color-mix(in srgb, var(--jd-folder-panel-edge) 66%, transparent);
+  outline-offset: 2px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-focused, .is-selected, .is-focus-failed) .jam-deck-canvas-folder-controls {
+  opacity: 0.92;
+}
+
+/* Folder state drives visibility only; WAAPI/inline transforms own node motion. */
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-representative {
+  visibility: visible !important;
+  pointer-events: none !important;
+  /* Authored representative order is carried by the runtime index.  Keep
+   * every native Canvas card above the transparent backboard and below the
+   * frosted front surface. */
+  z-index: calc(40 + min(var(--jd-folder-representative-index, 0), 3)) !important;
+}
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-hidden-member {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-expanded:not(.is-transitioning) {
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-member.is-expanded:not(.is-transitioning) {
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-member:is(.is-opening, .is-closing) {
+  visibility: visible !important;
+  pointer-events: none !important;
+}
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-member:is(.is-transitioning, .is-jam-deck-folder-transitioning) {
+  visibility: visible !important;
+  pointer-events: none !important;
+}
+.jam-deck-canvas-leaf:has(.jam-deck-canvas-folder.is-opening, .jam-deck-canvas-folder.is-closing, .jam-deck-canvas-folder-shell.is-opening, .jam-deck-canvas-folder-shell.is-closing) .canvas-node:is(.is-jam-deck-folder-member, .is-jam-deck-folder-representative, .is-jam-deck-folder-hidden-member) {
+  visibility: visible !important;
+  pointer-events: none !important;
+}
+
+/* A stable collapsed hidden-member is the only state that remains invisible. */
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-hidden-member:not(.is-transitioning):not(.is-jam-deck-folder-transitioning) {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-front,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-header,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-control,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+    transition: none;
+  }
+}
+
+
 .jam-deck-browser-empty { height: 100%; display: grid; place-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; text-align: center; }
 .jam-deck-primary-button { padding: 5px 9px; font-size: 11px; }
 .jam-deck-browser-frame { width: 100%; height: calc(100% - 22px); border: 0; border-radius: 5px; background: #fff; }
@@ -1410,6 +2016,229 @@
 .jam-deck-root .jam-deck-action:hover { border-color: var(--jd-line); background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
 .jam-deck-root .jam-deck-action:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-action.is-active { border-color: color-mix(in srgb, var(--jd-accent) 72%, var(--jd-line)); background: var(--jd-accent); color: var(--jd-accent-ink); }
+
+.jam-deck-root .jam-deck-ai-fab {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 52px;
+  padding: 0 18px;
+  border: 1px solid var(--jd-line);
+  border-radius: 999px;
+  background: var(--jd-surface-raised);
+  color: var(--jd-ink);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  box-shadow: var(--jd-shadow-lift);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition: background-color 140ms ease-out, transform 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-fab.is-dragging { cursor: grabbing; transform: scale(1.04); }
+.jam-deck-root .jam-deck-ai-fab:hover { background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
+.jam-deck-root .jam-deck-ai-fab:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
+
+.jam-deck-root .jam-deck-ai-chat[hidden] { display: none; }
+.jam-deck-root .jam-deck-ai-chat {
+  position: absolute;
+  right: 20px;
+  bottom: 84px;
+  z-index: 60;
+  width: 680px;
+  max-width: calc(100% - 40px);
+  height: 780px;
+  max-height: calc(100% - 110px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-lg);
+  background: var(--jd-surface-raised);
+  box-shadow: var(--jd-shadow-lift);
+  overflow: hidden;
+}
+.jam-deck-root .jam-deck-ai-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 8px 14px;
+  border-bottom: 1px solid var(--jd-line);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.jam-deck-root .jam-deck-ai-chat-header.is-dragging { cursor: grabbing; }
+.jam-deck-root .jam-deck-ai-chat-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.jam-deck-root .jam-deck-ai-chat-title { font-size: 12px; color: var(--jd-muted); letter-spacing: 0.04em; }
+.jam-deck-root .jam-deck-ai-provider-btn {
+  min-height: 22px;
+  padding: 2px 10px;
+  border: 1px solid var(--jd-line);
+  border-radius: 999px;
+  background: var(--jd-surface);
+  color: var(--jd-ink);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-provider-btn:hover { border-color: color-mix(in srgb, var(--jd-accent) 55%, var(--jd-line)); background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
+.jam-deck-root .jam-deck-ai-provider-btn:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
+.jam-deck-root .jam-deck-ai-chat-close {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--jd-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 140ms ease-out, color 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-chat-close:hover { background: color-mix(in srgb, var(--jd-ink) 7%, transparent); color: var(--jd-ink); }
+.jam-deck-root .jam-deck-ai-chat-close:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
+
+.jam-deck-root .jam-deck-ai-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jam-deck-root .jam-deck-ai-message {
+  position: relative;
+  max-width: 88%;
+  padding: 7px 10px;
+  border-radius: var(--jd-radius-sm);
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.jam-deck-root .jam-deck-ai-message-text {
+  user-select: text;
+  cursor: text;
+}
+.jam-deck-root .jam-deck-ai-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--jd-muted);
+  cursor: pointer;
+}
+.jam-deck-root .jam-deck-ai-message:hover .jam-deck-ai-copy,
+.jam-deck-root .jam-deck-ai-copy:focus-visible { display: flex; }
+.jam-deck-root .jam-deck-ai-copy:hover { background: color-mix(in srgb, var(--jd-ink) 9%, transparent); color: var(--jd-ink); }
+.jam-deck-root .jam-deck-ai-message-image {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: var(--jd-radius-sm);
+  object-fit: contain;
+  margin-bottom: 6px;
+}
+.jam-deck-root .jam-deck-ai-message.is-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--jd-ink) 9%, transparent);
+  color: var(--jd-ink);
+}
+.jam-deck-root .jam-deck-ai-message.is-assistant {
+  align-self: flex-start;
+  background: var(--jd-surface);
+  border: 1px solid var(--jd-line);
+  color: var(--jd-ink);
+}
+.jam-deck-root .jam-deck-ai-message.is-hint {
+  color: var(--jd-muted);
+  background: transparent;
+  border: none;
+}
+.jam-deck-root .jam-deck-ai-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  padding: 6px 2px 2px;
+}
+.jam-deck-root .jam-deck-ai-quick-label {
+  font-size: 12px;
+  color: var(--jd-muted);
+}
+.jam-deck-root .jam-deck-ai-quick-btn {
+  min-height: 26px;
+  padding: 3px 12px;
+  border: 1px solid var(--jd-line);
+  border-radius: 999px;
+  background: var(--jd-surface);
+  color: var(--jd-ink);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-quick-btn:hover { border-color: color-mix(in srgb, var(--jd-accent) 55%, var(--jd-line)); background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
+.jam-deck-root .jam-deck-ai-quick-btn:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
+.jam-deck-root .jam-deck-ai-quick-btn:disabled { opacity: 0.5; }
+.jam-deck-root .jam-deck-ai-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--jd-line);
+}
+.jam-deck-root .jam-deck-ai-input {
+  flex: 1;
+  min-height: 30px;
+  max-height: 160px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-sm);
+  background: var(--jd-surface);
+  color: var(--jd-ink);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+  box-shadow: none;
+}
+.jam-deck-root .jam-deck-ai-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--jd-accent) 55%, var(--jd-line));
+  box-shadow: var(--jd-focus-ring);
+}
+.jam-deck-root .jam-deck-ai-send {
+  min-height: 30px;
+  padding: 4px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--jd-ink);
+  font-size: 12px;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-send:hover:not(:disabled) { border-color: var(--jd-line); background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
+.jam-deck-root .jam-deck-ai-send:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
+.jam-deck-root .jam-deck-ai-send:disabled { opacity: 0.5; }
 
 .jam-deck-root .jam-deck-grid { gap: var(--deck-gap); padding: 14px; }
 .jam-deck-root .jam-deck-widget {
@@ -2040,4 +2869,421 @@
 .jam-deck-root .jam-deck-calendar-month {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "kern" 1, "tnum" 1;
+}
+
+/*
+ * Canvas folder surface — Figma 102:6
+ *
+ * The Canvas members remain the only image representatives.  This layer only
+ * paints the backboard/front shell, so zooming and native Canvas transforms
+ * continue to own the image geometry.  The neutral values intentionally match
+ * the light Figma sample; the controller can raise --jd-folder-tint-strength
+ * for the five optional colour presets without changing the proportions.
+ */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder {
+  --jd-folder-neutral: #dddcdc;
+  --jd-folder-tint-strength: 0%;
+  --jd-folder-backboard-color: color-mix(
+    in srgb,
+    var(--jd-folder-neutral) calc(100% - var(--jd-folder-tint-strength)),
+    var(--jd-folder-color, var(--jd-folder-neutral)) var(--jd-folder-tint-strength)
+  );
+  --jd-folder-front-start: color-mix(
+    in srgb,
+    #e7e7e7 calc(100% - var(--jd-folder-tint-strength)),
+    var(--jd-folder-color, var(--jd-folder-neutral)) var(--jd-folder-tint-strength)
+  );
+  --jd-folder-front-end: color-mix(
+    in srgb,
+    #f2f2f2 calc(100% - var(--jd-folder-tint-strength)),
+    var(--jd-folder-color, var(--jd-folder-neutral)) var(--jd-folder-tint-strength)
+  );
+  --jd-folder-count-ink: rgb(0 0 0 / 0.20);
+  --jd-folder-label-ink: rgb(0 0 0 / 0.50);
+  --jd-folder-slot-shadow: inset 0 1px 4px rgb(0 0 0 / 0.10);
+  color: var(--jd-folder-backboard-color);
+}
+
+/* Figma's 240×181.79 SVG remains oversized inside the 200×150 shell: its
+ * path inset is intentionally cancelled by the backboard image offsets below,
+ * preserving the authored tab and lower edge. */
+/* Explicit Figma layers. The backboard uses the exported SVG as a normal
+ * image surface (never as a CSS mask), while native Canvas representatives
+ * remain visible through transparent regions before the frosted front paint. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-backboard {
+  position: absolute;
+  z-index: 39 !important;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--jd-folder-backboard-color);
+  pointer-events: none;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-backboard-svg {
+  position: absolute;
+  top: -5.193333%;
+  left: -10%;
+  display: block;
+  width: 120%;
+  height: 121.193333%;
+  overflow: visible;
+  filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.10));
+  pointer-events: none;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives {
+  z-index: 39;
+  pointer-events: none;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front {
+  z-index: 45 !important;
+  top: 33.333333%; /* y=50 */
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  height: 66.666667%;
+  min-height: 0;
+  /* Kept as a defensive legacy declaration above; this override preserves
+   * the 2:3 shell ratio at compact node sizes instead of imposing a floor. */
+  max-height: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 0;
+  border-radius: 10px;
+  /* Adapt the reference flap's translucent white material to the authored
+   * Figma gradient.  The second layer retains the exact #e7e7e7 -> #f2f2f2
+   * geometry while the first layer supplies the frosted white falloff. */
+  background:
+    linear-gradient(to bottom, rgb(255 255 255 / 0.50), rgb(255 255 255 / 0.38)),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--jd-folder-front-start) 64%, transparent),
+      color-mix(in srgb, var(--jd-folder-front-end) 48%, transparent)
+    );
+  background-blend-mode: screen, normal;
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: blur(16px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.74),
+    0 -4px 8px rgb(0 0 0 / 0.05);
+  transform-origin: 50% 0%;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+
+/* The old stack preview opens the flap as its cards fan out.  Classes are a
+ * deterministic fallback for environments without WAAPI; the controller
+ * supplies the same keyframes when available. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-opening > .jam-deck-canvas-folder-front,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-open > .jam-deck-canvas-folder-front {
+  opacity: 0;
+  visibility: visible;
+  transform: perspective(420px) rotateX(-80deg);
+  transform-origin: 50% 0%;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing > .jam-deck-canvas-folder-front {
+  opacity: 0;
+  visibility: visible;
+  transform: perspective(420px) rotateX(-80deg);
+  transform-origin: 50% 0%;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-closing-flap) > .jam-deck-canvas-folder-front {
+  opacity: 1;
+  visibility: visible;
+  transform: perspective(420px) rotateX(0deg);
+  transform-origin: 50% 0%;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-opening, .is-preview-open) > .jam-deck-canvas-folder-header {
+  opacity: 0;
+  visibility: hidden;
+  transform: perspective(420px) rotateX(-80deg);
+  transform-origin: 50% 0%;
+  pointer-events: none;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing > .jam-deck-canvas-folder-header {
+  opacity: 0;
+  visibility: hidden;
+  transform: perspective(420px) rotateX(-80deg);
+  transform-origin: 50% 0%;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing-flap > .jam-deck-canvas-folder-header {
+  opacity: 1;
+  visibility: visible;
+  transform: perspective(420px) rotateX(0deg);
+  transform-origin: 50% 0%;
+}
+
+/* Once a folder is fully expanded, native Canvas members reclaim the whole
+ * surface.  Keep the authored backboard/front layers mounted for keyed
+ * reconciliation, but do not leave them over the expanded nodes. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-expanded, [aria-expanded="true"]):not(.is-opening):not(.is-closing) > :is(.jam-deck-canvas-folder-backboard, .jam-deck-canvas-folder-front) {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* The old keyed renderer paints the front as a sibling of the transparent
+ * header.  Keep the header interaction layer full-size, but do not let its
+ * legacy panel styles create a second surface. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header {
+  z-index: 46 !important;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+/* Figma text is placed in shell coordinates (x=12, y=115/127 at 200×150).
+ * Percentages preserve those anchors when a Canvas node is resized. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-meta {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The Figma component has no separate kicker/icon row.  Main.js removes it in
+ * the keyed view; this guard keeps older views from reintroducing a third line. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-kicker {
+  display: none !important;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta > .jam-deck-canvas-folder-count,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front > .jam-deck-canvas-folder-count,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-count {
+  position: absolute;
+  z-index: 2;
+  top: 76.666667%;
+  right: auto;
+  bottom: auto;
+  left: 6%;
+  display: block;
+  min-width: 0;
+  max-width: calc(100% - 18px);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #000;
+  font-family: Inter, var(--font-interface), sans-serif;
+  font-size: 8px;
+  font-weight: 400;
+  line-height: normal;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta > .jam-deck-canvas-folder-label,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front > .jam-deck-canvas-folder-label,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-label {
+  position: absolute;
+  z-index: 2;
+  top: 84.666667%;
+  right: auto;
+  bottom: auto;
+  left: 6%;
+  display: block;
+  min-width: 0;
+  max-width: calc(100% - 18px);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #000;
+  font-family: Inter, var(--font-interface), sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: normal;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* One understated colour trigger lives at the lower-right.  Legacy toggle,
+ * focus, and ungroup controls are hidden so a stale keyed view can never
+ * regress to the old four-button top bar. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+  position: absolute;
+  z-index: 4;
+  top: auto;
+  right: 10px;
+  bottom: 28px;
+  left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  opacity: 1;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color) {
+  display: none !important;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, #000 14%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #fff 78%, var(--jd-folder-color, var(--jd-folder-neutral)) 22%);
+  color: color-mix(in srgb, #000 42%, var(--jd-folder-color, var(--jd-folder-neutral)) 58%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.38), 0 1px 2px rgb(0 0 0 / 0.08);
+  opacity: 0.86;
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color:hover,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, #fff 68%, var(--jd-folder-color, var(--jd-folder-neutral)) 32%);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color:focus-visible {
+  outline: 1px solid color-mix(in srgb, #000 38%, var(--jd-folder-color, var(--jd-folder-neutral)) 62%);
+  outline-offset: 2px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-color :is(svg, .svg-icon) {
+  width: 11px;
+  height: 11px;
+}
+
+/* The two four-pixel inset slots are explicit decorative DOM, not hit targets.
+ * Percentages preserve Figma's x=179/y=129 and x=179/y=137 coordinates as the
+ * 200 x 150 shell scales with Canvas zoom. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-slot {
+  position: absolute;
+  z-index: 45;
+  right: 4.5%; /* x=179, w=12 */
+  width: 6%;
+  height: 4%;
+  border-radius: 8px;
+  background: rgb(241 241 241 / 0.01);
+  box-shadow: var(--jd-folder-slot-shadow);
+  pointer-events: none;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-slot-primary { top: 79%; /* y=129 */ }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-slot-secondary { top: 87%; /* y=137 */ }
+
+/* The front and its metadata never steal Canvas gestures.  Only the colour
+ * trigger (and the leaf-local popover) is interactive. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-meta,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-header {
+  pointer-events: none;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls .jam-deck-canvas-folder-color {
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-front,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-color,
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+    transition: none !important;
+  }
+}
+
+/* v4 final cascade: keep these after every legacy folder compatibility rule. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder {
+  isolation: isolate !important;
+  contain: layout style !important;
+  overflow: visible !important;
+  transform: none;
+  will-change: auto;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder[hidden],
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-layer-unsafe { display: none !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-backboard { z-index: 0 !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-representatives { z-index: 2 !important; inset: 0; overflow: visible; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-front { z-index: 10 !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:has(> .jam-deck-canvas-folder-front) > .jam-deck-canvas-folder-header { z-index: 12 !important; }
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-proxy-hidden { visibility: hidden !important; pointer-events: none !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+  z-index: 15 !important;
+  right: 10px;
+  bottom: 26px;
+  display: inline-flex;
+  width: auto;
+  height: 24px;
+  gap: 3px;
+  padding: 2px;
+  border: 1px solid rgb(0 0 0 / 0.09);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.72);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.10);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none !important;
+  transform: translateY(3px);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color) { display: grid !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-controls .jam-deck-canvas-folder-control { pointer-events: auto !important; }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(:hover, :focus-within) .jam-deck-canvas-folder-controls {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto !important;
+  transform: translateY(0);
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) > .jam-deck-canvas-folder-front {
+  opacity: 1;
+  visibility: visible;
+  transform: perspective(420px) rotateX(-30deg);
+  transform-origin: 50% 0%;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-opening, .is-preview-open, .is-preview-closing) .jam-deck-canvas-folder-proxy {
+  opacity: 0;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing-flap .jam-deck-canvas-folder-proxy {
+  opacity: 1;
+}
+.jam-deck-canvas-leaf .canvas-controls,
+.jam-deck-canvas-leaf .canvas-card-menu,
+.jam-deck-canvas-leaf .canvas-menu,
+.jam-deck-canvas-leaf .jam-deck-drawing-palette { z-index: 100 !important; }
+
+@media (hover: none), (pointer: coarse) {
+  .jam-deck-canvas-leaf .jam-deck-canvas-folder-controls {
+    opacity: 0.94;
+    visibility: visible;
+    pointer-events: auto !important;
+    transform: none;
+  }
+}
+
+/* AI 设置面板 */
+.jam-deck-setting-hint { color: var(--text-muted); font-size: 12px; margin-bottom: 8px; }
+.jam-deck-setting-h3 {
+  margin: 16px 0 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
 }
