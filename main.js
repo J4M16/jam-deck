@@ -1461,6 +1461,7 @@ class CanvasInkOwner {
   }
 
   async writeText(path, text) {
+    await this.plugin.ensureVaultFileParent(path);
     const file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (file) await this.plugin.app.vault.modify(file, text);
     else await this.plugin.app.vault.create(path, text);
@@ -9308,15 +9309,8 @@ class JamDeckView extends ItemView {
     const filePath = `attachments/jam-deck-chatbot/${date}.md`;
     const block = `## ${time}\n\n> 来源：Jam Deck AI 助手 · 模型 ${dsModel} · 压缩 ${pending.length} 条对话\n\n${summary.trim()}\n\n`;
     try {
-      // vault.create 不会自动建父目录，首次归档前显式确保 attachments/jam-deck-chatbot 存在
-      await this.ensureVaultFolder("attachments/jam-deck-chatbot");
-      const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
-      if (file) {
-        const text = await this.plugin.app.vault.read(file);
-        await this.plugin.app.vault.modify(file, `${text.trimEnd()}\n${block}`);
-      } else {
-        await this.plugin.app.vault.create(filePath, `# Jam Deck AI 会话归档 — ${date}\n\n${block}`);
-      }
+      const ok = await this.plugin.writeVaultFile(filePath, block, `# Jam Deck AI 会话归档 — ${date}`);
+      if (!ok) throw new Error("写入校验失败");
     } catch (error) {
       new Notice(`Jam Deck：归档写入失败 · ${error.message || "未知错误"}`);
       return;
@@ -11965,13 +11959,7 @@ class JamDeckPlugin extends Plugin {
     const label = role === "user" ? "你" : `AI（${provider || "助手"}）`;
     const line = `- **${label}**（${stamp}）：${String(content || "").replace(/\n/g, " ").trim().slice(0, 400)}`;
     try {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file) {
-        const text = await this.app.vault.read(file);
-        await this.app.vault.modify(file, `${text.trimEnd()}\n${line}\n`);
-      } else {
-        await this.app.vault.create(path, `# AI 对话记录\n\n${line}\n`);
-      }
+      await this.writeVaultFile(path, `${line}\n`, "# AI 对话记录");
     } catch (error) {
       /* 记录失败不影响对话 */
     }
@@ -12626,6 +12614,26 @@ class JamDeckPlugin extends Plugin {
         if (!this.app.vault.getAbstractFileByPath(current)) throw error;
       }
     }
+  }
+
+  /* 通用落盘守卫：写文件前确保父目录存在（vault.create 不会自动建父目录） */
+  async ensureVaultFileParent(filePath) {
+    const path = String(filePath || "");
+    const slash = path.lastIndexOf("/");
+    if (slash > 0) await this.ensureVaultFolder(path.slice(0, slash));
+  }
+
+  /* 通用落盘：存在则追加，不存在则带标题创建；写前确保父目录 */
+  async writeVaultFile(filePath, content, header) {
+    await this.ensureVaultFileParent(filePath);
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (file) {
+      const text = await this.app.vault.read(file);
+      await this.app.vault.modify(file, `${text.trimEnd()}\n${content}`);
+    } else {
+      await this.app.vault.create(filePath, header ? `${header}\n\n${content}` : content);
+    }
+    return this.app.vault.getAbstractFileByPath(filePath) != null;
   }
 
   sanitizeFilename(name) {

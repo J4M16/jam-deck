@@ -1,5 +1,19 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.26.0 落盘通用守卫
+
+- 背景：0.25.5 归档 ENOENT 暴露了「`vault.create` 不自动建父目录」这一类问题，决定做成通用守卫强制走，防止再次裸奔。
+- 新增（JamDeckPlugin）：
+  - `ensureVaultFileParent(filePath)`：取文件路径的父目录递归 `ensureVaultFolder`（幂等）。
+  - `writeVaultFile(filePath, content, header)`：先 ensure 父目录，再「存在→read+modify 追加 / 不存在→create 带标题」，返回写入是否成功。
+- 三条路径收口：
+  - `archiveAiChat` → `this.plugin.writeVaultFile(filePath, block, header)`（替代手写 create/modify + ensureVaultFolder）。
+  - `appendAiLog` → `this.writeVaultFile(path, line, "# AI 对话记录")`（Work/AI对话记录.md 之前裸奔）。
+  - `CanvasInkOwner.writeText` → 开头 `await this.plugin.ensureVaultFileParent(path)`（笔迹保存裸奔）。
+- 审计结论：其余 vault 写路径已自带 ensure（canvas 附件、Life 日报、Work 日报、CLIPBOARD_DIR/ICON_DIR 的 createFolder try/catch）；外部资源 validate（存在性+大小限制）在 readExternalCanvasImage / createCanvasAttachmentFromClipboard 已覆盖，本轮保持。
+- 回归：更新 1 条旧断言 + 新增 4 条（ensureVaultFileParent、writeVaultFile、对话记录与笔迹走守卫）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.25.5 修复归档失败（首次无目标子目录）
 
 - Jam 反馈：AI 助手归档报 `ENOENT: no such file or directory, open '...\attachments\jam-deck-chatbot\2026-08-04.md'`。

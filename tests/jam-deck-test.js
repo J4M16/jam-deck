@@ -123,7 +123,11 @@ assert(pluginSource.includes("batchTail"), "batched Canvas drops must mark the t
 assert(pluginSource.includes("const sources = [];") && pluginSource.includes("sources.length ? sources : null"), "external Canvas drops must collect every image file in the transfer");
 assert(pluginSource.includes("items: [item]"), "clipboard drops must put the item object itself in the items array so the source is the item");
 assert(!pluginSource.includes("source.item, pos, operation"), "drop commit must not read source.item for clipboard source — the item IS the source");
-assert(pluginSource.includes('ensureVaultFolder("attachments/jam-deck-chatbot")'), "archive must ensure the date folder exists before writing the dated file");
+assert(pluginSource.includes("this.plugin.writeVaultFile(filePath, block"), "archive must write through the guarded writer that ensures the date folder exists");
+assert(pluginSource.includes("async ensureVaultFileParent(filePath)"), "a generic guard must ensure a file's parent folder before any vault write");
+assert(pluginSource.includes("async writeVaultFile(filePath, content, header)"), "a generic writer must create-or-append behind the parent-folder guard");
+assert(pluginSource.includes("await this.writeVaultFile(path"), "the AI conversation log must write through the guarded writer");
+assert(pluginSource.includes("await this.plugin.ensureVaultFileParent(path)"), "ink strokes must write through the guarded writer");
 assert(!pluginSource.includes("上一张图片仍在写入 Canvas"), "the single-slot drop lock must be gone so queued images are never rejected");
 assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the pointer is down so panning a large Canvas does not rescan every node per move");
 assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");

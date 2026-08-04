@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.26.0 — 2026-08-04
+
+- 落盘防御加固：新增通用守卫 `ensureVaultFileParent`（写文件前确保父目录存在，`vault.create` 不自动建父目录）+ `writeVaultFile`（存在则追加、不存在则带标题创建）。
+- 强制走守卫的三条路径：AI 归档（`attachments/jam-deck-chatbot/`）、AI 对话记录（`Work/AI对话记录.md`）、画笔笔迹保存（CanvasInkOwner.writeText）。
+- 外部资源 validate 维持现状（拖入/读取前已做存在性 + 大小限制检查），本轮聚焦落盘侧。
+
 ## 0.25.5 — 2026-08-04
 
 - 修复 AI 助手归档失败：首次归档时 `attachments/jam-deck-chatbot/` 子目录未建，`vault.create` 不会自动建父目录，抛 ENOENT。归档写入前显式 `ensureVaultFolder("attachments/jam-deck-chatbot")` 兜底。
