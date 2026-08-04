@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.25.5 — 2026-08-04
+
+- 修复 AI 助手归档失败：首次归档时 `attachments/jam-deck-chatbot/` 子目录未建，`vault.create` 不会自动建父目录，抛 ENOENT。归档写入前显式 `ensureVaultFolder("attachments/jam-deck-chatbot")` 兜底。
+
 ## 0.25.4 — 2026-08-04
 
 - 修复从剪贴板拖图片到 Canvas 失败：0.25.2 队列化重构时把 clipboard 拖拽源多取了一层 `.item`（`source.item`），但 `getClipboardCanvasDrop` 返回的 `items` 数组元素就是剪贴板条目对象本身，再 `.item` 就是 `undefined`，导致 `createCanvasAttachmentFromClipboard` 抛「剪贴板图片无效」。改为直接传 `source`。external 路径不受影响。

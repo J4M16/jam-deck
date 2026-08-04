@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.25.5 修复归档失败（首次无目标子目录）
+
+- Jam 反馈：AI 助手归档报 `ENOENT: no such file or directory, open '...\attachments\jam-deck-chatbot\2026-08-04.md'`。
+- 根因：Obsidian `vault.create` 不会自动建父目录，首次归档时 `attachments/jam-deck-chatbot/` 还没创建过，create 直接抛错。
+- 修复：`archiveAiChat` 写入前 `await this.ensureVaultFolder("attachments/jam-deck-chatbot")`（与 canvas 拖入附件逻辑一致），保证子目录就绪。
+- 回归：新增 1 条断言（归档必须确保子目录存在）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.25.4 修复剪贴板拖入 Canvas 失败
 
 - Jam 反馈：拖剪贴板图片到 canvas 提示「图片加入 Canvas 失败 · 剪贴板图片无效」。

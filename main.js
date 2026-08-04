@@ -9308,6 +9308,8 @@ class JamDeckView extends ItemView {
     const filePath = `attachments/jam-deck-chatbot/${date}.md`;
     const block = `## ${time}\n\n> 来源：Jam Deck AI 助手 · 模型 ${dsModel} · 压缩 ${pending.length} 条对话\n\n${summary.trim()}\n\n`;
     try {
+      // vault.create 不会自动建父目录，首次归档前显式确保 attachments/jam-deck-chatbot 存在
+      await this.ensureVaultFolder("attachments/jam-deck-chatbot");
       const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
       if (file) {
         const text = await this.plugin.app.vault.read(file);
