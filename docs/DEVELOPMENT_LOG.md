@@ -1,5 +1,16 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.25.0 AI 对话归档与清理
+
+- Jam 需求：AI 助手要能管理聊天记录——① 归档按钮把当前窗口对话上下文经 DeepSeek 压缩整理后按日期存到 `attachments/jam-deck-chatbot`；② 已归档内容不清理、但不被下次归档重复记录；③ 清理按钮只清窗口上下文，不影响已归档。
+- **归档**：新增 `archiveAiChat()`。取 `aiMessages.slice(aiArchivedCount)`（游标去重），序列化为纯文本（图片消息用 `[图片:文件名]` 占位），固定调 `api.deepseek.com/chat/completions`（与当前 provider 无关，用 settings.aiModel）压缩成 ≤150 字纪要；写入 `attachments/jam-deck-chatbot/${YYYY-MM-DD}.md`（存在则 append，不存在 create，`## HH:mm` + 模型/条数头注）。成功后 `aiArchivedCount = aiMessages.length`——已归档对话保留在窗口，但下次归档不再重复。
+- **清理**：新增 `clearAiChat()`。清空 `aiMessages`、重置游标与输入，重渲染窗口；只动会话状态，归档文件不受影响。
+- **游标生命周期**：`aiArchivedCount` 在 `openAiChatWithCanvasText` / `openAiChatWithCanvasImage` 打开新会话时重置为 0。
+- **UI**：标题栏模型按钮右侧新增「归档」「清理」两个胶囊按钮（复用 provider-btn 层级；清理 hover 用 `--jd-danger` 色提示），拖动/pointerdown 事件已按 button 排除，不影响拖头。
+- 边界：未配置 DeepSeek Key / 无新增对话 / 压缩失败 / 写入失败均有 Notice 提示；`aiBusy` 期间禁用。
+- 回归：新增 8 条断言（archive/clear 存在、归档路径、游标去重、清理不动存档、固定 DeepSeek 端点）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.24.2 切换 DeepSeek 时降级图片上下文
 
 - Jam 反馈：对图片节点打开 AI（千问看图）对话几轮后，点标题旁模型按钮切到 DeepSeek，发纯文本仍报「看图需要千问（多模态）」。

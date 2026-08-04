@@ -9123,6 +9123,96 @@ class JamDeckView extends ItemView {
     if (this.aiChat) this.renderAiChat(this.aiChat);
   }
 
+  async archiveAiChat() {
+    if (this.aiBusy) return;
+    const messages = this.aiMessages || [];
+    const pending = messages.slice(this.aiArchivedCount || 0);
+    if (!pending.length) {
+      new Notice("Jam Deck：本窗口对话已全部归档过，没有新增内容");
+      return;
+    }
+    const dsKey = this.plugin.settings.aiApiKey || "";
+    if (!dsKey) {
+      new Notice("Jam Deck：未配置 DeepSeek API Key，无法归档");
+      return;
+    }
+    const dsModel = this.plugin.settings.aiModel || "deepseek-v4-flash";
+    const lines = [];
+    for (const msg of pending) {
+      if (msg.role === "user") {
+        const img = msg.image && msg.image.alt ? `[图片:${msg.image.alt}]` : "";
+        lines.push(`用户：${(img + (msg.text || "")).trim()}`);
+      } else {
+        lines.push(`助手：${msg.content || ""}`);
+      }
+    }
+    const transcript = lines.join("\n");
+    const system = "你是会话记录归档助手。把下面的对话压缩成精炼的会话纪要：保留关键事实、决定、待办或画布操作、图片涉及的内容主题；删去寒暄和过程噪音；用简体中文分点列出，150 字以内。只输出纪要正文，不要标题、不要解释。";
+    let summary = "";
+    try {
+      const response = await requestUrl({
+        url: "https://api.deepseek.com/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${dsKey}` },
+        body: JSON.stringify({
+          model: dsModel,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: `以下是要归档的对话（共 ${pending.length} 条）：\n${transcript}` },
+          ],
+          max_tokens: 1024,
+          stream: false,
+          temperature: 0.3,
+        }),
+        throw: false,
+      });
+      if (!response || response.status !== 200) {
+        let detail = response ? `HTTP ${response.status}` : "无响应";
+        try { detail = (response.json && response.json.error && response.json.error.message) || detail; } catch (e) {}
+        throw new Error(detail);
+      }
+      summary = response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message
+        ? response.json.choices[0].message.content
+        : "";
+      if (!summary) throw new Error("模型没有返回内容");
+    } catch (error) {
+      new Notice(`Jam Deck：归档压缩失败 · ${error.message || "未知错误"}`);
+      return;
+    }
+    const now = new Date();
+    const date = this.plugin.formatLocalDate(now);
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const filePath = `attachments/jam-deck-chatbot/${date}.md`;
+    const block = `## ${time}\n\n> 来源：Jam Deck AI 助手 · 模型 ${dsModel} · 压缩 ${pending.length} 条对话\n\n${summary.trim()}\n\n`;
+    try {
+      const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
+      if (file) {
+        const text = await this.plugin.app.vault.read(file);
+        await this.plugin.app.vault.modify(file, `${text.trimEnd()}\n${block}`);
+      } else {
+        await this.plugin.app.vault.create(filePath, `# Jam Deck AI 会话归档 — ${date}\n\n${block}`);
+      }
+    } catch (error) {
+      new Notice(`Jam Deck：归档写入失败 · ${error.message || "未知错误"}`);
+      return;
+    }
+    this.aiArchivedCount = messages.length;
+    new Notice(`Jam Deck：已归档 ${pending.length} 条对话 → ${filePath}`);
+  }
+
+  clearAiChat() {
+    if (this.aiBusy) return;
+    this.aiMessages = [];
+    this.aiArchivedCount = 0;
+    this.aiInputValue = "";
+    if (this.aiChat) {
+      const input = this.aiChat.querySelector("textarea");
+      if (input) input.value = "";
+      this.renderAiChat(this.aiChat);
+    }
+    new Notice("Jam Deck：已清空对话窗口（已归档记录不受影响）");
+  }
+
   toggleAiChat() {
     this.aiChatOpen = !this.aiChatOpen;
     if (this.aiChat) {
@@ -9191,6 +9281,7 @@ class JamDeckView extends ItemView {
     };
     this.aiChatOpen = true;
     this.aiMessages = [];
+    this.aiArchivedCount = 0;
     this.aiInputValue = "";
     this.aiQuickDone = false;
     this.addAiMessage("user", text ? `[选中文本]\n${text}` : "[选中的文本节点]");
@@ -9258,6 +9349,7 @@ class JamDeckView extends ItemView {
     };
     this.aiChatOpen = true;
     this.aiMessages = [];
+    this.aiArchivedCount = 0;
     this.aiInputValue = "";
     this.aiQuickDone = true;
     this.aiMessages.push({
@@ -9289,6 +9381,18 @@ class JamDeckView extends ItemView {
       attr: { type: "button", title: provider === "千问" ? "当前：千问（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到千问（可看图）" },
     });
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
+    const archive = header.createEl("button", {
+      text: "归档",
+      cls: "jam-deck-ai-archive",
+      attr: { type: "button", title: "把当前对话压缩整理存入 attachments/jam-deck-chatbot（按日期分档，已归档部分不重复记录）" },
+    });
+    archive.addEventListener("click", () => void this.archiveAiChat());
+    const clear = header.createEl("button", {
+      text: "清理",
+      cls: "jam-deck-ai-clear",
+      attr: { type: "button", title: "清空当前对话窗口（不影响已归档的记录）" },
+    });
+    clear.addEventListener("click", () => this.clearAiChat());
     const close = header.createEl("button", {
       text: "×",
       cls: "jam-deck-ai-chat-close",

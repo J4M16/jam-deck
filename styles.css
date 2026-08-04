@@ -2093,6 +2093,32 @@
 }
 .jam-deck-root .jam-deck-ai-provider-btn:hover { border-color: color-mix(in srgb, var(--jd-accent) 55%, var(--jd-line)); background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
 .jam-deck-root .jam-deck-ai-provider-btn:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
+.jam-deck-root .jam-deck-ai-archive,
+.jam-deck-root .jam-deck-ai-clear {
+  min-height: 22px;
+  padding: 2px 9px;
+  border: 1px solid var(--jd-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--jd-ink);
+  font-size: 11px;
+  opacity: 0.82;
+  cursor: pointer;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out, opacity 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-archive:hover {
+  border-color: color-mix(in srgb, var(--jd-accent) 45%, var(--jd-line));
+  background: color-mix(in srgb, var(--jd-accent) 12%, transparent);
+  opacity: 1;
+}
+.jam-deck-root .jam-deck-ai-clear:hover {
+  border-color: color-mix(in srgb, var(--jd-danger) 55%, var(--jd-line));
+  background: color-mix(in srgb, var(--jd-danger) 10%, transparent);
+  color: var(--jd-danger);
+  opacity: 1;
+}
+.jam-deck-root .jam-deck-ai-archive:focus-visible,
+.jam-deck-root .jam-deck-ai-clear:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-ai-chat-close {
   width: 26px;
   height: 26px;
