@@ -9381,19 +9381,20 @@ class JamDeckView extends ItemView {
       attr: { type: "button", title: provider === "千问" ? "当前：千问（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到千问（可看图）" },
     });
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
-    const archive = header.createEl("button", {
+    const headerActions = header.createDiv({ cls: "jam-deck-ai-chat-actions" });
+    const archive = headerActions.createEl("button", {
       text: "归档",
       cls: "jam-deck-ai-archive",
       attr: { type: "button", title: "把当前对话压缩整理存入 attachments/jam-deck-chatbot（按日期分档，已归档部分不重复记录）" },
     });
     archive.addEventListener("click", () => void this.archiveAiChat());
-    const clear = header.createEl("button", {
+    const clear = headerActions.createEl("button", {
       text: "清理",
       cls: "jam-deck-ai-clear",
       attr: { type: "button", title: "清空当前对话窗口（不影响已归档的记录）" },
     });
     clear.addEventListener("click", () => this.clearAiChat());
-    const close = header.createEl("button", {
+    const close = headerActions.createEl("button", {
       text: "×",
       cls: "jam-deck-ai-chat-close",
       attr: { type: "button", title: "关闭", "aria-label": "关闭 AI 助手" },

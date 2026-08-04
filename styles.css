@@ -2079,6 +2079,11 @@
   align-items: center;
   gap: 8px;
 }
+.jam-deck-root .jam-deck-ai-chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .jam-deck-root .jam-deck-ai-chat-title { font-size: 12px; color: var(--jd-muted); letter-spacing: 0.04em; }
 .jam-deck-root .jam-deck-ai-provider-btn {
   min-height: 22px;

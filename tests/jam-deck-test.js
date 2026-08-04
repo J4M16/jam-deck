@@ -126,6 +126,7 @@ assert(pluginSource.includes("this.aiArchivedCount"), "archives must advance a c
 assert(pluginSource.includes("clearAiChat()"), "the AI chat must own a clear action");
 assert(pluginSource.includes("已清空对话窗口（已归档记录不受影响）"), "clearing the chat window must not touch archived records");
 assert(pluginSource.includes("api.deepseek.com/chat/completions"), "archive summarization must always use the DeepSeek endpoint regardless of the active provider");
+assert(pluginSource.includes("jam-deck-ai-chat-actions"), "archive/clear/close must group together at the header's right end beside the close button");
 assert(pluginSource.includes('const threshold = press.pointerType === "touch" ? 10 : 6'), "expanded stack cards must separate click from drag with pointer-specific thresholds");
 assert(pluginSource.includes("this.canvas.posFromEvt(event)"), "expanded stack drag-out must convert pointer endpoints through native Canvas world coordinates");
 assert(pluginSource.includes("this.commitPreviewDrag(press, next)"), "expanded stack cards must commit a real Canvas drag-out after the threshold");

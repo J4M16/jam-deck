@@ -1,5 +1,12 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-04 — 0.25.1 标题栏操作按钮右侧分组
+
+- Jam 反馈：0.25.0 的「归档」「清理」按钮位置奇怪——header 是 `justify-content: space-between`，我直接把按钮插在 provider 按钮与关闭按钮之间，四个子项被均匀分散，按钮散在标题栏中部且显得像消失。
+- 修复：把归档 / 清理 / 关闭三个按钮包进 `headerActions`（`jam-deck-ai-chat-actions`，flex + gap 4px），标题与模型按钮独占左侧，操作组整组贴右端、关闭按钮在最右；满足「关闭按钮左侧排列、至少 4px 间距」。
+- 回归：新增 1 条断言（actions 分组存在）；`npm run verify` 全绿。
+- 处理模型签名：GLM-5.2（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.25.0 AI 对话归档与清理
 
 - Jam 需求：AI 助手要能管理聊天记录——① 归档按钮把当前窗口对话上下文经 DeepSeek 压缩整理后按日期存到 `attachments/jam-deck-chatbot`；② 已归档内容不清理、但不被下次归档重复记录；③ 清理按钮只清窗口上下文，不影响已归档。
