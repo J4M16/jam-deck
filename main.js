@@ -3630,6 +3630,61 @@ class CanvasImageStackController {
     const isExternal = !this.clusters.some((candidate) => candidate.id === cluster.id);
     if (isExternal) this.externalPreviewClusters.set(cluster.id, cluster);
     const rootRect = this.root.getBoundingClientRect();
+    const visuals = this.buildPreviewVisuals(cluster, rootRect);
+    if (visuals.length < 2) {
+      this.externalPreviewClusters.delete(cluster.id);
+      return;
+    }
+    const anchorVisual = visuals.find((visual) => visual.member.id === cluster.anchor.id) || visuals[0];
+    const anchorRect = {
+      left: anchorVisual.rect.left - rootRect.left,
+      right: anchorVisual.rect.right - rootRect.left,
+      top: anchorVisual.rect.top - rootRect.top,
+      bottom: anchorVisual.rect.bottom - rootRect.top,
+    };
+    const layout = jamDeckLayoutCanvasStackPreview(
+      visuals.map((visual) => ({ width: visual.logicalWidth, height: visual.logicalHeight })),
+      anchorRect,
+      { width: rootRect.width, height: rootRect.height },
+    );
+    if (!layout) return;
+    const wrapper = this.entry.ownerDocument.createElement("div");
+    wrapper.className = "jam-deck-canvas-stack-preview";
+    const backdrop = this.entry.ownerDocument.createElement("div");
+    backdrop.className = "jam-deck-canvas-stack-backdrop";
+    wrapper.appendChild(backdrop);
+    const previewCards = [];
+    visuals.forEach((visual, index) => {
+      const built = this.createPreviewCard(visual, layout.positions[index], rootRect, index);
+      if (!built) return;
+      wrapper.appendChild(built.card);
+      visual.member.node.nodeEl.addClass("is-jam-deck-stack-source-ghost");
+      previewCards.push(built);
+    });
+    if (previewCards.length < 2) {
+      for (const visual of previewCards) visual.member.node.nodeEl.removeClass("is-jam-deck-stack-source-ghost");
+      this.externalPreviewClusters.delete(cluster.id);
+      return;
+    }
+    this.overlay.appendChild(wrapper);
+    this.previewWrapper = wrapper;
+    this.previewCards = previewCards;
+    this.previewCluster = cluster;
+    this.previewClusterId = cluster.id;
+    this.previewBystanders = this.prepareBystanders(cluster, layout, rootRect);
+    this.notifyFolderPreview(cluster, "opening", { reason: "stack-open" });
+    wrapper.getBoundingClientRect();
+    this.ownerWindow.requestAnimationFrame(() => {
+      this.ownerWindow.requestAnimationFrame(() => {
+        if (this.previewWrapper === wrapper && wrapper.isConnected && !wrapper.hasClass("is-closing")) {
+          for (const nodeEl of this.previewBystanders) nodeEl.addClass("is-jam-deck-stack-displaced");
+          wrapper.addClass("is-visible");
+        }
+      });
+    });
+  }
+
+  buildPreviewVisuals(cluster, rootRect) {
     // Explicit folders render read-only proxies while their real Canvas nodes
     // are hidden.  Their preview therefore carries canonical screen-space
     // source rects instead of sampling presentation-mutated native DOM.
@@ -3672,93 +3727,48 @@ class CanvasImageStackController {
         logicalHeight: Math.max(1, Number(logicalCanvasSize.height) * screenScale),
       });
     }
-    if (visuals.length < 2) {
-      this.externalPreviewClusters.delete(cluster.id);
-      return;
-    }
-    const anchorVisual = visuals.find((visual) => visual.member.id === cluster.anchor.id) || visuals[0];
-    const anchorRect = {
-      left: anchorVisual.rect.left - rootRect.left,
-      right: anchorVisual.rect.right - rootRect.left,
-      top: anchorVisual.rect.top - rootRect.top,
-      bottom: anchorVisual.rect.bottom - rootRect.top,
+    return visuals;
+  }
+
+  createPreviewCard(visual, position, rootRect, index) {
+    const source = {
+      left: visual.rect.left - rootRect.left,
+      top: visual.rect.top - rootRect.top,
+      width: visual.rect.width,
+      height: visual.rect.height,
     };
-    const layout = jamDeckLayoutCanvasStackPreview(
-      visuals.map((visual) => ({ width: visual.logicalWidth, height: visual.logicalHeight })),
-      anchorRect,
-      { width: rootRect.width, height: rootRect.height },
-    );
-    if (!layout) return;
-    const wrapper = this.entry.ownerDocument.createElement("div");
-    wrapper.className = "jam-deck-canvas-stack-preview";
-    const backdrop = this.entry.ownerDocument.createElement("div");
-    backdrop.className = "jam-deck-canvas-stack-backdrop";
-    wrapper.appendChild(backdrop);
-    const previewCards = [];
-    visuals.forEach((visual, index) => {
-      const position = layout.positions[index];
-      const source = {
-        left: visual.rect.left - rootRect.left,
-        top: visual.rect.top - rootRect.top,
-        width: visual.rect.width,
-        height: visual.rect.height,
-      };
-      const card = this.entry.ownerDocument.createElement("div");
-      card.className = "jam-deck-canvas-stack-preview-card";
-      card.tabIndex = 0;
-      card.setAttribute("role", "button");
-      card.setAttribute("aria-label", visual.member.kind === "image"
-        ? "图片：单击放大，拖动移出堆叠"
-        : visual.member.kind === "text"
-          ? "文本：单击编辑，拖动移出堆叠"
-          : "笔记：单击打开，拖动移出堆叠");
-      card.style.left = `${position.x}px`;
-      card.style.top = `${position.y}px`;
-      card.style.width = `${position.width}px`;
-      card.style.height = `${position.height}px`;
-      card.style.setProperty("--jd-stack-index", String(index));
-      card.style.setProperty("--jd-stack-delay", `${Math.min(72, index * 18)}ms`);
-      card.style.setProperty("--jd-stack-from-x", `${source.left - position.x}px`);
-      card.style.setProperty("--jd-stack-from-y", `${source.top - position.y}px`);
-      card.style.setProperty("--jd-stack-from-scale", String(source.width && position.width ? source.width / position.width : 1));
-      if (visual.member.kind === "text") {
-        card.style.setProperty(
-          "--jd-stack-text-font-size",
-          `${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`,
-        );
-        card.style.setProperty(
-          "--jd-stack-text-padding",
-          `${JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX}px`,
-        );
-      }
-      const surface = this.createPreviewSurface(visual.member);
-      if (!surface) return;
-      card.appendChild(surface);
-      wrapper.appendChild(card);
-      visual.member.node.nodeEl.addClass("is-jam-deck-stack-source-ghost");
-      previewCards.push({ card, member: visual.member, source, position });
-    });
-    if (previewCards.length < 2) {
-      for (const visual of previewCards) visual.member.node.nodeEl.removeClass("is-jam-deck-stack-source-ghost");
-      this.externalPreviewClusters.delete(cluster.id);
-      return;
+    const card = this.entry.ownerDocument.createElement("div");
+    card.className = "jam-deck-canvas-stack-preview-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", visual.member.kind === "image"
+      ? "图片：单击放大，拖动移出堆叠"
+      : visual.member.kind === "text"
+        ? "文本：单击编辑，拖动移出堆叠"
+        : "笔记：单击打开，拖动移出堆叠");
+    card.style.left = `${position.x}px`;
+    card.style.top = `${position.y}px`;
+    card.style.width = `${position.width}px`;
+    card.style.height = `${position.height}px`;
+    card.style.setProperty("--jd-stack-index", String(index));
+    card.style.setProperty("--jd-stack-delay", `${Math.min(72, index * 18)}ms`);
+    card.style.setProperty("--jd-stack-from-x", `${source.left - position.x}px`);
+    card.style.setProperty("--jd-stack-from-y", `${source.top - position.y}px`);
+    card.style.setProperty("--jd-stack-from-scale", String(source.width && position.width ? source.width / position.width : 1));
+    if (visual.member.kind === "text") {
+      card.style.setProperty(
+        "--jd-stack-text-font-size",
+        `${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`,
+      );
+      card.style.setProperty(
+        "--jd-stack-text-padding",
+        `${JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX}px`,
+      );
     }
-    this.overlay.appendChild(wrapper);
-    this.previewWrapper = wrapper;
-    this.previewCards = previewCards;
-    this.previewCluster = cluster;
-    this.previewClusterId = cluster.id;
-    this.previewBystanders = this.prepareBystanders(cluster, layout, rootRect);
-    this.notifyFolderPreview(cluster, "opening", { reason: "stack-open" });
-    wrapper.getBoundingClientRect();
-    this.ownerWindow.requestAnimationFrame(() => {
-      this.ownerWindow.requestAnimationFrame(() => {
-        if (this.previewWrapper === wrapper && wrapper.isConnected && !wrapper.hasClass("is-closing")) {
-          for (const nodeEl of this.previewBystanders) nodeEl.addClass("is-jam-deck-stack-displaced");
-          wrapper.addClass("is-visible");
-        }
-      });
-    });
+    const surface = this.createPreviewSurface(visual.member);
+    if (!surface) return null;
+    card.appendChild(surface);
+    return { card, member: visual.member, source, position };
   }
 
   cleanupPreview(wrapper, cards, bystanders, options = {}) {
