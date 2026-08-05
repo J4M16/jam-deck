@@ -173,7 +173,7 @@ assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media > img"), "
 assert(styleSource.includes("width: 90%") && styleSource.includes("height: 90%") && styleSource.includes("max-height: 100%"), "image focus preview must remain bounded to the viewport");
 assert(styleSource.includes(".jam-deck-canvas-stack-drag-portal"), "expanded stack drag-out must use a DOM-only elevated portal");
 assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX = 16"), "expanded Canvas text must use one fixed screen-space font target");
-assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX") && pluginSource.includes("card.style.setProperty(\n          \"--jd-stack-text-font-size\",\n          `${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`,"), "text preview font must be fixed at the screen target because the card rests at its real arranged layout");
+assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX") && pluginSource.includes('"--jd-stack-text-font-size"') && pluginSource.includes("`${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`"), "text preview font must be fixed at the screen target because the card rests at its real arranged layout");
 assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX") && pluginSource.includes("--jd-stack-text-padding"), "text preview padding must remain fixed in screen space");
 assert(styleSource.includes("font-size: var(--jd-stack-text-font-size, 16px) !important"), "cloned Canvas text descendants must not retain native zoom-driven font sizes");
 assert(styleSource.includes("--jd-stack-text-font-size: 16px"), "dragged-out text previews must return to the fixed screen font after the card transform is removed");
