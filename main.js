@@ -10657,7 +10657,13 @@ class JamDeckView extends ItemView {
       attr: { tabindex: "0", role: "group", "aria-label": "音乐播放器" },
     });
     player.dataset.widgetId = widget.id;
+    this.renderMusicHero(player, widget);
+    this.renderMusicTransport(player, widget);
+    this.updateMusicPlayerEl(player, widget);
+    void this.plugin.ensureMusicMedia();
+  }
 
+  renderMusicHero(player, widget) {
     const sourceControl = player.createDiv({ cls: "jam-deck-music-source-control" });
     const sourceButton = sourceControl.createEl("button", {
       cls: "jam-deck-music-source-button",
@@ -10733,6 +10739,13 @@ class JamDeckView extends ItemView {
     meta.createDiv({ cls: "jam-deck-music-title", text: "等待播放" });
     meta.createDiv({ cls: "jam-deck-music-artist", text: "打开本地音乐软件即可显示" });
 
+    cover.addEventListener("error", () => {
+      cover.removeAttribute("src");
+      player.removeClass("has-artwork");
+    });
+  }
+
+  renderMusicTransport(player, widget) {
     const transportStage = player.createDiv({ cls: "jam-deck-music-transport-stage" });
     const timeline = transportStage.createDiv({ cls: "jam-deck-music-timeline" });
     const progress = timeline.createEl("input", {
@@ -10785,13 +10798,6 @@ class JamDeckView extends ItemView {
     player.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "touch" && !event.target.closest("button, input")) player.focus();
     });
-
-    cover.addEventListener("error", () => {
-      cover.removeAttribute("src");
-      player.removeClass("has-artwork");
-    });
-    this.updateMusicPlayerEl(player, widget);
-    void this.plugin.ensureMusicMedia();
   }
 
   rebuildMusicSourceMenu(player, widget) {
