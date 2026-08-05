@@ -2103,6 +2103,13 @@ function jamDeckRoundCanvasStackValue(value) {
   return Math.round(Number(value) * 100) / 100;
 }
 
+function jamDeckRequestFrame(ownerWindow) {
+  if (ownerWindow && typeof ownerWindow.requestAnimationFrame === "function") {
+    return ownerWindow.requestAnimationFrame.bind(ownerWindow);
+  }
+  return (callback) => ownerWindow.setTimeout(callback, 0);
+}
+
 function jamDeckCanvasStackIntersectionArea(left, right) {
   const a = jamDeckCanvasStackRect(left);
   const b = jamDeckCanvasStackRect(right);
@@ -4616,9 +4623,7 @@ class CanvasFolderController {
 
   scheduleReconcile() {
     if (this.destroyed || this.reconcileFrame) return;
-    const raf = typeof this.ownerWindow.requestAnimationFrame === "function"
-      ? this.ownerWindow.requestAnimationFrame.bind(this.ownerWindow)
-      : (callback) => this.ownerWindow.setTimeout(callback, 0);
+    const raf = jamDeckRequestFrame(this.ownerWindow);
     this.reconcileFrame = raf(() => {
       this.reconcileFrame = 0;
       this.reconcile();
@@ -4935,9 +4940,7 @@ class CanvasFolderController {
     this.applyFolderRuntimeNodes(group, runtime);
     this.renderFolderLayer();
     if (this.ownerWindow) {
-      const raf = typeof this.ownerWindow.requestAnimationFrame === "function"
-        ? this.ownerWindow.requestAnimationFrame.bind(this.ownerWindow)
-        : (callback) => this.ownerWindow.setTimeout(callback, 0);
+      const raf = jamDeckRequestFrame(this.ownerWindow);
       runtime.raf = raf(() => {
         runtime.raf = 0;
         if (token === runtime.transitionToken) this.renderFolderLayer();
@@ -5159,9 +5162,7 @@ class CanvasFolderController {
 
   scheduleToolbarSync() {
     if (this.destroyed || this.toolbarFrame) return;
-    const raf = typeof this.ownerWindow.requestAnimationFrame === "function"
-      ? this.ownerWindow.requestAnimationFrame.bind(this.ownerWindow)
-      : (callback) => this.ownerWindow.setTimeout(callback, 0);
+    const raf = jamDeckRequestFrame(this.ownerWindow);
     this.toolbarFrame = raf(() => {
       this.toolbarFrame = 0;
       this.syncToolbar();
