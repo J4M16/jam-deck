@@ -1947,7 +1947,7 @@ assert(folderControlShowIdx > 0 && styleSource.indexOf(".jam-deck-canvas-folder-
 assert(folderControllerSource.includes("jam-deck-canvas-folder-backboard") && folderControllerSource.includes("jam-deck-canvas-folder-representatives") && folderControllerSource.includes("jam-deck-canvas-folder-front"), "folder DOM must expose ordered backboard/representatives/front layers");
 assert(!folderControllerSource.includes("jam-deck-canvas-folder-mask"), "folder DOM must not create or retain a mask layer");
 assert(folderControllerSource.includes('backboard.dataset.asset = "assets/jam-deck-folder-shell.svg"'), "folder DOM must retain the exact exported backboard asset reference");
-assert(folderControllerSource.includes("shell.append(backboard, representatives, front, header)"), "folder DOM layer order must keep the backboard, representatives, front, then metadata header");
+assert(folderControllerSource.includes("shell.append(view.backboard, view.representatives, view.front, view.header)"), "folder DOM layer order must keep the backboard, representatives, front, then metadata header");
 
 // A tiny DOM fixture exercises the keyed view without requiring Obsidian's
 // private Canvas DOM.  It protects layer order, decorative hit testing, and

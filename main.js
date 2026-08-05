@@ -6425,6 +6425,17 @@ class CanvasFolderController {
     // Figma's authored surfaces remain explicit DOM layers.  The native
     // Canvas representatives stay in Obsidian's Canvas tree; this transparent
     // layer is only a z-index reference and never contains a clone.
+    this.createFolderBackboard(view);
+    this.createFolderLayers(view);
+    this.createFolderHeader(view);
+    shell.append(view.backboard, view.representatives, view.front, view.header);
+    const anchorEl = group && group.anchor && group.anchor.node && group.anchor.node.nodeEl;
+    if (anchorEl && anchorEl.parentElement === sceneParent && typeof sceneParent.insertBefore === "function") sceneParent.insertBefore(shell, anchorEl.nextSibling || null);
+    else sceneParent.appendChild(shell);
+    return view;
+  }
+
+  createFolderBackboard(view) {
     const backboard = this.ownerDocument.createElement("div");
     backboard.className = "jam-deck-canvas-folder-backboard";
     backboard.dataset.layer = "backboard";
@@ -6451,6 +6462,9 @@ class CanvasFolderController {
     backboardSvg.appendChild(backboardPath);
     backboard.appendChild(backboardSvg);
     view.backboardSvg = backboardSvg;
+  }
+
+  createFolderLayers(view) {
     const representatives = this.ownerDocument.createElement("div");
     representatives.className = "jam-deck-canvas-folder-representatives";
     representatives.dataset.layer = "representatives";
@@ -6475,7 +6489,9 @@ class CanvasFolderController {
     secondarySlot.style.pointerEvents = "none";
     view.slots = [primarySlot, secondarySlot];
     front.append(primarySlot, secondarySlot);
+  }
 
+  createFolderHeader(view) {
     const header = this.ownerDocument.createElement("div");
     header.className = "jam-deck-canvas-folder-header";
     const meta = this.ownerDocument.createElement("div");
@@ -6506,11 +6522,6 @@ class CanvasFolderController {
     });
     controls.append(view.color, view.ungroup);
     header.append(meta, controls);
-    shell.append(backboard, representatives, front, header);
-    const anchorEl = group && group.anchor && group.anchor.node && group.anchor.node.nodeEl;
-    if (anchorEl && anchorEl.parentElement === sceneParent && typeof sceneParent.insertBefore === "function") sceneParent.insertBefore(shell, anchorEl.nextSibling || null);
-    else sceneParent.appendChild(shell);
-    return view;
   }
 
   updateFolderView(view, group) {
