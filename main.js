@@ -2497,6 +2497,9 @@ const JAM_DECK_CANVAS_FOLDER_BASE_HEIGHT = 150;
 const JAM_DECK_CANVAS_FOLDER_PREVIEW_OPEN_MS = 450;
 const JAM_DECK_CANVAS_FOLDER_PREVIEW_CLOSE_MS = 600;
 const JAM_DECK_CANVAS_FOLDER_PREVIEW_CARD_RETURN_MS = 260;
+const JAM_DECK_STACK_PREVIEW_CLEANUP_MS = 340;
+const JAM_DECK_FOLDER_FALLBACK_WIDTH_RATIO = 0.46;
+const JAM_DECK_FOLDER_FALLBACK_HEIGHT_RATIO = 0.42;
 
 // Figma file R3sGYRg1Q0XIRMGXCDkg34, node 102:6.  These are the authored
 // screen-space representative slots at the 200 x 150 folder baseline.  The
@@ -3851,7 +3854,7 @@ class CanvasImageStackController {
     });
     wrapper.removeClass("is-visible");
     wrapper.addClass("is-closing");
-    this.previewRemovalTimer = this.ownerWindow.setTimeout(() => this.cleanupPreview(wrapper, cards, bystanders, { forceClosed: false }), 340);
+    this.previewRemovalTimer = this.ownerWindow.setTimeout(() => this.cleanupPreview(wrapper, cards, bystanders, { forceClosed: false }), JAM_DECK_STACK_PREVIEW_CLEANUP_MS);
   }
 
   destroy() {
@@ -6328,8 +6331,8 @@ class CanvasFolderController {
       const rect = proxy && typeof proxy.getBoundingClientRect === "function" ? proxy.getBoundingClientRect() : null;
       if (id && rect && rect.width > 0 && rect.height > 0) sourceRects.set(String(id), { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
     }
-    const fallbackWidth = Math.max(40, shellRect.width * 0.46);
-    const fallbackHeight = Math.max(30, shellRect.height * 0.42);
+    const fallbackWidth = Math.max(40, shellRect.width * JAM_DECK_FOLDER_FALLBACK_WIDTH_RATIO);
+    const fallbackHeight = Math.max(30, shellRect.height * JAM_DECK_FOLDER_FALLBACK_HEIGHT_RATIO);
     (group.members || []).forEach((member, index) => {
       const id = String(member.id);
       if (sourceRects.has(id)) return;
