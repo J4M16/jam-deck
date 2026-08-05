@@ -13551,6 +13551,10 @@ class JamDeckPlugin extends Plugin {
     return matches;
   }
 
+  // TODO(legacy-data-migration): 日记格式 v1→v2 迁移，仍在活跃写入路径
+  //（ensureTaskV2Blocks 调用）。删除会放弃旧版日记的自动迁移。请在确认
+  // 所有历史日记均已升级为 v2 块格式后，再移除本函数与 ensureTaskV2Blocks
+  // 中的调用分支。
   upgradeLegacyTaskInJournal(markdown, task) {
     const eol = String(markdown).includes("\r\n") ? "\r\n" : "\n";
     const normalized = String(markdown).replace(/\r\n/g, "\n");
