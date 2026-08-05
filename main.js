@@ -47,6 +47,8 @@ const EAGLE_SEARCH_GRID_COLUMNS = 5;
 const EAGLE_SEARCH_GRID_GAP = 40;
 // 多图拖入 canvas 时相邻两张的世界坐标间距（同一行横排）。
 const CANVAS_DROP_AUTO_GAP = 28;
+// Canvas 节点按住多久后才判定为"按住"并悬浮（300ms 内松手视为单击，不悬浮）。
+const CANVAS_STACK_LIFT_DELAY_MS = 300;
 const MEDIA_LAUNCH_POLL_MS = 500;
 const MEDIA_LAUNCH_TIMEOUT_MS = 12000;
 
@@ -710,6 +712,7 @@ const WIDGET_DEFS = {
 const DEFAULT_SETTINGS = {
   dataVersion: 4,
   editMode: false,
+  animationsEnabled: true,
   clipboardPollMs: 700,
   clipboardMaxItems: 60,
   aiApiKey: "",
@@ -2453,7 +2456,7 @@ function jamDeckCanvasStackBystanderShift(rect, focus, viewport, gap = 20, influ
 // Keep this schema small and deterministic so reopening a Canvas (or undoing a
 // mutation) never depends on a runtime-only registry or a screenshot cache.
 const JAM_DECK_CANVAS_FOLDER_SCHEMA_VERSION = 1;
-const JAM_DECK_CANVAS_FOLDER_COLORS = ["#DDDCDC", "#9DBB8E", "#C69CB8", "#D9B36C", "#D58C78", "#A9A9A9"];
+const JAM_DECK_CANVAS_FOLDER_COLORS = ["#DDDCDC", "#9BC287", "#CC96BA", "#E9B85C", "#E3846A", "#5E9BD6"];
 // 0.19.0 persisted the original blue-gray as the first preset.  Continue to
 // accept it as a stable legacy value so existing folders do not silently
 // change appearance when the new neutral default is selected for new groups.
@@ -2903,12 +2906,17 @@ class CanvasImageStackController {
       dispose: null,
     };
     this.drag = drag;
+    const lift = () => {
+      if (node.nodeEl) node.nodeEl.addClass("is-jam-deck-stack-dragging");
+    };
+    drag.liftTimer = this.ownerWindow.setTimeout(lift, CANVAS_STACK_LIFT_DELAY_MS);
     const move = (next) => {
       if (this.drag !== drag || next.pointerId !== drag.pointerId) return;
       if (!drag.moved && Math.hypot(next.clientX - drag.startClientX, next.clientY - drag.startClientY) >= 5) {
         drag.moved = true;
+        this.ownerWindow.clearTimeout(drag.liftTimer);
+        lift();
         this.collapsePreview(true);
-        if (node.nodeEl) node.nodeEl.addClass("is-jam-deck-stack-dragging");
       }
     };
     const finish = (next, cancelled) => {
@@ -2931,6 +2939,7 @@ class CanvasImageStackController {
     const up = (next) => finish(next, false);
     const cancel = (next) => finish(next, true);
     drag.dispose = () => {
+      this.ownerWindow.clearTimeout(drag.liftTimer);
       this.ownerWindow.removeEventListener("pointermove", move, true);
       this.ownerWindow.removeEventListener("pointerup", up, true);
       this.ownerWindow.removeEventListener("pointercancel", cancel, true);
@@ -3683,24 +3692,23 @@ class CanvasImageStackController {
         : visual.member.kind === "text"
           ? "文本：单击编辑，拖动移出堆叠"
           : "笔记：单击打开，拖动移出堆叠");
-      card.style.left = `${source.left}px`;
-      card.style.top = `${source.top}px`;
-      card.style.width = `${source.width}px`;
-      card.style.height = `${source.height}px`;
+      card.style.left = `${position.x}px`;
+      card.style.top = `${position.y}px`;
+      card.style.width = `${position.width}px`;
+      card.style.height = `${position.height}px`;
       card.style.setProperty("--jd-stack-index", String(index));
       card.style.setProperty("--jd-stack-delay", `${Math.min(72, index * 18)}ms`);
-      card.style.setProperty("--jd-stack-to-x", `${position.x - source.left}px`);
-      card.style.setProperty("--jd-stack-to-y", `${position.y - source.top}px`);
-      const targetScale = position.width / source.width;
-      card.style.setProperty("--jd-stack-to-scale", String(targetScale));
+      card.style.setProperty("--jd-stack-from-x", `${source.left - position.x}px`);
+      card.style.setProperty("--jd-stack-from-y", `${source.top - position.y}px`);
+      card.style.setProperty("--jd-stack-from-scale", String(source.width && position.width ? source.width / position.width : 1));
       if (visual.member.kind === "text") {
         card.style.setProperty(
           "--jd-stack-text-font-size",
-          `${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX / Math.max(0.01, targetScale)}px`,
+          `${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`,
         );
         card.style.setProperty(
           "--jd-stack-text-padding",
-          `${JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX / Math.max(0.01, targetScale)}px`,
+          `${JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX}px`,
         );
       }
       const surface = this.createPreviewSurface(visual.member);
@@ -3708,7 +3716,7 @@ class CanvasImageStackController {
       card.appendChild(surface);
       wrapper.appendChild(card);
       visual.member.node.nodeEl.addClass("is-jam-deck-stack-source-ghost");
-      previewCards.push({ card, member: visual.member, source });
+      previewCards.push({ card, member: visual.member, source, position });
     });
     if (previewCards.length < 2) {
       for (const visual of previewCards) visual.member.node.nodeEl.removeClass("is-jam-deck-stack-source-ghost");
@@ -3772,9 +3780,9 @@ class CanvasImageStackController {
     this.externalPreviewClusters.clear();
     this.previewClusterId = null;
     const reducedMotion = !!(
-      this.ownerWindow
-      && this.ownerWindow.matchMedia
-      && this.ownerWindow.matchMedia("(prefers-reduced-motion: reduce)").matches
+      this.root
+      && this.root.closest
+      && this.root.closest(".jam-deck-root.jam-deck-no-motion")
     );
     this.notifyFolderPreview(cluster, "closing", {
       reason: immediate ? "stack-immediate-collapse" : "stack-collapse",
@@ -3795,12 +3803,12 @@ class CanvasImageStackController {
     cards.forEach((visual, index) => {
       const nodeEl = visual.member && visual.member.node && visual.member.node.nodeEl;
       const latest = nodeEl && nodeEl.isConnected ? nodeEl.getBoundingClientRect() : null;
-      const source = visual.source;
-      const returnLeft = latest ? latest.left - rootRect.left : source.left;
-      const returnTop = latest ? latest.top - rootRect.top : source.top;
-      const returnScale = latest && source.width ? latest.width / source.width : 0.985;
-      visual.card.style.setProperty("--jd-stack-return-x", `${returnLeft - source.left}px`);
-      visual.card.style.setProperty("--jd-stack-return-y", `${returnTop - source.top}px`);
+      const target = visual.position || visual.source;
+      const returnLeft = latest ? latest.left - rootRect.left : target.left;
+      const returnTop = latest ? latest.top - rootRect.top : target.top;
+      const returnScale = latest && target.width ? latest.width / target.width : 1;
+      visual.card.style.setProperty("--jd-stack-return-x", `${returnLeft - target.left}px`);
+      visual.card.style.setProperty("--jd-stack-return-y", `${returnTop - target.top}px`);
       visual.card.style.setProperty("--jd-stack-return-scale", String(returnScale));
       visual.card.style.setProperty("--jd-stack-exit-delay", `${Math.min(54, (cards.length - index - 1) * 18)}ms`);
     });
@@ -4682,7 +4690,7 @@ class CanvasFolderController {
 
   prefersReducedMotion() {
     try {
-      return !!(this.ownerWindow && this.ownerWindow.matchMedia && this.ownerWindow.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      return !!(this.root && this.root.closest && this.root.closest(".jam-deck-root.jam-deck-no-motion"));
     } catch (error) { return false; }
   }
 
@@ -5250,8 +5258,8 @@ class CanvasFolderController {
       try { runtime.animation.cancel(); } catch (error) {}
       runtime.animation = null;
     }
-    const startTransform = "perspective(420px) rotateX(0deg)";
-    const openTransform = "perspective(420px) rotateX(-80deg)";
+    const startTransform = "perspective(260px) rotateX(0deg)";
+    const openTransform = "perspective(260px) rotateX(-80deg)";
     const start = open ? { transform: startTransform, opacity: 1 } : { transform: openTransform, opacity: 0 };
     const end = open ? { transform: openTransform, opacity: 0 } : { transform: startTransform, opacity: 1 };
     const finish = () => {
@@ -6493,6 +6501,10 @@ class CanvasFolderController {
     const runtime = this.getFolderRuntime(group.id, group);
     const state = group.collapsed ? "collapsed" : "expanded";
     if (runtime) runtime.state = state;
+    if (state === "collapsed" && this.canvas && this.canvas.selection && typeof this.canvas.deselectAll === "function") {
+      const hasSelectedMember = (group.members || []).some((member) => member && member.node && this.canvas.selection.has(member.node));
+      if (hasSelectedMember) this.canvas.deselectAll();
+    }
     view.shell.classList.toggle("is-collapsed", state === "collapsed");
     view.shell.classList.toggle("is-expanded", state === "expanded");
     view.shell.classList.remove("is-opening", "is-closing");
@@ -9123,6 +9135,7 @@ class JamDeckView extends ItemView {
     this.canvasRuntime.parkAll();
     root.empty();
     root.addClass("jam-deck-root");
+    root.toggleClass("jam-deck-no-motion", !this.plugin.settings.animationsEnabled);
 
     const toolbar = root.createDiv({ cls: "jam-deck-toolbar" });
     const title = toolbar.createDiv({ cls: "jam-deck-title" });
@@ -11435,6 +11448,7 @@ class JamDeckPlugin extends Plugin {
     this.archivingTaskIds = new Set();
     this.countdownCompletionLocks = new Set();
     this.widgetRestoreLocks = new Set();
+    this.applyAnimationSetting();
     this.mediaBridge = null;
     this.mediaPollBusy = false;
     this.musicPending = null;
@@ -11553,6 +11567,15 @@ class JamDeckPlugin extends Plugin {
     const operation = this.settingsSaveQueue.then(() => this.saveData(this.settings));
     this.settingsSaveQueue = operation.catch(() => {});
     return operation;
+  }
+
+  applyAnimationSetting() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const root = leaf && leaf.view && leaf.view.contentEl;
+      if (root && typeof root.toggleClass === "function") {
+        root.toggleClass("jam-deck-no-motion", !this.settings.animationsEnabled);
+      }
+    }
   }
 
   normalizeDeckTask(task) {
@@ -15509,6 +15532,18 @@ class JamDeckSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "Jam Deck" });
     containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / 千问）", cls: "jam-deck-setting-hint" });
+
+    new Setting(containerEl)
+      .setName("动画效果")
+      .setDesc("工作台与画布组件动效（展开/收起/悬浮/翻牌等）。默认开启，且不再跟随系统「减少动态效果」；关闭后停用全部动画。")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.animationsEnabled !== false).onChange(async (value) => {
+          this.plugin.settings.animationsEnabled = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAnimationSetting();
+        });
+      });
+
     containerEl.createEl("h3", { text: "DeepSeek（文本）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)

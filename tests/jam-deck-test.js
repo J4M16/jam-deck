@@ -98,7 +98,7 @@ assert(pluginSource.includes("this.previewWrapper.contains(event.target)") && pl
 assert(pluginSource.includes('if (event.key === "Escape") this.collapsePreview();'), "preview isolation must retain an Escape exit");
 assert(pluginSource.includes("stackController && stackController.previewWrapper"), "the early Canvas keyboard bridge must yield to an open focus preview");
 assert(styleSource.includes(".jam-deck-canvas-stack-overlay {\n  position: absolute;\n  z-index: 70;"), "the focus overlay must sit above native Canvas controls");
-assert(styleSource.includes("translate: var(--jd-stack-bystander-x) var(--jd-stack-bystander-y);"), "reduced motion must retain the final bystander displacement");
+assert(!styleSource.includes("prefers-reduced-motion"), "Jam Deck animations must not follow the OS reduced-motion setting");
 assert(pluginSource.includes("getCanvasItems()") && pluginSource.includes("for (const item of this.getCanvasItems())"), "focus displacement must enumerate every Canvas node type");
 assert(styleSource.includes(".canvas-node.is-jam-deck-stack-bystander {"), "focus displacement must move the complete Canvas node surface");
 assert(styleSource.includes("rgb(248 249 250 / 0.70)"), "Spatial focus preview must ghost the light Canvas background");
@@ -107,7 +107,15 @@ assert(styleSource.includes("0 22px 44px rgb(15 23 42 / 0.22)"), "dragged Canvas
 assert(styleSource.includes("transform 300ms cubic-bezier(.22, 1, .36, 1)"), "stack previews must use the Spatial enter rhythm");
 assert(styleSource.includes("transition-duration: 260ms"), "stack previews must reverse to their source geometry");
 assert(styleSource.includes(".is-jam-deck-stack-source-ghost") && styleSource.includes("opacity: 0;"), "source stack visuals must fully yield to their moving FLIP copies");
-assert(styleSource.includes("translate3d(0, 0, 0) scale(1)"), "stack preview copies must begin at the exact source geometry");
+assert(styleSource.includes("translate3d(var(--jd-stack-from-x, 0px), var(--jd-stack-from-y, 0px), 0) scale(var(--jd-stack-from-scale, 1))"), "stack preview copies must start from their source geometry via a from-transform while resting at the arranged layout");
+assert(pluginSource.includes("drag.liftTimer = this.ownerWindow.setTimeout(lift, CANVAS_STACK_LIFT_DELAY_MS);"), "pressed Canvas nodes must arm a hold-delay lift on pointerdown");
+assert(pluginSource.includes("CANVAS_STACK_LIFT_DELAY_MS"), "the hold delay between click and press must be an explicit constant");
+assert(pluginSource.includes("drag.moved = true;\n        this.ownerWindow.clearTimeout(drag.liftTimer);\n        lift();"), "dragging past the threshold must lift immediately without waiting for the hold delay");
+assert(pluginSource.includes("this.ownerWindow.clearTimeout(drag.liftTimer);\n      this.ownerWindow.removeEventListener"), "the lift timer must be cleared when the drag session ends");
+assert(styleSource.includes("is-jam-deck-stack-dragging:has(.canvas-node-content.media-embed > img) .canvas-node-container {\n  opacity: 0.5;"), "lifted Canvas nodes must drop to 50% opacity");
+assert(!styleSource.includes("scale: 1.018"), "lifted Canvas nodes must not scale while pressed");
+assert(!styleSource.includes("is-jam-deck-stack-dragging:has(.canvas-node-content.media-embed > img) .canvas-node-container {\n  translate: 0 -6px;"), "lifted Canvas nodes must not translate while pressed");
+assert(styleSource.includes(".jam-deck-root.jam-deck-no-motion *"), "the plugin animation toggle must disable motion via a scoped class");
 assert(pluginSource.includes("wrapper.getBoundingClientRect();"), "stack preview must commit its source frame before starting FLIP motion");
 assert(pluginSource.includes("this.previewWrapper === wrapper") && pluginSource.includes('!wrapper.hasClass("is-closing")'), "delayed preview motion must not reopen a closing stack");
 assert(pluginSource.includes("this.ownerWindow.requestAnimationFrame(() =>"), "stack previews must coordinate work with animation frames");
@@ -165,8 +173,8 @@ assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media > img"), "
 assert(styleSource.includes("width: 90%") && styleSource.includes("height: 90%") && styleSource.includes("max-height: 100%"), "image focus preview must remain bounded to the viewport");
 assert(styleSource.includes(".jam-deck-canvas-stack-drag-portal"), "expanded stack drag-out must use a DOM-only elevated portal");
 assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX = 16"), "expanded Canvas text must use one fixed screen-space font target");
-assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX / Math.max(0.01, targetScale)"), "text preview font size must counter-scale the FLIP card");
-assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX / Math.max(0.01, targetScale)"), "text preview padding must remain fixed in screen space");
+assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX") && pluginSource.includes("card.style.setProperty(\n          \"--jd-stack-text-font-size\",\n          `${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`,"), "text preview font must be fixed at the screen target because the card rests at its real arranged layout");
+assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX") && pluginSource.includes("--jd-stack-text-padding"), "text preview padding must remain fixed in screen space");
 assert(styleSource.includes("font-size: var(--jd-stack-text-font-size, 16px) !important"), "cloned Canvas text descendants must not retain native zoom-driven font sizes");
 assert(styleSource.includes("--jd-stack-text-font-size: 16px"), "dragged-out text previews must return to the fixed screen font after the card transform is removed");
 assert(styleSource.includes("border-radius: 0") && styleSource.includes(".jam-deck-canvas-stack-preview-card {"), "expanded stack cards must not impose a shared rounded container");
@@ -182,7 +190,7 @@ assert(pluginSource.includes("jamDeckRenderCountdownFlip") && pluginSource.inclu
 assert(pluginSource.includes('role: "group"') && pluginSource.includes("jam-deck-countdown-duration-hours"), "idle countdown must expose separate hour, minute and second fields");
 assert(styleSource.includes(".jam-deck-countdown-flip-digit") && styleSource.includes("@keyframes jam-deck-countdown-flip"), "countdown digits must use the flip-card visual treatment");
 assert(styleSource.includes("--jd-countdown-card-top") && styleSource.includes(".theme-dark .jam-deck-root"), "countdown cards must use separate light and dark theme tokens");
-assert(styleSource.includes("prefers-reduced-motion") && styleSource.includes(".jam-deck-countdown-flip-digit.is-flipping { animation: none; }"), "countdown flip motion must respect reduced-motion preferences");
+assert(pluginSource.includes("animationsEnabled"), "the animation toggle must persist in plugin settings");
 assert(!pluginSource.includes("queueHoverMove(event)") && !pluginSource.includes('addEventListener("pointerleave", pointerleave'), "stack previews must not open or close from hover");
 assert(pluginSource.includes("is-jam-deck-stack-source-ghost"), "stack source visuals must restore through a scoped visual class");
 assert(!styleSource.includes(".jam-deck-canvas-leaf .canvas-node { transform:"), "Canvas stack styling must never replace native node positioning transforms");
@@ -201,7 +209,7 @@ assert(pluginSource.includes('kind: "url"'), "launcher must persist URL shortcut
 assert(pluginSource.includes("resolveShortcutIconPath(shortcut)"), "launcher icon rendering must resolve converted WebP files");
 assert(pluginSource.includes('"aria-live": "polite"'), "launcher reorder must announce position changes");
 assert(styleSource.includes(".jam-deck-launcher-item.is-insert-before::before"), "launcher reorder must use a thin insertion indicator");
-assert(styleSource.includes("prefers-reduced-motion: reduce"), "launcher motion must respect reduced-motion preferences");
+assert(pluginSource.includes("applyAnimationSetting()") && pluginSource.includes("jam-deck-no-motion"), "the deck must sync the animation class from settings");
 assert(!styleSource.includes("@media (any-pointer: coarse)"), "clipboard actions must not remain visible merely because Windows reports a coarse pointer");
 assert(pluginSource.includes('music: { label: "音乐播放器"'), "widget picker must expose the music player");
 assert(pluginSource.includes('case "music":') && pluginSource.includes("this.renderMusicPlayer(body, widget);"), "music widgets must render through their dedicated view");
@@ -227,7 +235,7 @@ assert(styleSource.includes(".jam-deck-music-player:hover .jam-deck-music-contro
 assert(pluginSource.includes("jam-deck-music-transport-stage") && styleSource.includes(".jam-deck-music-transport-stage"), "transport controls and timeline must share one overlay stage");
 assert(styleSource.includes("color-mix(in srgb, var(--jd-surface) 94%, transparent)") && styleSource.includes("justify-self: start") && styleSource.includes("text-align: left"), "hover transport must veil the timeline and metadata must follow the screenshot's left-aligned beside-disc layout");
 assert(styleSource.includes("@container (max-width: 270px)"), "the music widget must adapt to narrow dashboard columns");
-assert(styleSource.includes(".jam-deck-music-disc,") && styleSource.includes("animation: none !important;"), "reduced motion must stop CD rotation");
+assert(!pluginSource.includes("prefers-reduced-motion"), "JS must not consult the OS reduced-motion media query");
 assert(!pluginSource.includes("GameDeck") && !styleSource.includes(".game-deck-"), "Game Deck now ships as its own plugin; Jam Deck must stay 2D only");
 assert(pluginSource.includes("function jamDeckCollectFillSlots"), "dashboard insert must collect fillable gaps");
 assert(pluginSource.includes("function jamDeckPickFillSlot"), "dashboard insert must pick the hovered gap slot");
@@ -253,7 +261,7 @@ assert(pluginSource.includes("jam-deck-layout-slot"), "gap previews must render 
 assert(styleSource.includes(".jam-deck-layout-slot"), "gap fill previews must have a green gradient stroke rectangle");
 assert(styleSource.includes(".jam-deck-widget.is-layout-seam-bottom::after") && styleSource.includes(".jam-deck-widget.is-layout-seam-right::after"), "gapless seams must light the facing neighbor edges");
 assert(styleSource.includes("0 18px 40px rgb(15 20 18 / 0.22)"), "dragged widgets must float with a soft elevation shadow");
-assert(styleSource.includes("@media (prefers-reduced-motion: reduce)") && styleSource.includes(".jam-deck-grid.is-layout-dragging .jam-deck-widget:not(.is-moving) { transition: none; }"), "dashboard rearrange motion must yield to reduced motion");
+assert(pluginSource.includes("root.toggleClass(\"jam-deck-no-motion\", !this.plugin.settings.animationsEnabled)"), "the deck root must apply the animation class from settings");
 
 const originalLoad = Module._load;
 Module._load = function(request, parent, isMain) {
@@ -1895,11 +1903,14 @@ assert(pluginSource.includes("entry.folderController.install()"), "Canvas runtim
 assert(pluginSource.includes("if (entry.folderController)"), "Canvas runtime destroy must own folder controller cleanup");
 assert(pluginSource.includes("entry.folderController.destroy()"), "Canvas runtime destroy must destroy the folder controller");
 assert(pluginSource.includes("destroyPromises = new Map()") && pluginSource.includes("this.destroyPromises.get(widgetId)"), "Canvas runtime destroy must serialize repeated lifecycle calls");
+assert(pluginSource.includes("perspective(260px) rotateX(-80deg)"), "folder front must hinge at the bottom edge and lift the top edge toward the viewer so the top edge reads wider");
+assert(styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-folder-front,"), "the folder front hinge must stay on the bottom edge");
+assert(pluginSource.includes("const hasSelectedMember = (group.members || []).some((member) => member && member.node && this.canvas.selection.has(member.node));") && pluginSource.includes("if (hasSelectedMember) this.canvas.deselectAll();"), "collapsing a folder must clear selected members so the giant selection box shrinks to the shell");
 
 for (const token of ["--jd-canvas-folder-color-1", "--jd-canvas-folder-color-2", "--jd-canvas-folder-color-3", "--jd-canvas-folder-color-4", "--jd-canvas-folder-color-5", "--jd-canvas-folder-color-6"]) assert(styleSource.includes(token), `folder styling must retain six scoped color tokens (${token})`);
 assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-folder-layer"), "folder overlay styles must remain scoped to embedded Canvas leaves");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-proxy-hidden") && styleSource.includes("visibility: hidden !important"), "proxy presentation must hide native members through one scoped owned class");
-assert(styleSource.includes("@media (prefers-reduced-motion: reduce)") && styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-folder-front") && styleSource.includes("transition: none"), "folder motion must respect reduced-motion preferences");
+assert(styleSource.includes("animation-duration: 0.001s !important") && styleSource.includes("transition-duration: 0.001s !important"), "the no-motion class must quench every animation and transition duration");
 assert(styleSource.includes("one scene-local shell with sanitized thumbnail proxies"), "folder styling must document the scene-local proxy architecture");
 assert(folderControllerSource.includes('"is-double-column"') && folderControllerSource.includes('"is-single-column"'), "folder DOM must distinguish single- and double-column representative layouts");
 assert(!styleSource.includes("translate: calc(var(--jd-folder-representative-x") && !styleSource.includes("rotate(var(--jd-folder-item-tilt))"), "CSS must not override native Canvas member transforms with clone-card positioning");
@@ -2063,6 +2074,7 @@ folderDomView.shell.dispatchEvent({ type: "click", target: folderDomView.shell, 
 assert.strictEqual(folderDomClickCount, 1, "folder root click must retain the legacy stack preview proxy");
 assert.strictEqual(folderDomView.controls.children.length, 2, "folder hover toolbar must expose color and ungroup actions");
 assert.strictEqual(folderDomView.controls.children[0], folderDomView.color, "folder toolbar keyboard order must start with color");
+assert(styleSource.includes("perspective(420px) rotateX(-30deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must hinge on the bottom edge and raise the top edge toward the viewer");
 assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar keyboard order must end with ungroup");
 let folderDomUngroupCalls = 0;
 folderDomController.ungroup = () => { folderDomUngroupCalls += 1; };
@@ -2111,16 +2123,19 @@ assert.deepStrictEqual(proxySourceRects.get("proxy-a"), { left: 220, top: 130, w
 assert(proxySourceRects.get("proxy-c").width > 0, "non-representative members must receive a deterministic in-folder launch slot");
 proxyView.dispose();
 
-// Preview bridge behavior: reduced motion must settle to a stable final
+// Preview bridge behavior: with the plugin animation toggle off (no-motion
+// class on the deck root), opening/closing must settle to a stable final
 // state immediately, while a normal collapse keeps one cancellable return
 // timer and destroy() must clear it without leaving flap classes behind.
 const reducedFolderDocument = { ...folderDomDocument };
 reducedFolderDocument.defaultView = {
-  matchMedia: () => ({ matches: true }),
   setTimeout: (callback) => { callback(); return 1; },
   clearTimeout: () => {},
 };
-const reducedPreviewController = new JamDeckPlugin.CanvasFolderController({}, { ownerDocument: reducedFolderDocument });
+const reducedPreviewController = new JamDeckPlugin.CanvasFolderController({}, {
+  ownerDocument: reducedFolderDocument,
+  leaf: { containerEl: { closest: () => ({}), addClass: () => {}, removeClass: () => {} } },
+});
 reducedPreviewController.layer = new FolderDomFixtureElement("div");
 const reducedPreviewGroup = { id: "reduced-preview", collapsed: true, members: [] };
 const reducedPreviewView = reducedPreviewController.createFolderView(reducedPreviewGroup);

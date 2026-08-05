@@ -1,6 +1,6 @@
 {
   "name": "jam-deck",
-  "version": "0.27.3",
+  "version": "0.28.6",
   "private": true,
   "description": "Jam 的 Obsidian 副屏工作台插件（仓库同时维护独立的 Game Deck 3D 插件）",
   "scripts": {

@@ -1,5 +1,94 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-05 — 0.28.6 色板更新 + 前片透视 + 折叠选中范围
+
+- Jam 反馈：①中灰换天蓝，六色饱和度各 +30% 独立调整；②前片"固定底边、翻顶边、顶边宽度加宽"；③图片成文件夹后选中范围仍巨大，需缩小到壳体附近。
+- 实现：
+  - **色板**：`JAM_DECK_CANVAS_FOLDER_COLORS` 中灰 `#A9A9A9` → 天蓝 `#5E9BD6`；其余按 HSL 饱和度 ×1.3 独立换算（python colorsys）：`#9BC287 / #CC96BA / #E9B85C / #E3846A`。浅灰 #DDDCDC 饱和度近 0 保持。
+  - **前片翻开（理解修正）**：Jam 要的是「**底边固定、顶边朝 viewer 翻起、顶边显宽**」。正确实现：transform-origin **50% 100%**（底边铰链）+ `rotateX(80deg)`（正角：顶边向 viewer 方向翻起，近大远小 → 顶边宽度增加）+ perspective 260px 强化透视。⚠️ 我一度误实现为固定顶边（origin 50% 0% + rotateX(-80deg)，底边收窄）——Jam 明确纠正后改回。hover 悬浮微翻（origin 50% 0% + rotateX(-30deg)）为独立状态，保持不变。
+  - **折叠选中范围**：运行时取证发现 folder 成员节点被选中（`is-selected`，包围盒 808×539px 远超壳体 137×103px）。`updateFolderView` 折叠分支：若 `canvas.selection` 含任一成员 → `deselectAll()` 清除，选中框回归壳体。
+- 回归：+3 断言（折叠清选中、rotateX(80deg) 正角、front origin 底边）；`npm run verify` 全绿。版本 0.28.6。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-05 — 0.28.5 文件夹面板浓度 + 前片翻开方向
+
+- Jam 反馈：①文件夹颜色很浅，想提高面板浓度；②前片翻动动画上下颠倒，要调过来。
+- 改法（styles.css，两处）：
+  - `--jd-folder-panel: color-mix(in srgb, var(--jd-folder-color) 78%, #edf3f5 22%)` → `90% / 10%`（面板颜色更实）。
+  - `.jam-deck-canvas-folder-front, .jam-deck-canvas-folder-header` 的 `transform-origin: 50% 100%`（底边）→ `50% 0%`（顶边）——前片 rotateX(-80deg) 翻开动画改为绕顶边旋转，与 hover（origin 50% 0%）一致，方向修正。
+- 回归：无相关断言，`npm run verify` 全绿。版本 0.28.5。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-05 — 0.28.4 动画与系统「减少动态效果」脱钩
+
+- Jam 反馈：为什么插件动画要跟 Windows 动画设置挂钩？应该脱钩——Jam Deck 动画正常做，要关就在插件设置里关。
+- 实现：
+  - **CSS**：删除 styles.css 全部 12 处 `@media (prefers-reduced-motion: reduce)` 块（均为"禁用动画"性质，无必要布局规则）；末尾加 `.jam-deck-root.jam-deck-no-motion *::before/::after { animation-duration/transition-duration: 0.001s !important }` 统一停用动效（成熟 CSS 手法）。
+  - **设置**：DEFAULT_SETTINGS 加 `animationsEnabled: true`；设置页顶部加「动画效果」toggle（onChange → saveSettings + applyAnimationSetting）。
+  - **JS**：`JamDeckView.render` 按设置给 root toggle `jam-deck-no-motion`；新增 `JamDeckPlugin.applyAnimationSetting()`（onload 调用 + 设置变更同步已打开视图，经 `getLeavesOfType`）；`CanvasImageStackController.collapsePreview` 与 `CanvasFolderController.prefersReducedMotion()` 从 `matchMedia` 改为读 `this.root.closest(".jam-deck-root.jam-deck-no-motion")`（DOM class 驱动，无需 plugin 引用）。
+  - 测试：7 条 reduced-motion 断言改为脱钩断言（styles 无 prefers-reduced-motion、no-motion class 规则、animationsEnabled 设置、JS 不读 media query、fixture 用 root.closest mock）。
+- 坑：python `open('w')` 文本模式把 styles.css 换行从 LF 写成 CRLF，导致全部多行字符串断言失败——用 `wb` 替换 `\r\n → \n` 恢复 LF。
+- 回归：`npm run verify` 全绿。版本 0.28.4。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-05 — 0.28.3 展开图糊：FLIP 改为真实布局落地
+
+- Jam 反馈：点开编组排开了，但图糊——"放大是变回原图清晰的样子"，不是把代理成员放大。
+- 根因（静态分析 + 运行时取证）：位图本身 1536×1024（够清晰），但 FLIP 动画用 `transform: scale(9.35)` 把**代理小图（56px）的渲染结果**放大，且 transform 一直保留在最终态——浏览器放大的是 56px 光栅化结果，不是原图重采样，因此糊。
+- 修复（经典 FLIP 落地）：
+  - main.js `showPreview`：卡片 `left/top/width/height` 直接 = 排列目标（position），起点 transform = `translate3d(var(--jd-stack-from-x), ...) scale(var(--jd-stack-from-scale))`（从 source 飞到 target 的过渡）；is-visible 后 transform 归 identity（`translate3d(0,0,0) scale(1)`）——**最终态无缩放，img 用 1536 位图重采样到 ~590px，清晰**。
+  - `collapsePreview`：return 偏移相对 target 布局计算（visual 增存 position）。
+  - 文本字号/内边距改为直接 16px（不再反向补偿 targetScale）。
+  - styles.css：卡片起点/终点/is-closing/reduced-motion 四处的 transform 语义同步（`--jd-stack-to-*` 弃用，改用 `--jd-stack-from-*`）。
+- 回归：更新 4 条断言（from 起点、is-visible identity、reduced-motion identity、文本固定字号）；`npm run check` + `npm test` 全绿。
+- 部署：0.28.3，`npm run deploy` 成功（data.json 保持 `4B82F291…DC60`，备份 `.jam-deck-backup-20260805-005016-4f47bcb7`）。
+- ⚠️ 启动问题：命令行/Start-Process 启动 Obsidian 仍 GPU FATAL（RDP 会话 Chromium GPU 初始化失败），Jam 手动双击可启动。已请 Jam 手动打开验证。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-04 — 0.28.2 文件夹壳体：代表图白边 + 文案对齐
+
+- Jam 反馈：拖文件堆叠（编组）后，进去的示例文件（代表成员）没有白色描边；壳体底部"2 个节点 / 编组"文案偏上，应与右侧图标（颜色圆钮 / 取消编组）按下方间距和左方间距对齐，目前要下移。
+- 改法（纯 CSS，styles.css）：
+  - `.jam-deck-canvas-folder-proxy` 加 `border: 2px solid rgb(255 255 255 / 0.92); box-sizing: border-box;`，让代表图（最多 4 个真实节点）带白边。
+  - `.jam-deck-canvas-folder:has(> front) > header > .meta` 由 `top: calc(42% + 11px)` 改为 `top: auto; bottom: 26px;`，与同 header 内 controls（`bottom: 26px`）底部对齐——meta 内部的 count / label 因此贴近壳体底缘、与图标同行。
+- 千问视觉查验（热重载后）发现：白边在 plugin:reload 下未必立刻刷新（CSS 插入由插件 onload 触发），需重启 Obsidian；meta 最初我按 Jam "下移 10px" 直接 `top: +21px` 导致文案脱出壳体，改为 bottom 对齐后稳。
+- 千问同时揭示两个未改的相关问题（与本次无关但需后续观察）：
+  1. 多数 representative 渲染为 Obsidian Canvas 的骨架占位（"几道横杠纹样"）而非真实图片——可能是成员文件未加载/未识别，非 CSS 问题；
+  2. 壳体前片（半透磨砂面板）在暗色主题下"几乎不可见"——Figma 纸面板的体量感没体现。
+- Jam 第三点"点开编组内容不自动排列展开"未能在本次复现：当前 Obsidian 因 GPU 进程崩溃无法稳定启动（疑似 RTX 5080 渲染占用），Jam 重启 Obsidian 后需点开编组复现，FLIP 布局逻辑（`jamDeckLayoutCanvasStackPreview` + 切换 sourceRects）未发现破坏。
+- 回归：`npm run check` + `npm test` 通过；`npm run build:game-deck` 因 Obsidian 残留进程锁住 `game-deck/main.js` 写入失败（环境问题，非代码），`game-deck/main.js` 语法 `node --check` 通过，未影响本次发布。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-04 — 0.28.2 补：展开叠图根因 = reduced-motion 杀 FLIP（已修）
+
+- Jam 实机复现：点开文件夹（编组），两张图仍叠在源位置小图，没有放大排开。
+- **根因（运行时 eval 定位）**：系统开了「减少动态效果」（`prefers-reduced-motion: reduce` = true）。styles.css 的 reduced-motion 块（旧 1275-1280 行）把 `.is-visible .jam-deck-canvas-stack-preview-card { transform: none; }`——FLIP 的目标 transform 被强杀，卡片永远停在 source 小图位置；`--jd-stack-to-scale` 实际已算出 8.8–9.4 倍放大、wrapper 也有 is-visible，纯粹是 CSS 覆盖掉了落位。
+- 修复：reduced-motion 下**保留最终落位 transform**（`translate3d(var(--jd-stack-to-x), var(--jd-stack-to-y), 0) scale(var(--jd-stack-to-scale))` / closing 保留 return 值），只去掉 transition（过渡动画）。与 VISUAL_DESIGN.md「reduce 时取消过渡但保留最终排版」对齐。
+- 运行时验证：CLI eval 注入修复 CSS 后，两张卡 computed transform 变为 `matrix(9.35…)`/`matrix(8.82…)`，rect 各约 548px 并排展开。新增 1 条回归断言（reduced-motion 下 is-visible 保留最终 transform）。
+- ⚠️ 部署受阻：Obsidian GPU crash 残留的 zombie 进程（PID 4448/94044/49864/64336/53880，60-80K）**无法被 Stop-Process / taskkill /F / Kill / CIM Terminate 终止**，持续锁住 `jam-deck` 的 styles.css/manifest.json 句柄（cp Permission denied）。**需 Jam 重启电脑**清理后部署修复版（源文件已就绪）。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-04 — 0.28.1 Canvas 悬浮改为 300ms 按住延迟判定
+
+- Jam 反馈：0.28.0 按下即悬浮导致**单击也会闪一下悬浮**再展开预览，希望用延迟区分点击与按住。
+- 修改：pointerdown 时不再立即 addClass，改为 `setTimeout(lift, CANVAS_STACK_LIFT_DELAY_MS)`（300ms）挂起；
+  - 300ms 内松手 → `drag.dispose()` clearTimeout，走单击路径（togglePreview 展开），全程不悬浮；
+  - 按住超 300ms → 定时器触发 lift() 悬浮；
+  - 拖动越过 5px 阈值 → 立即 clearTimeout + lift()（拖动意图明确，不等 300ms）。
+- 常量 `CANVAS_STACK_LIFT_DELAY_MS = 300` 置于顶部常量区；removeClass 逻辑不变（finishDrag/清理统一）。
+- 回归：更新 1 条旧断言为 4 条新断言（定时器挂起、常量、拖动立即 lift、dispose 清理定时器），样式断言不变；`npm run verify` 全绿。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-04 — 0.28.0 Canvas 节点按住即悬浮（阴影 + 50% 透明）
+
+- Jam 反馈：Canvas 按住图片没反应，拖过 5px 阈值才悬浮；希望**按下立即悬浮**，只要阴影、降 50% 透明度、不要缩放。
+- 根因：`onPointerDown` 只在 move 超过 5px（`drag.moved`）时才 addClass `is-jam-deck-stack-dragging`。
+- 修改：pointerdown 建立 drag 记录后**立即** addClass；move 回调不再负责加 class。移除逻辑不变，`finishDrag` 与清理路径统一 removeClass，单击（不移动）路径在松手后正常恢复并展开预览。
+- 样式：`.canvas-node.is-jam-deck-stack-dragging` 去掉 `translate: 0 -6px` 与 `scale: 1.018`，改为 `opacity: 0.5`；保留三层柔和阴影；transition 只保留 opacity / box-shadow。图片与混合堆叠两类选择器统一处理，dark 主题阴影不变。
+- 规范同步：docs/VISUAL_DESIGN.md「Canvas」悬浮条目改写为仅阴影 + 50% 透明度、无位移无缩放。
+- 回归：新增 4 条断言（pointerdown 即加 class、opacity 0.5、无 scale 1.018、无 translate 0 -6px）；`npm run verify` 全绿。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
 ## 2026-08-04 — 0.27.3 修复"处理中"提示模型错标
 
 - Jam 反馈：切到千问后聊天窗提示仍显示"DeepSeek 处理中"。
