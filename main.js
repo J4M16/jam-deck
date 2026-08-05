@@ -907,6 +907,13 @@ class TaskDetailModal extends Modal {
     contentEl.createEl("p", { text: "整理分类、截止日期、说明、链接和图片；图片栏支持直接粘贴。", cls: "jam-deck-task-modal-subtitle" });
 
     const form = contentEl.createDiv({ cls: "jam-deck-task-form" });
+    const refs = this.renderTaskFields(form, task);
+    const images = this.renderTaskImages(form, task);
+    this.renderTaskActions(form, task, refs, images);
+    refs.titleInput.focus();
+  }
+
+  renderTaskFields(form, task) {
     const titleField = form.createDiv({ cls: "jam-deck-task-field" });
     titleField.createEl("label", { text: "标题" });
     const titleInput = titleField.createEl("input", { type: "text" });
@@ -945,6 +952,10 @@ class TaskDetailModal extends Modal {
       .join("\n");
     linksField.createDiv({ text: "仅支持 http / https；归档时会写入当天日记的“链接”。", cls: "jam-deck-task-hint" });
 
+    return { titleInput, categoryInput, dueInput, descriptionInput, linksInput };
+  }
+
+  renderTaskImages(form, task) {
     const imageField = form.createDiv({ cls: "jam-deck-task-field" });
     imageField.createEl("label", { text: "图片 · 可直接 Ctrl+V 粘贴" });
     imageField.tabIndex = 0;
@@ -1010,6 +1021,15 @@ class TaskDetailModal extends Modal {
       new Notice(`Jam Deck：已粘贴 ${files.length} 张图片，保存后写入待办`);
     });
 
+    return {
+      getRetained: () => retainedImages,
+      setRetained: (value) => { retainedImages = value; },
+      renderImages,
+    };
+  }
+
+  renderTaskActions(form, task, refs, images) {
+    const { titleInput, categoryInput, dueInput, descriptionInput, linksInput } = refs;
     const actions = form.createDiv({ cls: "jam-deck-modal-actions" });
     const destructive = actions.createDiv({ cls: "jam-deck-modal-actions-left" });
     const primary = actions.createDiv({ cls: "jam-deck-modal-actions-right" });
@@ -1026,7 +1046,7 @@ class TaskDetailModal extends Modal {
         text,
         description: descriptionInput.value.trim(),
         links: this.plugin.parseTaskLinks(linksInput.value),
-        images: retainedImages,
+        images: images.getRetained(),
         pendingFiles: this.pendingFiles,
         category: categoryInput.value || null,
         dueDate: dueInput.value || null,
@@ -1040,8 +1060,8 @@ class TaskDetailModal extends Modal {
       this.didSave = true;
       this.pendingFiles = [];
       const savedTask = this.plugin.getDeckTask(this.taskId);
-      if (savedTask) retainedImages = this.plugin.getSafeTaskImages(savedTask).map((image) => ({ ...image }));
-      renderImages();
+      if (savedTask) images.setRetained(this.plugin.getSafeTaskImages(savedTask).map((image) => ({ ...image })));
+      images.renderImages();
       if (this.onSaved) this.onSaved();
       return this.taskId;
     };
@@ -1085,8 +1105,8 @@ class TaskDetailModal extends Modal {
         else setBusy(false);
       });
     }
-    titleInput.focus();
   }
+
 
   onClose() {
     this.pendingFiles = [];
