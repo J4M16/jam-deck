@@ -9625,6 +9625,20 @@ class JamDeckView extends ItemView {
   renderAiChat(chat) {
     chat.empty();
     const header = chat.createDiv({ cls: "jam-deck-ai-chat-header" });
+    this.renderAiChatHeader(header);
+    this.renderAiChatBody(chat);
+    this.renderAiChatInputRow(chat);
+    // 重建窗口后恢复已载入图片的 dock
+    if (this.aiCanvasContext && this.aiCanvasContext.kind === "image" && this.aiCanvasContext.image) {
+      this.updateAiImageDock(
+        `data:${this.aiCanvasContext.image.mime};base64,${this.aiCanvasContext.image.base64}`,
+        String(this.aiCanvasContext.image.path || "").split("/").pop() || "图片",
+      );
+    }
+    this.scrollAiMessages();
+  }
+
+  renderAiChatHeader(header) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
     const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
@@ -9675,7 +9689,9 @@ class JamDeckView extends ItemView {
       header.removeClass("is-dragging");
       void this.plugin.saveSettings();
     });
+  }
 
+  renderAiChatBody(chat) {
     const messages = chat.createDiv({ cls: "jam-deck-ai-messages" });
     this.aiMessagesEl = messages;
     if (!this.aiMessages || !this.aiMessages.length) {
@@ -9693,7 +9709,9 @@ class JamDeckView extends ItemView {
     const dock = chat.createDiv({ cls: "jam-deck-ai-image-dock" });
     dock.hidden = true;
     this.aiImageDockEl = dock;
+  }
 
+  renderAiChatInputRow(chat) {
     const row = chat.createDiv({ cls: "jam-deck-ai-row" });
     const input = row.createEl("textarea", {
       cls: "jam-deck-ai-input",
@@ -9784,14 +9802,6 @@ class JamDeckView extends ItemView {
         break;
       }
     });
-    // 重建窗口后恢复已载入图片的 dock
-    if (this.aiCanvasContext && this.aiCanvasContext.kind === "image" && this.aiCanvasContext.image) {
-      this.updateAiImageDock(
-        `data:${this.aiCanvasContext.image.mime};base64,${this.aiCanvasContext.image.base64}`,
-        String(this.aiCanvasContext.image.path || "").split("/").pop() || "图片",
-      );
-    }
-    this.scrollAiMessages();
   }
 
   renderAiQuickOptions(list) {
