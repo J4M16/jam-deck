@@ -14516,8 +14516,15 @@ class JamDeckPlugin extends Plugin {
         action,
       });
       if (!response || response.accepted !== true) throw Object.assign(new Error("media command rejected"), { code: "COMMAND_REJECTED" });
-      window.setTimeout(() => void this.pollMusicMedia(true), 220);
-      window.setTimeout(() => void this.pollMusicMedia(true), 900);
+      // 确认轮询：仅在 pending 仍是本次请求时才 poll，避免提前确认后的幽灵回调。
+      const confirmPoll = (delay) => {
+        window.setTimeout(() => {
+          if (!this.musicPending || this.musicPending.id !== pending.id) return;
+          void this.pollMusicMedia(true);
+        }, delay);
+      };
+      confirmPoll(220);
+      confirmPoll(900);
       window.setTimeout(() => {
         if (!this.musicPending || this.musicPending.id !== pending.id) return;
         this.musicPending = null;
