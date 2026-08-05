@@ -1400,14 +1400,22 @@ assert(folderControllerSource.includes('surface.querySelectorAll("script, iframe
 assert(folderControllerSource.includes('nodeEl.addClass("is-jam-deck-folder-proxy-hidden")'), "collapsed folders must yield native nodes to owned proxy presentation");
 assert(!folderControllerSource.includes('nodeEl.style.zIndex =') && !folderControllerSource.includes('nodeEl.style.position ='), "folder presentation must not overwrite native node stacking styles");
 
-// Folder schema and runtime contracts stay deliberately separate: the eight
-// portable fields are persisted on the anchor Canvas node, while anchorNodeId,
-// transitions, keyed DOM views and focus requests remain runtime-only.
+// Folder schema and runtime contracts stay deliberately separate: the portable
+// fields are persisted on the anchor Canvas node, while anchorNodeId,
+// transitions, keyed DOM views and focus requests remain runtime-only.  Schema
+// v1 gained five optional native-group fields (native/label/nativeGroupId/
+// positions/stacked) that legacy folders simply omit.
 assert.deepStrictEqual(
   Object.keys(parsedFolder).filter((key) => key !== "version").sort(),
-  ["anchorId", "collapsed", "color", "id", "layoutMode", "memberIds", "representativeColumns", "representativeIds"].sort(),
-  "schema v1 must keep exactly eight portable folder fields besides version",
+  ["anchorId", "collapsed", "color", "id", "layoutMode", "memberIds", "native", "label", "nativeGroupId", "positions", "stacked", "hiddenEdges", "representativeColumns", "representativeIds"].sort(),
+  "schema v1 must keep exactly fourteen portable folder fields besides version",
 );
+assert.strictEqual(parsedFolder.native, false, "legacy folders must default to the non-native preview mode");
+assert.strictEqual(parsedFolder.label, "文件夹", "legacy folders must default to the 文件夹 label");
+assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", native: true, label: "参考", positions: { n: { x: 1, y: 2, width: 100, height: 80 } }, stacked: { n: { x: 5, y: 6, width: 40, height: 30 } } } } }).label, "参考", "native folder labels must survive schema parsing");
+assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", native: true } } }).native, true, "native flag must survive schema parsing");
+assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", positions: { n: { x: 1, y: 2, width: 100, height: 80 } } } } }).positions.n.width, 100, "folder expanded positions must parse authored member rectangles");
+assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", stacked: { n: { x: 1, y: 2, width: 0, height: 0 } } } } }).stacked, null, "invalid stacked rectangles must be dropped");
 assert(folderControllerSource.includes("anchorNodeId"), "folder runtime groups must expose an anchorNodeId alias");
 for (const state of ["collapsed", "opening", "expanded", "closing", "destroyed"]) {
   assert(folderControllerSource.includes(`"${state}"`), `folder runtime must model the ${state} lifecycle state`);
@@ -1442,6 +1450,9 @@ assert(focusMethodStart >= 0 && focusMethodEnd > focusMethodStart, "folder focus
 assert(focusMethodSource.includes("toggleFolderPreview(group)"), "folder focus must use the same transient all-member preview as shell activation");
 assert(!focusMethodSource.includes("mutateNodes("), "focus must never mutate Canvas node data");
 assert(folderControllerSource.includes('Object.prototype.hasOwnProperty.call(overrides, "collapsed")') && folderControllerSource.includes("return this.toggleFolderPreview(group)"), "persisted expand requests must be redirected to the transient preview path");
+const previewFrontStart = folderControllerSource.indexOf("animateFolderPreviewFront(");
+const previewFrontSource = folderControllerSource.slice(previewFrontStart, previewFrontStart + 2600);
+assert(previewFrontSource.includes('fill: "both"') && previewFrontSource.includes("latest.animation.cancel"), "preview flap WAAPI must cancel its fill:both animation on finish so CSS hover motion is never shadowed");
 const activeReconcileStart = folderControllerSource.lastIndexOf("  reconcile()");
 const activeReconcileEnd = folderControllerSource.indexOf("\n  destroy()", activeReconcileStart);
 const reconcileSource = folderControllerSource.slice(activeReconcileStart, activeReconcileEnd);
@@ -2073,6 +2084,19 @@ assert.strictEqual(folderDomClickCount, 1, "folder root click must retain the le
 assert.strictEqual(folderDomView.controls.children.length, 2, "folder hover toolbar must expose color and ungroup actions");
 assert.strictEqual(folderDomView.controls.children[0], folderDomView.color, "folder toolbar keyboard order must start with color");
 assert(styleSource.includes("perspective(420px) rotateX(-30deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must hinge on the bottom edge and raise the top edge toward the viewer");
+assert(styleSource.includes(".canvas-node-group") && styleSource.includes("visibility: hidden !important"), "Jam Deck must keep native group frames data-only (shell is the only visible grouping surface)");
+assert(folderControllerSource.includes("JAM_DECK_NATIVE_GROUP_BASE_HEIGHT"), "native group frame must use the explicit 200×180 baseline");
+assert(folderControllerSource.includes('data.type === "group"') && !folderControllerSource.includes('nodeType === "group"'), "native group lookup must match by id + serialized type because 1.13 minifies nodeType");
+assert(folderControllerSource.includes("nativeExpandTargets") === false && folderControllerSource.includes("expandNativeFolder") === false && folderControllerSource.includes("collapseNativeFolder") === false, "native folders must not un-bury real members; the preview is the only expand path");
+assert(folderControllerSource.includes("hiddenEdges") && folderControllerSource.includes("edgeChanges"), "native folders must park member edges into the payload instead of leaving phantom connectors");
+assert(folderControllerSource.includes("nativeFolderShellBounds(group)") && folderControllerSource.includes("findDropTarget(source, groups)"), "native drop targeting must judge collapsed folders against the visible shell bounds");
+assert(folderControllerSource.includes("centerInside") && folderControllerSource.includes("rect.width / 2"), "collapsed folder drop must also hit when the dragged centre lands inside the shell (wide/short images cap at 0.5 area ratio)");
+assert(folderControllerSource.includes("(anchorStacked.width - width) / 2"), "joining a collapsed folder must fold the member onto the anchor slot while preserving its own width/height (no anchor-size crop)");
+assert(styleSource.includes("object-fit: contain !important") && !styleSource.includes("object-fit: cover !important"), "folder shell thumbnails must show the full frame (contain) instead of cropping to the slot aspect (cover)");
+assert(styleSource.includes(":has(.jam-deck-canvas-folder:is(:hover, :focus-within)) .canvas-node-connection-point"), "hovering a folder shell must suppress every canvas connection point (folded members keep oversized rects at the anchor)");
+assert(folderControllerSource.includes("patchNodeInteractionLayer") && folderControllerSource.includes("nodeInteractionLayer") && folderControllerSource.includes("isFolderOwnedNode"), "the interaction layer must be patched so folder-owned nodes never become its target (Obsidian renders connection points in a single overlay, not inside nodes)");
+assert(folderControllerSource.includes("folderGroupId"), "native group node data must carry a self-describing jamdeck marker for folder-owned detection");
+assert(pluginSource.includes("getStackItems(false).filter((item) => item.id !== currentItem.id)"), "legacy auto-snap must exclude explicit folder members from its stack candidates");
 assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar keyboard order must end with ungroup");
 let folderDomUngroupCalls = 0;
 folderDomController.ungroup = () => { folderDomUngroupCalls += 1; };

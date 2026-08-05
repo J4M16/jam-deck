@@ -1,5 +1,56 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-05 — 0.28.9 追加：矮图拖不进文件夹（旧堆叠隔离 + 中心点命中）
+
+- Jam 反馈：拖高度较矮的图到文件夹，没进文件夹，反而变小叠在上面。
+- **根因 ①（旧堆叠没隔离）**：`attemptAutoSnap`（旧图片堆叠自动吸附）候选用 `getStackItems()`（默认 `includeExplicitFolders=true`）——埋在锚点、互相重叠的文件夹成员被 `jamDeckChooseCanvasStackTarget` 认成旧堆叠集群，触发 normalize（缩小）+ snap（叠上）。修复：候选改 `getStackItems(false)`，旧堆叠永不触碰文件夹成员。reconcile 的集群构建本就用 `getStackItems(false)`，此次补齐 auto-snap 这个漏网入口。
+- **根因 ②（矮图特有）**：`findDropTarget` 折叠文件夹判定 =  dragged∩shell ÷ min（面积）。壳体 200×180；宽矮图（如 400×60，面积 24000 < 36000）交集最多 200×60=12000，ratio 卡死 0.5，`> JAM_DECK_STACK_OVERLAP_THRESHOLD(0.5)` 永远 false → `findDropTarget` 返回 null → 不加入 → 之后旧 auto-snap 接手缩小叠上。修复：加图标式拖放语义——拖拽中心点落进壳体即 ratio=1。
+- 时序补充：folder controller `finishDrop`（setTimeout 0）先于 stack controller `awaitStableDragRect`（3 稳定帧）执行，所以 join 成功后 auto-snap 会因 folderId 检查跳过——两条修复任一条都能消除表象，①是治本（隔离），②是修矮图阈值。
+- 断言 +2：`pluginSource` 含 `getStackItems(false).filter(...)`（auto-snap 排除文件夹成员）；`folderControllerSource` 含 `centerInside`。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-05 — 0.28.9 hover 翻动动画修复（fill:both 残留锁死）
+
+- Jam 反馈：hover 态文件夹翻动动画没了。
+- 运行时取证（focus 触发 `:focus-within` + 读 computed）：front 的 computed transform 是 `matrix3d(...,0,0,1,-0.00384615,...)` = `perspective(260px)` 纯投影，CSS hover 规则（3263 行 `rotateX(-30deg)`，specificity 更高）完全没生效。
+- **根因**：`animateFolderPreviewFront`（main.js）的 WAAPI `front.animate([...], {fill:"both"})` 动画结束后**从不 cancel**——fill:"both" 的持久效果优先级高于 CSS 规则，把 front 锁死在关闭动画终点 `perspective(260px) rotateX(0deg)`。preview 打开又关闭一次后，hover 翻动永久失效。`clearFolderPreviewRuntime` 有 cancel 但正常 finish 路径没走它。
+- 修复：`finish()` 里先 `latest.animation.cancel()`（对已完成的动画 cancel 无害）再置空，front 回到 CSS 值，hover 规则重新可应用。+1 断言（previewFrontSource 含 `fill: "both"` + `latest.animation.cancel`；注意切片长度 1700 不够覆盖 finish，用 2600）。
+- 版本 0.28.9，deploy + plugin:reload 生效。⚠️ 验证注意：plugin reload 会 detach 插件视图，Jam 需重新打开工作台；工作台画布组件为空时无 folder 可验，端到端 hover 需 Jam 在真实画布确认。
+- **追加（11:40，Jam 反馈"堆叠文件后文件夹周围有个分组，区域比文件夹视觉大太多、不贴靠"）**：原生 group node 的 bbox 此前 = 成员堆叠矩形的并集（成员可保留大尺寸 → 分组框巨大，看起来"为什么有分组"）。新增 `nativeFolderShellBounds()`：anchor 堆叠中心 ±100/75 的 200×150 设计基准（与壳体 world rect 同源，含 fallback）。编组创建 / `collapseNativeFolder` / `renameNativeFolder` 折叠态三处 group bbox 统一用它；`expandNativeFolder` 保持原位成员包围盒（展开态囊括全部可见成员，合理的大框）。已 deploy + reload（备份 `.jam-deck-backup-20260805-113923-6baf8fcc`）。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-05 — 0.28.8 文件夹：缩放露出修复 + 原生 Canvas 分组接入
+
+- Jam 三个反馈：(1) 重置缩放后折叠内容自己露出来（没点文件夹）；(2) 折叠成员连线端点仍可交互（0.28.6 修了选中范围但漏了 connection points）；(3) 期望新编组 = 原生 canvas 分组，折叠时无连接点/选中交互，点开释放，必须通过关闭按钮退出。
+- 侦察：Obsidian 1.13.4。原生 group = `nodes` 里的 `type:'group'` 条目（不是顶层 `groups` 数组）；`canvas.createGroupNode({pos,size,label,save:false})` 创建后 `canvas.getData()` 即包含该条目（`canvas.nodes` Map 暂不含但 `getData` 序列化已含），所以 `mutateNodes` 一次原子事务可一并提交成员 + group；`canvas.removeNode(group)` + `view.requestSave()` 删除。`getNativeGroupCapability()` 运行时 gate（缺能力时自动回退老 preview）。
+- 问题 1 修复：`applyFolderRuntimeNodes` 的 `hide` 去掉 `view.safe` 与 `view.shell.hidden` 依赖 → 折叠完全由 `group.collapsed` 驱动；`updateFolderView` 的 `shell.hidden` 只随 `state==="expanded"` 翻转；reconcile 里 `!view.safe` 不再执行 `restoreFolderOwnedNodes`，仅一次性告警。`styles.css` 给 `.canvas-node.is-jam-deck-folder-member:is(.is-jam-deck-folder-collapsed, .is-opening, .is-closing, .is-transitioning, .is-jam-deck-folder-transitioning) .canvas-node-connection-point` 加 `pointer-events:none !important; opacity:0 !important`（问题 2）。
+- 问题 3 改造：
+  - **Schema v1 增字段**（老数据全部缺省，`native` 默认 false 走老 preview）：`jamDeckCanvasFolderRects` 解析 rect 字典；`jamDeckCanvasFolderSchema` 读出 `native/label/nativeGroupId/positions/stacked`；`folderRecord` 通过 overrides 写回；`collectGroups` 初始化 + 锚点更新分支同步。
+  - **原生折叠/展开核心**（CanvasFolderController 新增）：`getNativeGroupCapability` / `isNativeFolder` / `nativeGroupNode` / `nativeFolderBounds` / `nativeFolderGroupNodeData` / `nativeFolderRecord` / `captureNativeMemberScreenRects` / `animateNativeFolderTransition`（WAAPI FLIP + `is-jam-deck-folder-transitioning` 禁交互）/ `expandNativeFolder` / `collapseNativeFolder` / `renameNativeFolder`。
+  - **编组入口 `createFolder`**：编组前捕获 `positions`（成员原始矩形），`placed` 算后构建 `stacked`；`canvas.createGroupNode({save:false})` 拿到 `nativeGroupId`；folder record 写 `native/label/nativeGroupId/positions/stacked`；`mutateNodes` 一次性提交（成员堆叠坐标 + anchor payload + group node 数据）。能力缺失时 `nativeGroupId=""` → 老 preview 路径（优雅降级）。
+  - **交互分流**：`toggleFolderPreview` native 分支 → expand/collapse；`onDocumentKeydown` Escape 拦截 native 展开态 → `collapseNativeFolder`（capture 阶段 `stopImmediatePropagation` 优先于 Obsidian）；`onClick` 拦截 native 展开态的空白点击（仅按钮可点）；`finishFolderShellDrag` 整组拖动同步 group bbox；`ungroup` native 分支恢复 positions + `canvas.removeNode` + `view.requestSave`。
+  - **壳体 UI**：`createFolderHeader` 新增 `view.close`（chevron-up，收起按钮，native 展开态显示）+ label dblclick 弹 `window.prompt` 重命名（调 `renameNativeFolder`）；`updateFolderView` 给 shell 加 `is-native-folder` class，native 展开态改 position（bounds 顶部 200×40 浮条，expandedBounds 顶部居中）、`shell.hidden = expanded && !nativeExpanded`、`view.label` 文本同步 `group.label`、`view.close` display 切换。
+  - **`reconcile`** 的 `collapsed:true` 强制改为 `collectedGroup.native ? !!collectedGroup.collapsed : true`——native 模式 collapsed 真实持久化（展开 = 成员回原位，重开 Obsidian 保持）。
+  - **CSS**：`.jam-deck-canvas-folder.is-expanded.is-native-folder` 控制条样式（隐藏 backboard/representatives/front，header 全高 flex 横排，controls `opacity:1/visibility:visible`，label ellipsis，count 隐藏）；加 `pointer-events:auto !important` 覆盖壳体默认 `none`。
+  - **边界 fallback**：`collapseNativeFolder` 对缺 `stacked` 矩形的新加入成员 fallback 到 anchor 的 stacked rect（不留在原位露出）；`expandNativeFolder` 缺 `positions` 时用当前 data 矩形。
+- 测试：`tests/jam-deck-test.js` schema 字段断言由 8 改 13 + native/label/positions 解析断言 + controls 3 按钮顺序断言（close/color/ungroup）。`npm run verify` 全绿。
+- 部署：版本 0.28.8，`npm run deploy` 成功，data.json 保持 `F95D651E…B61B440DDFD0614B`，备份 `.jam-deck-backup-20260805-111300-ca1dc25c`。`plugin:reload id=jam-deck` 热重载。
+- 实机验证：Obsidian 1.13.4 (installer 1.12.7) 启动正常（CLI `Obsidian.com` 拉起 GUI）。JamDeck 工作台画布组件当前为「未打开文件」空状态，无法自动跑编组端到端；交互细节（壳体点击展开 / 关闭按钮 + Escape 收起 / 缩放后折叠不露出 / 折叠成员连接点不可交互 / 原生 group 视觉囊括）需 Jam 在挂载图片节点的画布上手动验收。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
+## 2026-08-05 — 0.28.7 屎山清理（大型重构）
+
+- Jam 要求整体 review 并清理屎山代码。先 git 备份（0.28.6 快照）再分批处理，每批 verify + 提交。
+- **CSS final cascade 合并（根因）**：styles.css 68 个选择器重复定义（同名规则 2-6 次、末尾覆盖前面）是 hover 等样式修不好的根因（DeepSeek 改前面规则被末尾覆盖）。用 python 脚本解析所有顶层规则，对 25 组完全相同的选择器按"后定义覆盖前定义、保留独有属性"合并为单一定义，删除前面重复，文件 3300+ → 3235 行。更新 3 条断言（final cascade 结构验证 → 单一定义验证）。工作台视觉验证无破坏。
+- **拆分 5 个超长函数**：TaskDetailModal.onOpen(200行)→renderTaskFields/Images/Actions；renderAiChat(172行)→Header/Body/InputRow；createFolderView(155行)→Backboard/Layers/Header；renderMusicPlayer(144行)→Hero/Transport；showPreview(137行)→buildPreviewVisuals/createPreviewCard。全部行为不变。
+- **controlMusic 确认轮询**：220/900ms 裸 setTimeout 加 pending id 检查，消除提前确认后的幽灵回调。
+- **rAF helper**：抽取 jamDeckRequestFrame 消除 3 处 rAF fallback 重复。
+- **魔法数字常量化**：JAM_DECK_STACK_PREVIEW_CLEANUP_MS、JAM_DECK_FOLDER_FALLBACK_WIDTH/HEIGHT_RATIO。
+- **legacy 数据迁移**：日记 v1→v2（upgradeLegacyTaskInJournal）保留 + TODO（删除会放弃老日记迁移，确认发版周期后再删）。
+- 提交序列：CSS 合并(40bbb86) → 拆 TaskDetailModal(b9dfc9b) → renderAiChat(eda9fd7) → createFolderView(d5bee39) → renderMusicPlayer(737c76e) → showPreview(d24b0c7) → controlMusic(46a4342) → rAF helper(adb362f) → 魔法数字(553956e) → legacy 标注(5ccd388)。
+- 回归：`npm run verify` 全绿。部署 0.28.7，备份 `.jam-deck-backup-20260805-095724-1532dca8`。
+- 处理模型签名：具体模型标识不可见（主代理，WorkBuddy）
+
 ## 2026-08-05 — 0.28.6 色板更新 + 前片透视 + 折叠选中范围
 
 - Jam 反馈：①中灰换天蓝，六色饱和度各 +30% 独立调整；②前片"固定底边、翻顶边、顶边宽度加宽"；③图片成文件夹后选中范围仍巨大，需缩小到壳体附近。

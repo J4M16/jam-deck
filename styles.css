@@ -881,7 +881,10 @@
   margin: 0 !important;
   border: 0 !important;
   border-radius: inherit !important;
-  object-fit: cover !important;
+  /* contain, not cover: an extreme-aspect member (e.g. a wide/short
+     texture) must show its full frame in the shell thumbnail instead of
+     being cropped to the slot's aspect ratio. */
+  object-fit: contain !important;
   overflow: hidden !important;
   pointer-events: none !important;
 }
@@ -1547,6 +1550,26 @@
 .jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-hidden-member:not(.is-transitioning):not(.is-jam-deck-folder-transitioning) {
   visibility: hidden !important;
   pointer-events: none !important;
+}
+
+/* Folded members never expose Canvas connection points: pointer-events on the
+   node does not stop events reaching the connection-point descendants. */
+.jam-deck-canvas-leaf .canvas-node.is-jam-deck-folder-member:is(.is-jam-deck-folder-collapsed, .is-jam-deck-folder-proxy-hidden, .is-opening, .is-closing, .is-transitioning, .is-jam-deck-folder-transitioning) .canvas-node-connection-point {
+  pointer-events: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* Hovering a folder shell must not surface any connection points.  Folded
+   members keep their authored (possibly oversized) rects at the anchor, so
+   Obsidian can geometrically mark them as hovered and render their points
+   even though the nodes are hidden — and the points may live outside the
+   node subtree.  Belt-and-suspenders: suppress every connection point while
+   a folder is hovered/focused. */
+.jam-deck-canvas-leaf:has(.jam-deck-canvas-folder:is(:hover, :focus-within)) .canvas-node-connection-point {
+  pointer-events: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
 }
 
 
@@ -3059,6 +3082,86 @@
 .jam-deck-canvas-leaf .jam-deck-canvas-folder[hidden],
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-layer-unsafe {
   display: none !important;
+}
+/* Native Canvas group frames are data-only in Jam Deck: the authored folder
+   shell is the only visible grouping surface, so hide the group box/label
+   (the group node still exists in Canvas data for native parity).  Obsidian
+   1.13 renders groups as canvas-node canvas-node-group, not .canvas-group. */
+.jam-deck-canvas-leaf .canvas-node-group {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+/* Native expanded: the shell becomes a compact floating control bar (close,
+   color, ungroup) anchored above the expanded bounds. */
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder {
+  display: block !important;
+  background: color-mix(in srgb, var(--jd-folder-panel) 92%, #fff 8%);
+  border: 1px solid var(--jd-folder-panel-edge);
+  border-radius: 12px;
+  box-shadow: var(--jd-folder-shadow);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  pointer-events: auto !important;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-backboard,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-representatives,
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-front {
+  display: none !important;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-header {
+  z-index: 15 !important;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 6px;
+  pointer-events: none;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-meta {
+  position: static !important;
+  top: auto !important;
+  bottom: auto !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  pointer-events: auto;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jd-folder-panel-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 96px;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-count {
+  display: none;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-controls {
+  position: static !important;
+  top: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  right: auto !important;
+  display: inline-flex;
+  gap: 2px;
+  height: 24px;
+  padding: 2px;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto !important;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-close {
+  display: grid !important;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-backboard {
   z-index: 0 !important;

@@ -1,5 +1,46 @@
 ﻿# Changelog
 
+## 0.28.9 — 2026-08-05
+
+- **矮图拖不进文件夹 + 被旧堆叠缩小（追加）**：双重根因。①旧堆叠 `attemptAutoSnap` 的候选用 `getStackItems()`（默认含文件夹成员）——埋在锚点、互相重叠的文件夹成员被当成旧堆叠集群，拖图上去时旧逻辑先把图 `jamDeckNormalizeCanvasStackImage` 缩小再吸附叠上，文件夹加入逻辑被旁路。修复：候选改 `getStackItems(false)`，旧堆叠永不触碰文件夹成员。②`findDropTarget` 对折叠文件夹用 200×180 壳体面积比（交集÷较小面积），宽矮图（如 400×60）交集被壳体 200 宽卡死在 0.5，`> 0.5` 阈值永远达不到。修复：加图标式拖放语义——拖拽中心点落进壳体即命中（ratio=1），与宽高比无关。
+- **修复 hover 翻动动画被 WAAPI fill 残留锁死**：`animateFolderPreviewFront` 用 `fill:"both"` 播放前片翻开/合拢动画，动画结束后从未 cancel——WAAPI 的填充效果会持续覆盖 CSS transform，把 front 钉在 `perspective(260px) rotateX(0deg)`，导致 `.jam-deck-canvas-folder:is(:hover, :focus-within) > .front` 的 `rotateX(-30deg)` 规则永远改不动它（preview 打开又关闭一次后 hover 翻动就永久消失）。修复：`finish()` 里对 `runtime.animation` 执行 `cancel()` 再置空，让 front 回到 CSS 值。
+- **折叠态原生分组框贴合壳体**：原生 group node 的 bbox 此前取成员堆叠矩形的并集（成员可保留大尺寸），导致分组框比 200×150 壳体视觉大太多、不贴靠。新增 `nativeFolderShellBounds()`（anchor 堆叠中心 ± 100/75 的 200×150 设计基准），折叠态与编组创建的 group bbox 统一用它；展开态仍用原位成员包围盒（囊括全部可见成员）。`renameNativeFolder` 折叠态同步改用 shell bounds。
+- **原生分组框数据化（追加）**：group bbox 改 200×180（新常量 `JAM_DECK_NATIVE_GROUP_BASE_HEIGHT`）；`styles.css` 隐藏 `.jam-deck-canvas-leaf .canvas-group`（visibility:hidden + pointer-events:none）——JamDeck 工作台里原生分组框/标签不可见，只保留 JamDeck 壳体视觉；group 节点仍存在于 Canvas 数据（原生 canvas 打开时仍是分组囊括状态）。
+- **修复点击不展开 + group 框选择器（追加）**：
+  - 分组框隐藏选择器修正：Obsidian 1.13 的 group 渲染 class 是 `.canvas-node canvas-node-group`（不是 `.canvas-group`，后者是工具栏控件组）——`.canvas-node-group` 才命中。
+  - 点击不展开根因：`nativeGroupNode` 用 `node.nodeType === "group"` 查找，但 1.13 压缩后 GroupNode 的 `nodeType` 是 undefined（构造函数单字母），group 永远找不到 → `expandNativeFolder` 直接 return false。改为按稳定 `id` 匹配 + `getData().type === "group"` 确认（序列化 type 才是 `"group"`）。`collapseNativeFolder`/`renameNativeFolder`/`ungroup`/整组拖动同步一并修复。
+- **展开自动排开（追加，千问审查合入）**：native 展开此前只回到 `positions`（编组前坐标），编组前就重叠的卡片展开后依旧叠着（`.canvas` 文件取证：两成员 x 差 37px）。新增 `nativeExpandTargets()`：positions 成员两两 IoU>0.5 **或中心点在对方矩形内**（大小悬殊时 IoU 不可靠）判定重叠 → 用 `jamDeckCanvasFolderGridLayout` 排全尺寸网格（columns 2/3、gap 24、cellHeight=maxHeight、bounds 原位中心对齐且保证不缩小），展开目标写回 payload.positions 持久化；不重叠则尊重用户手动布局。单成员/缺失/rect 不全/grid 失败一律 fallback 原 positions。折叠态连接点确认已隐藏（DOM 取证）；展开态端点保留（释放交互），排开后自然分散。
+- **真打包连线 / 堆叠触发 / 控制条可点（追加，三问题一次修）**：
+  - **真打包**：折叠态成员 `visibility:hidden` 不够——连线（edges）仍按数据坐标指向埋点（DOM 取证：canvas 有 6 条 SVG edge，壳体上下出现"连线端点"）。`collapseNativeFolder` 现在把指向成员的 edge 从 `data.edges` 移除、完整数据存 `payload.hiddenEdges`，展开/取消编组恢复；`mutateNodes` 扩展 `edgeChanges` 参数，同一原子事务提交，回滚含 edges。schema 增 `hiddenEdges` 字段。
+  - **堆叠触发**：native 折叠态成员埋在锚点，`findDropTarget` 此前用数据层堆叠区判定 50% 重叠（区域比壳体视觉大且可能偏移）→ 拖到壳体上常不触发。改为用 `nativeFolderShellBounds`（壳体视觉 200×180）判定；`updateGroupMembership` 加 native 分支，新成员补 stacked（锚点矩形）+ positions（当前坐标），折叠态加入即移到锚点堆叠。
+  - **控制条可点**：展开态控制条挂在 canvas world 层，缩小到 0.4x 时只有 79×16px、close 按钮 8px → 点不到，导致"没有方法折叠回"。给壳体加 `transform: scale(1/canvas.scale)`（origin 底部中心）反向抵消 world 缩放 → 屏幕尺寸恒定 200×40px。
+- 回归：`tests/jam-deck-test.js` 新增断言锁定「preview flap WAAPI 必须在 finish 时 cancel 其 fill:both 动画」。
+
+## 0.28.8 — 2026-08-05
+
+- **文件夹缩放露出（修复 1/3）**：`CanvasFolderController.reconcile` 之前在 `validateFolderToolbarLayer` 返回 unsafe 时执行 `restoreFolderOwnedNodes()` 撤销折叠隐藏——重置缩放瞬间触发壳体与工具栏重叠采样异常 → safe=false → 成员暴露。折叠隐藏改为完全由 `group.collapsed` 驱动（`applyFolderRuntimeNodes` 的 `hide` 条件去掉 `view.safe` / `view.shell.hidden`），`updateFolderView` 的 `shell.hidden` 只随展开态翻转；unsafe 时仅告警，不再撤销折叠。**`styles.css` 折叠态成员连接点**新增 `.canvas-node-connection-point { pointer-events:none; opacity:0 }`（折叠/过渡态统一隐藏，展开态恢复）——修复 0.28.6 漏修的连线端点交互。
+- **新编组接入原生 Canvas 分组（修复 3/3）**：
+  - **Schema v1 增字段**：`native`/`label`/`nativeGroupId`/`positions`/`stacked`（可选，老数据全部缺省）。`jamDeckCanvasFolderSchema` + `folderRecord` + `collectGroups` 同步。
+  - **核心数据流**：native 折叠 = 成员坐标移到 `stacked` 锚点堆叠矩形 + 原生 `group`（type:'group'）bbox 覆盖堆叠区 + `payload.collapsed=true`；展开 = 坐标回到 `positions` 原位 + bbox 扩到原位包围盒 + `collapsed=false`。通过一次 `mutateNodes` 原子事务提交（Obsidian 1.13 原生 group 是 `nodes` 里的 `type:'group'` 条目，与成员一并 setData 即可持久化、共享 undo）。
+  - **Obsidian API 用法**（运行时探测确认）：`canvas.createGroupNode({pos,size,label,save:false})` 创建实例并进入 `getData()`；`canvas.removeNode(group)` 删除；`group node data = {id,x,y,width,height,type:'group',label}`。`getNativeGroupCapability()` 运行时 gate，能力缺失时自动回退老 preview。
+  - **交互语义**：折叠态壳体点击 = 展开（成员释放，可连线/可选中/可拖动，原生 group bbox 变大）；退出 = 壳体控制条上的「收起」按钮（chevron-up，`view.close`）或 Escape（document keydown 拦截），**点空白处不再自动收起**。`onClick` 拦截 native 展开态的空白点击避免误关。
+  - **壳体 header 改版**：label span 默认显示 `folder.label`（"文件夹"），native 模式双击 label 弹 `window.prompt` 重命名（同步更新 payload + 原生 group node label）；controls 新增 close 按钮，native 展开态壳体压缩为 200×40 浮条（`.is-expanded.is-native-folder` CSS 控制条样式）浮在 expanded bounds 顶部。
+  - **老数据兼容**：0.28.x 旧文件夹（`native` 缺省）继续走 preview 路径，不升级；仅新编组走 native。`reconcile` 的 `collapsed:true` 强制改为 `native ? payload.collapsed : true`。
+  - **几何边界**：新加入成员可能没有 stacked 矩形（`updateGroupMembership` 路径），折叠时 fallback 到 anchor 的 stacked rect（不会留在原位露出）。`finishFolderShellDrag` 整组拖动同步 group bbox；`ungroup` native 分支恢复 positions + removeNode + requestSave。
+  - **FLIP 动画**：展开/折叠走真节点 WAAPI 过渡（`animateNativeFolderTransition`，从 mutateNodes 前的 screen rect 飞到落定 CSS transform），沿用现有 `transformWithDelta` + `is-jam-deck-folder-transitioning` class。reduced-motion 跳过动画。
+- **测试断言更新**：`tests/jam-deck-test.js` schema 13 字段断言 + native/label/positions 解析 + 控件 close 顺序断言。`npm run verify` 全绿。
+
+## 0.28.7 — 2026-08-05
+
+- **屎山清理（大型重构）**：
+  - **CSS final cascade 合并**：styles.css 中 25 组完全重复选择器（同名规则 2-6 次定义、末尾覆盖前面——hover 等样式修不好的根因）合并为单一定义，删除前面重复，文件 3300+ → 3235 行。
+  - **拆分 5 个超长函数**：TaskDetailModal.onOpen(200行)、renderAiChat(172行)、createFolderView(155行)、renderMusicPlayer(144行)、showPreview(137行)，按区块拆为子方法，行为不变。
+  - **controlMusic 确认轮询**：裸 setTimeout 链加 pending id 检查，消除提前确认后的幽灵回调。
+  - **rAF helper**：抽取 `jamDeckRequestFrame` 消除 3 处 rAF fallback 重复。
+  - **魔法数字常量化**：JAM_DECK_STACK_PREVIEW_CLEANUP_MS、JAM_DECK_FOLDER_FALLBACK_WIDTH/HEIGHT_RATIO。
+  - **legacy 数据迁移**：日记 v1→v2 迁移保留并加 TODO（删除会放弃老日记迁移，确认发版周期后再删）。
+- 行为不变，全部重构经 `npm run verify` 验证，工作台视觉无破坏。
+
 ## 0.28.6 — 2026-08-05
 
 - **文件夹色板更新**：中灰 `#A9A9A9` 换成**天蓝 `#5E9BD6`**；其余五色（绿/紫/黄/粉）**饱和度各自 +30%**（HSL 独立换算）：`#9DBB8E→#9BC287`、`#C69CB8→#CC96BA`、`#D9B36C→#E9B85C`、`#D58C78→#E3846A`。
