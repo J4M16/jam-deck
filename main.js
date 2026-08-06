@@ -730,13 +730,13 @@ const DEFAULT_SETTINGS = {
   lifeArchivePath: LIFE_DAILY_PATH,    // 文件模式：单文件路径
   lifeArchiveDir: "Life/生活日记",     // 目录模式：目录路径
   widgets: [
-    { id: "clock-1", type: "clock", x: 1, y: 1, w: 13, h: 8, config: {} },
-    { id: "clipboard-1", type: "clipboard", x: 14, y: 1, w: 13, h: 18, config: {} },
-    { id: "tasks-1", type: "tasks", x: 27, y: 1, w: 14, h: 14, config: {} },
-    { id: "calendar-1", type: "calendar", x: 1, y: 9, w: 13, h: 16, config: {} },
-    { id: "canvas-1", type: "canvas", x: 27, y: 15, w: 14, h: 10, config: {} },
-    { id: "browser-1", type: "browser", x: 14, y: 19, w: 13, h: 14, config: { url: "" } },
-    { id: "launcher-1", type: "launcher", x: 27, y: 25, w: 14, h: 10, config: { shortcuts: [] } },
+    { id: "clock-1", type: "clock", x: 1, y: 1, w: 5, h: 6, config: {} },
+    { id: "music-1", type: "music", x: 6, y: 1, w: 5, h: 6, config: { mediaSourceId: "", musicSchemaVersion: 1 } },
+    { id: "launcher-1", type: "launcher", x: 11, y: 1, w: 30, h: 6, config: { shortcuts: [] } },
+    { id: "tasks-1", type: "tasks", x: 1, y: 7, w: 5, h: 10, config: {} },
+    { id: "canvas-embed-1", type: "canvas-embed", x: 6, y: 7, w: 35, h: 30, config: { schemaVersion: 1 } },
+    { id: "calendar-1", type: "calendar", x: 1, y: 17, w: 5, h: 9, config: {} },
+    { id: "clipboard-1", type: "clipboard", x: 1, y: 26, w: 5, h: 11, config: {} },
   ],
   clipboardItems: [],
   deckTasks: [],
