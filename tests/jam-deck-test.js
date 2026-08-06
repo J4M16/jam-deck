@@ -1265,13 +1265,18 @@ assert.strictEqual(parsedFolder.collapsed, false, "folder booleans must normaliz
 assert.strictEqual(parsedFolder.color, folderGeometry.colors[0], "unknown folder colors must use the first preset");
 assert.strictEqual(
   folderGeometry.schema({ id: "legacy-blue", jamdeck: { folder: { id: "legacy", color: "#8EAFCC" } } }).color,
-  "#8EAFCC",
-  "the 0.19.0 blue-gray folder color must remain readable as legacy metadata",
+  "#F7BDB1",
+  "the 0.19.0 blue-gray folder color must migrate to the NZS4 light red preset",
+);
+assert.strictEqual(
+  folderGeometry.schema({ id: "legacy-0286", jamdeck: { folder: { id: "legacy2", color: "#DDDCDC" } } }).color,
+  "#C1C1C1",
+  "the 0.28.6 neutral folder color must migrate to the NZS4 paper gray preset",
 );
 assert.strictEqual(
   folderGeometry.schema({ id: "default-color", jamdeck: { folder: { id: "default" } } }).color,
-  "#DDDCDC",
-  "new folders must default to the neutral gray-white preset",
+  "#C1C1C1",
+  "new folders must default to the NZS4 paper gray preset",
 );
 assert.strictEqual(parsedFolder.layoutMode, "grid", "grid layout mode must survive schema parsing");
 assert.deepStrictEqual(parsedFolder.representativeIds, ["alpha", "five", "four", "overflow"], "representatives must be stable-sorted and capped at four");
@@ -1439,7 +1444,15 @@ assert(folderControllerSource.includes("JAM_DECK_CANVAS_FOLDER_COLORS.slice()") 
 assert(folderControllerSource.includes("jam-deck-canvas-folder-color-menu") && folderControllerSource.includes("jam-deck-canvas-folder-count") && folderControllerSource.includes("jam-deck-canvas-folder-label"), "folder shell DOM must expose the styled color menu and quiet metadata hierarchy");
 assert(!folderControllerSource.includes("jam-deck-canvas-folder-kicker") && !folderControllerSource.includes("jam-deck-canvas-folder-kicker-icon"), "folder shell metadata must not add a folder icon or kicker row");
 assert(folderControllerSource.includes('count.className = "jam-deck-canvas-folder-count"') && folderControllerSource.includes('label.className = "jam-deck-canvas-folder-label"'), "folder count and label must remain independent metadata spans");
-assert(folderControllerSource.includes("--jd-folder-tint-strength") && folderControllerSource.includes('=== "#DDDCDC" ? "0%" : "12%"'), "folder tint strength must distinguish the neutral default from colored presets");
+assert(folderControllerSource.includes("--jd-folder-tint-strength") && folderControllerSource.includes('=== "#C1C1C1" ? "0%" : "100%"'), "folder tint strength must distinguish the NZS4 neutral from colored presets");
+assert.deepStrictEqual(
+  folderGeometry.colors,
+  ["#C1C1C1", "#F7BDB1", "#F0C5DA", "#EDD0AE", "#BBE0AF", "#AFD0E0"],
+  "folder presets must mirror the NZS4 Figma 134:143 board solids in order",
+);
+assert(pluginSource.includes("JAM_DECK_CANVAS_FOLDER_FRONT_TINTS") && pluginSource.includes("--jd-folder-front-tint"), "folder front panels must carry the NZS4 Figma per-color tints");
+assert(styleSource.includes("var(--jd-folder-front-start) 50%, transparent"), "folder front gradient must fade from 50% alpha tint at the top to solid at the bottom");
+assert(styleSource.includes("Inter, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"), "folder label and count must use the NZS4 Inter stack");
 
 // Folder focus shares the transient preview path; it must never resurrect the
 // retired persisted expanded/collapsed mutation semantics.
@@ -1943,7 +1956,7 @@ assert(styleSource.includes("jam-deck-canvas-folder-slot") && styleSource.includ
 assert(styleSource.includes("pointer-events: none") && folderControllerSource.includes("backboard.style.pointerEvents = \"none\"") && folderControllerSource.includes("representatives.style.pointerEvents = \"none\"") && folderControllerSource.includes("front.style.pointerEvents = \"none\""), "folder decorative layers must never steal Canvas pointer events");
 assert(styleSource.includes(".jam-deck-canvas-folder:is(.is-expanded, [aria-expanded=\"true\"]):not(.is-opening):not(.is-closing)") && styleSource.includes(".jam-deck-canvas-folder-backboard") && styleSource.includes(".jam-deck-canvas-folder-front") && styleSource.includes("visibility: hidden"), "expanded folders must release the authored paper layers back to native Canvas members");
 assert(styleSource.includes("height: 66.666667%") && styleSource.includes("border-radius: 10px") && styleSource.includes("0 -4px 8px rgb(0 0 0 / 0.05)"), "folder front must preserve the Figma 2:3 geometry and soft top shadow");
-assert(styleSource.includes("backdrop-filter: blur(16px) saturate(180%)") && styleSource.includes("rgb(255 255 255 / 0.50)") && styleSource.includes("rgb(255 255 255 / 0.38)") && styleSource.includes("color-mix(in srgb, var(--jd-folder-front-start) 64%, transparent)"), "folder front must adapt the reference frosted flap material");
+assert(styleSource.includes("backdrop-filter: blur(16px) saturate(180%)") && styleSource.includes("color-mix(in srgb, var(--jd-folder-front-start) 50%, transparent)") && styleSource.includes("var(--jd-folder-front-end)"), "folder front must use the NZS4 single tint gradient over the frosted blur");
 assert(styleSource.includes("filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.10))"), "folder backboard must use a path-aware SVG drop shadow instead of a square box shadow");
 assert(styleSource.includes(".jam-deck-canvas-folder-backboard") && styleSource.includes("z-index: 0 !important") && styleSource.includes(".jam-deck-canvas-folder-representatives") && styleSource.includes("z-index: 2 !important") && styleSource.includes(".jam-deck-canvas-folder-front") && styleSource.includes("z-index: 10 !important") && styleSource.includes("z-index: 12 !important"), "folder backboard, proxies, front, and header must interleave inside one local shell context");
 assert(styleSource.includes("isolation: isolate !important") && styleSource.includes("contain: layout style !important"), "each folder shell must be an independently ordered Canvas stack unit");
@@ -1951,7 +1964,7 @@ assert(folderControllerSource.includes("onStackPreviewState") && folderControlle
 assert(pluginSource.includes("notifyFolderPreview(cluster, \"opening\"") && pluginSource.includes("notifyFolderPreview(cluster, \"closing\"") && pluginSource.includes("notifyFolderPreview(cluster, \"closed\""), "stack preview lifecycle must notify folder open, collapse, and cleanup paths");
 assert(pluginSource.includes("addEventListener(\"pointerup\", up, true)") && pluginSource.includes("removeEventListener(\"pointerup\", up, true)"), "stack pointerup handling must stay in capture phase for Canvas release races");
 assert(pluginSource.includes("previewCluster: this.previewCluster") && pluginSource.includes("press.previewCluster || this.clusterByNodeId.get(press.nodeId)"), "preview drag cancellation must restore the saved explicit folder cluster after viewport changes");
-assert(styleSource.includes("top: 76.666667%") && styleSource.includes("top: 84.666667%") && styleSource.includes("font-size: 8px") && styleSource.includes("font-size: 12px"), "folder count and label must keep the Figma vertical spacing and type sizes");
+assert(styleSource.includes("top: 73.333333%") && styleSource.includes("top: 82.666667%") && styleSource.includes("count baseline sits at y=110") && styleSource.includes("label top sits at y=124"), "folder count and label must keep the NZS4 Figma vertical spacing");
 assert(styleSource.includes("opacity: 0") && styleSource.includes("visibility: hidden") && styleSource.includes("pointer-events: none !important") && styleSource.includes(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)") && styleSource.includes("display: grid !important"), "folder hover toolbar must be inert while hidden and expose the ungroup control when shown");
 const folderControlShowIdx = styleSource.indexOf(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)");
 assert(folderControlShowIdx > 0 && styleSource.indexOf(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)") === styleSource.lastIndexOf(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)"), "folder non-color control rule must exist exactly once after the final-cascade merge");

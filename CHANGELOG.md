@@ -1,5 +1,35 @@
 ﻿# Changelog
 
+## 0.29.3 — 2026-08-06
+
+- **边缘 widget 角点无 sash handle（修 0.29.1 漏的根因）**：`jamDeckCollectLayoutSashes` 之前只把"全局 grid 右/下边界"（`x+w === rightLine` / `y+h === bottomLine`）的 widget 视为 edge，忽略了 widget 自己在网格内部的局部底/右边界（如下方无邻居的 widget bottom）。cross product 因此不会为局部边缘角点生成 xy node——以当前布局为例，canvas-embed `y+h=20` 在 col 8-40 下方无邻居、但不是全局 bottomLine=37，被漏掉，其右下角 (col 41, row 20) 永远没有 sash handle，无法从该角拉伸。修复：改为 per-widget 检测"右/下边界是否有 y/x overlap 邻居"，edge sashes 按 line 分组合并并保留各自 line 字段。回归：verify 全绿。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
+## 0.29.2 — 2026-08-06
+
+- **文件夹背叶/前叶提亮**：Jam 反馈当前文件夹颜色偏暗——背叶（backboard 底板）+15% 明度、前叶（磨砂前片）+10% 明度。实现为白混（`color-mix ... 85%/15%`、`90%/10%`）而非 HSL 明度加点：樱粉/月黄/浅红/天蓝的 HSL 明度已超 80%，直接 +15 点会漂成近白丢色相。
+  - `--jd-folder-backboard-color`：`color-mix(in srgb, var(--jd-folder-color) 85%, #fff 15%)`。
+  - `--jd-folder-front-start/end`：tint 混 10% 白。
+  - 色板圆钮（color swatch）同步按 85%/15% 提亮，选色所见即渲染所得。
+- 回归：`npm run verify` 全绿（断言锁结构不锁色值）。
+- 处理模型签名：Qwen3.8-Max（主代理，WorkBuddy）
+
+## 0.29.1 — 2026-08-06
+
+- **canvas 组件右下角拉伸手柄命中过紧**：sash handle 命中半径 18→24px。原因：canvas-embed 组件内部右下角被 Obsidian 原生 `.canvas-controls`（z-index 100）覆盖，sash 实际生效区仅在 widget 边界外侧 13px 一圈（`width:26; margin:-13 0 0 -13`），18px 半径要求鼠标必须落在 widget 外侧脱壳区，频繁脱靶。扩到 24px 给出 6px 缓冲，hover 更容易命中。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
+## 0.29.0 — 2026-08-06
+
+- **文件夹外观还原 NZS4 Figma「文件夹样式」（134:143）**：经 Figma Desktop Bridge 读取六个变体（纸灰/浅红/樱粉/月黄/草绿/天蓝）的精确属性后整体还原。
+  - **六色**：`JAM_DECK_CANVAS_FOLDER_COLORS` 换为 Figma 底板实色 `#C1C1C1 / #F7BDB1 / #F0C5DA / #EDD0AE / #BBE0AF / #AFD0E0`；面板 `--jd-folder-panel` 直接用实色（不再 90% 混白）。
+  - **前片**：改 Figma 封面语义——单层 tint 渐变（顶 50% 透明 → 底实色）叠磨砂 blur，去掉白色 screen 层与描边；tint 按色号独立注入 `--jd-folder-front-tint`（`#E7E7E7 / #FAC0C0 / #F8CECE / #FBE2BB / #CCF2C0 / #BEE1F3`）。
+  - **文字**：label 改 Inter 16px Regular 黑@0.5、count 改 10px Regular 黑@0.3，定位按 Figma y=124/y=110（top 82.67%/73.33%）。
+  - **阴影/边**：壳体阴影改 `0 4px 20px rgb(0 0 0 / 0.10)`，描边 token 透明化。
+  - **旧数据迁移**：0.19.0/0.28.6 持久化旧色经 `JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS` Map 语义映射到新六色（蓝灰/旧浅红→浅红，旧纸灰→纸灰，草绿/樱粉/月黄/天蓝按色相归位），老文件夹不静默变色。
+- 回归：新增六色锁定、front tint 注入、渐变与 Inter 字体栈断言；旧材质/旧定位断言更新为 NZS4 值；`npm run verify` 全绿。
+- 处理模型签名：Qwen3.8-Max（主代理，WorkBuddy）
+
 ## 0.28.9 — 2026-08-05
 
 - **矮图拖不进文件夹 + 被旧堆叠缩小（追加）**：双重根因。①旧堆叠 `attemptAutoSnap` 的候选用 `getStackItems()`（默认含文件夹成员）——埋在锚点、互相重叠的文件夹成员被当成旧堆叠集群，拖图上去时旧逻辑先把图 `jamDeckNormalizeCanvasStackImage` 缩小再吸附叠上，文件夹加入逻辑被旁路。修复：候选改 `getStackItems(false)`，旧堆叠永不触碰文件夹成员。②`findDropTarget` 对折叠文件夹用 200×180 壳体面积比（交集÷较小面积），宽矮图（如 400×60）交集被壳体 200 宽卡死在 0.5，`> 0.5` 阈值永远达不到。修复：加图标式拖放语义——拖拽中心点落进壳体即命中（ratio=1），与宽高比无关。

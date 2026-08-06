@@ -2483,11 +2483,31 @@ function jamDeckCanvasStackBystanderShift(rect, focus, viewport, gap = 20, influ
 // Keep this schema small and deterministic so reopening a Canvas (or undoing a
 // mutation) never depends on a runtime-only registry or a screenshot cache.
 const JAM_DECK_CANVAS_FOLDER_SCHEMA_VERSION = 1;
-const JAM_DECK_CANVAS_FOLDER_COLORS = ["#DDDCDC", "#9BC287", "#CC96BA", "#E9B85C", "#E3846A", "#5E9BD6"];
-// 0.19.0 persisted the original blue-gray as the first preset.  Continue to
-// accept it as a stable legacy value so existing folders do not silently
-// change appearance when the new neutral default is selected for new groups.
-const JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS = new Set(["#8EAFCC"]);
+// NZS4 Figma "文件夹样式" (134:143) board solids: 纸灰/浅红/樱粉/月黄/草绿/天蓝.
+const JAM_DECK_CANVAS_FOLDER_COLORS = ["#C1C1C1", "#F7BDB1", "#F0C5DA", "#EDD0AE", "#BBE0AF", "#AFD0E0"];
+// Older presets persisted in Canvas metadata map onto the closest NZS4 Figma
+// solid so existing folders keep a stable appearance: 0.19.0 blue-gray and the
+// 0.28.6 hand-tuned light red both land on 浅红; the 0.28.6 neutrals land on
+// 纸灰; sage/lilac/sand/rose/sky follow their hue.
+const JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS = new Map([
+  ["#8EAFCC", "#F7BDB1"],
+  ["#DDDCDC", "#C1C1C1"],
+  ["#9BC287", "#BBE0AF"],
+  ["#CC96BA", "#F0C5DA"],
+  ["#E9B85C", "#EDD0AE"],
+  ["#E3846A", "#F7BDB1"],
+  ["#5E9BD6", "#AFD0E0"],
+]);
+// NZS4 Figma front-panel tints (封面 gradient solid), keyed by board color:
+// each front runs top 50% alpha to bottom 100% of its tint over the blur.
+const JAM_DECK_CANVAS_FOLDER_FRONT_TINTS = new Map([
+  ["#C1C1C1", "#E7E7E7"],
+  ["#F7BDB1", "#FAC0C0"],
+  ["#F0C5DA", "#F8CECE"],
+  ["#EDD0AE", "#FBE2BB"],
+  ["#BBE0AF", "#CCF2C0"],
+  ["#AFD0E0", "#BEE1F3"],
+]);
 const JAM_DECK_CANVAS_FOLDER_MAX_REPRESENTATIVES = 4;
 const JAM_DECK_CANVAS_FOLDER_BASE_WIDTH = 200;
 const JAM_DECK_CANVAS_FOLDER_BASE_HEIGHT = 150;
@@ -2608,9 +2628,9 @@ function jamDeckCanvasFolderStableId(memberIds, salt = "") {
 
 function jamDeckCanvasFolderNormalizeColor(value) {
   const color = String(value || "").trim();
-  return JAM_DECK_CANVAS_FOLDER_COLORS.includes(color) || JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS.has(color)
-    ? color
-    : JAM_DECK_CANVAS_FOLDER_COLORS[0];
+  if (JAM_DECK_CANVAS_FOLDER_COLORS.includes(color)) return color;
+  if (JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS.has(color)) return JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS.get(color);
+  return JAM_DECK_CANVAS_FOLDER_COLORS[0];
 }
 
 // Native folders (schema additions, v1 kept): each member keeps its authored
@@ -7085,10 +7105,19 @@ class CanvasFolderController {
       ? `文件夹，${group.members.length} 个成员；单击展开，双击名称重命名`
       : `文件夹，${group.members.length} 个成员；单击展开预览`);
     view.shell.style.pointerEvents = state === "expanded" ? "none" : "auto";
-    view.shell.style.setProperty("--jd-folder-color", group.color);
+    // Legacy persisted presets resolve to their NZS4 Figma equivalents so the
+    // CSS var always carries a current solid.
+    const resolvedColor = jamDeckCanvasFolderNormalizeColor(group.color);
+    view.shell.style.setProperty("--jd-folder-color", resolvedColor);
+    view.shell.style.setProperty(
+      "--jd-folder-front-tint",
+      JAM_DECK_CANVAS_FOLDER_FRONT_TINTS.get(resolvedColor) || "#E7E7E7",
+    );
     view.shell.style.setProperty(
       "--jd-folder-tint-strength",
-      jamDeckCanvasFolderNormalizeColor(group.color) === "#DDDCDC" ? "0%" : "12%",
+      // NZS4 Figma board solids are used verbatim; only the neutral stays
+      // un-tinted so 纸灰 keeps its gray identity.
+      jamDeckCanvasFolderNormalizeColor(group.color) === "#C1C1C1" ? "0%" : "100%",
     );
     view.shell.style.setProperty("--jd-folder-member-count", String(group.members.length));
     view.shell.style.setProperty("--jd-folder-representative-columns", String(group.representativeColumns || 1));
@@ -8963,15 +8992,39 @@ function jamDeckCollectLayoutSashes(widgets, options = {}) {
   const horizontal = new Map();
   const rightEdge = [];
   const bottomEdge = [];
-  const rightLine = list.reduce((line, item) => Math.max(line, item.x + item.w), 1);
-  const bottomLine = list.reduce((line, item) => Math.max(line, item.y + item.h), 1);
 
   for (const item of list) {
-    if (item.x + item.w === rightLine) {
-      rightEdge.push({ start: item.y, end: item.y + item.h, beforeIds: [item.id], afterIds: [] });
+    // A widget boundary is an edge when no other widget sits immediately past
+    // it with overlapping orthogonal range. This covers both the global grid
+    // right/bottom edge and inner widgets whose side butts up against empty
+    // space — e.g. canvas-embed with no neighbor below row 20 had its
+    // bottom-right corner ignored here, so the cross product could not emit a
+    // (col 41, row 20) xy node and that corner became un-resizable.
+    const hasRightNeighbor = list.some(
+      (other) => other.x === item.x + item.w
+        && Math.min(item.y + item.h, other.y + other.h) > Math.max(item.y, other.y)
+    );
+    if (!hasRightNeighbor) {
+      rightEdge.push({
+        line: item.x + item.w,
+        start: item.y,
+        end: item.y + item.h,
+        beforeIds: [item.id],
+        afterIds: [],
+      });
     }
-    if (item.y + item.h === bottomLine) {
-      bottomEdge.push({ start: item.x, end: item.x + item.w, beforeIds: [item.id], afterIds: [] });
+    const hasBottomNeighbor = list.some(
+      (other) => other.y === item.y + item.h
+        && Math.min(item.x + item.w, other.x + other.w) > Math.max(item.x, other.x)
+    );
+    if (!hasBottomNeighbor) {
+      bottomEdge.push({
+        line: item.y + item.h,
+        start: item.x,
+        end: item.x + item.w,
+        beforeIds: [item.id],
+        afterIds: [],
+      });
     }
   }
 
@@ -9028,29 +9081,48 @@ function jamDeckCollectLayoutSashes(widgets, options = {}) {
       });
     }
   }
-  for (const range of jamDeckMergeSashRanges(rightEdge)) {
-    sashes.push({
-      id: `edge-x:${rightLine}:${range.start}:${range.end}`,
-      axis: "x",
-      edge: "end",
-      line: rightLine,
-      start: range.start,
-      end: range.end,
-      beforeIds: range.beforeIds,
-      afterIds: [],
-    });
+  // Edge sashes live on each widget's own right/bottom boundary (which may
+  // differ from the global grid rightLine/bottomLine), so group by line
+  // before merging — different lines must not collapse into one.
+  const rightEdgeByLine = new Map();
+  for (const edge of rightEdge) {
+    const bucket = rightEdgeByLine.get(edge.line) || [];
+    bucket.push(edge);
+    rightEdgeByLine.set(edge.line, bucket);
   }
-  for (const range of jamDeckMergeSashRanges(bottomEdge)) {
-    sashes.push({
-      id: `edge-y:${bottomLine}:${range.start}:${range.end}`,
-      axis: "y",
-      edge: "end",
-      line: bottomLine,
-      start: range.start,
-      end: range.end,
-      beforeIds: range.beforeIds,
-      afterIds: [],
-    });
+  for (const [line, ranges] of rightEdgeByLine) {
+    for (const range of jamDeckMergeSashRanges(ranges)) {
+      sashes.push({
+        id: `edge-x:${line}:${range.start}:${range.end}`,
+        axis: "x",
+        edge: "end",
+        line,
+        start: range.start,
+        end: range.end,
+        beforeIds: range.beforeIds,
+        afterIds: [],
+      });
+    }
+  }
+  const bottomEdgeByLine = new Map();
+  for (const edge of bottomEdge) {
+    const bucket = bottomEdgeByLine.get(edge.line) || [];
+    bucket.push(edge);
+    bottomEdgeByLine.set(edge.line, bucket);
+  }
+  for (const [line, ranges] of bottomEdgeByLine) {
+    for (const range of jamDeckMergeSashRanges(ranges)) {
+      sashes.push({
+        id: `edge-y:${line}:${range.start}:${range.end}`,
+        axis: "y",
+        edge: "end",
+        line,
+        start: range.start,
+        end: range.end,
+        beforeIds: range.beforeIds,
+        afterIds: [],
+      });
+    }
   }
   return sashes.sort((left, right) => left.axis.localeCompare(right.axis) || left.line - right.line || left.start - right.start);
 }
@@ -11826,7 +11898,10 @@ class JamDeckView extends ItemView {
       for (const handle of layer.querySelectorAll(".jam-deck-sash-handle")) {
         const hx = Number.parseFloat(handle.style.left) || 0;
         const hy = Number.parseFloat(handle.style.top) || 0;
-        const near = Math.hypot(x - hx, y - hy) <= 18;
+        // 24px（不是默认 18）：canvas-embed 组件内部右下角被 Obsidian 原生
+        // .canvas-controls（z-index 100）覆盖，sash 实际生效区仅在 widget 边界
+        // 外侧 13px 一圈，18px 命中半径过紧会频繁脱靶。
+        const near = Math.hypot(x - hx, y - hy) <= 24;
         handle.toggleClass("is-hot", near);
       }
     };

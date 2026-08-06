@@ -1,5 +1,56 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-06 — 0.29.3 修边缘 widget 角点无 sash handle
+
+- Jam 反馈：0.29.1 修 sash 半径 18→24px 后实测仍触发不了 canvas 组件右下角拉伸（鼠标放红箭头处没出现小绿点）。
+- **诊断**：用 Obsidian.com eval 实地 dump `.jam-deck-sash-handle` 元素，grid 内 9 个 handle 中**没有** canvas-embed 右下角 (col 41, row 20) 的——说明问题不是半径，而是根本没生成这个角点的 sash。回溯 `jamDeckCollectLayoutSashes`：原版 8998-9005 行只把 `x+w === rightLine` 或 `y+h === bottomLine`（即全局 grid 右/下边界）的 widget 入 edge 队列。canvas-embed `y+h=20` 在 col 8-40 下方确实无邻居，但 20 ≠ 37 (bottomLine)，被漏掉。于是 vertical/horizontal 集合里没有 line=20 的 horizontal edge-y sash，cross product 不会产 (41, 20) xy node，widgetId 角点 handle 缺失。这是个**老 bug**（非 0.29.1 引入，也非 0.29.0 引入），0.29.1 改半径只是治标。
+- **修复**：改为 per-widget 检测"右/下边界是否有 y/x overlap 邻居"（minH 1 行 overlap 视为有邻居，无 overlap 视为 edge）。edge sashes 按 line 分组（Map）传入 `jamDeckMergeSashRanges`，保留各自 line 字段。改 main.js 8993-9083 行（移除 `rightLine`/`bottomLine` 全局变量，新增 per-widget 检测 + 按 line 分组合并）。
+- **测试**：`npm run verify` 全绿。手动验算：canvas-embed `(x=8, y=9, w=33, h=11)` — 下方无 y overlap 邻居，bottomEdge 入列 line=20 range 8-41；右方无 x overlap 邻居，rightEdge 入列 line=41 range 9-20。cross product `edge-x:41 × edge-y:20` → (41, 20)，owners `x+w=41 ∧ y+h=20` = [canvas-embed]，length===1 → widgetId 关联 → handle 出现。
+- **并发协调**：0.29.2 已被另一会话的"文件夹提亮"占用，本次修复升 0.29.3。manifest/package/CHANGELOG 同步。
+- 版本 0.29.3。修复已部署。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
+## 2026-08-06 — 0.29.2 文件夹背叶/前叶提亮
+
+- Jam 反馈：现在文件夹的颜色，背叶可以增加 15% 的明度，前叶增加 10% 的明度。
+- **实现解读**：「明度 +15%」按混入 15% 白实现（保色相）。若按 HSL 明度 +15 点，樱粉/月黄/浅红/天蓝（HSL L 已 >80%）会漂成近白、色相全丢。混白是亮度实打实上去又不丢色的做法。
+- **消费点核实**（改前必查，别切错变量）：背叶 backboard 消费 `--jd-folder-backboard-color`（SVG 壳体 color）；前叶磨砂前片消费 `--jd-folder-front-tint` 渐变（start/end）；`--jd-folder-panel` 只喂展开态控制条与前片兜底背景（被渐变覆盖），不喂两片叶子。
+- **改动**（styles.css）：
+  - `--jd-folder-backboard-color` → `color-mix(in srgb, var(--jd-folder-color, var(--jd-folder-neutral)) 85%, #fff 15%)`。
+  - `--jd-folder-front-start/end` → `color-mix(in srgb, var(--jd-folder-front-tint) 90%, #fff 10%)`。
+  - 色板圆钮 `.jam-deck-canvas-folder-color-swatch` background 同步 85%/15% 提亮（原 `background: var(--jd-folder-swatch-color...)` 残留行已删，避免后定义覆盖）。
+- 回归：断言锁结构不锁色值，`npm run verify` 全绿。版本 0.29.2（0.29.1 是另一会话的 sash 命中半径改动）。待部署与实机过目。
+- 处理模型签名：Qwen3.8-Max（主代理，WorkBuddy）
+
+## 2026-08-06 — 0.29.1 修 canvas 组件右下角拉伸手柄命中过紧
+
+- Jam 反馈：canvas 组件右下角触发不了拉伸窗口；与此同时 AI 助手按钮也不见了。
+- **诊断**：
+  - 拉伸：`enableLayoutSashes` 的 probe 用 `Math.hypot(x - hx, y - hy) <= 18` 判定 is-hot。sash 元素 `width:26; height:26; margin:-13 0 0 -13`，中心在 widget 角点，命中区是 widget 边界外侧 13px + 中心区 5px 共 18px。但 `canvas-embed` 组件内右下角被 Obsidian 原生 `.canvas-controls`（z-index 100，覆盖 +/-/100%/fit 按钮）占住，鼠标在 widget 内部右下角时事件被 canvas 吃了，grid 的 pointermove probe 永远检测不到 hover，sash 永远不会激活——表现为"触发不了"。
+  - AI 助手：data.json 持久化 `aiFabPos = {x: 2375, y: 608}`，x=2375 超出当前视口宽度（截图约 1280px），按钮其实在 DOM 里但被定位到视口外。原因是早期拖 FAB 时持久化位置过大或窗口后续缩小导致脱壳。
+- **修复**：
+  - 拉伸：sash hover 半径 18→24px（多 6px 缓冲覆盖 canvas-controls 遮挡的边界）。改 main.js 11858 行的 probe 半径，加注释说明 canvas-controls 遮挡的根因。
+  - AI 助手：通过 Obsidian.com eval 在运行时重置 `settings.aiFabPos = null` + `saveSettings()` + `renderAllViews()`，下次渲染时回退到默认右下角（`rect.width - 52 - 20, rect.height - 52 - 20`），不直接改 data.json。
+- **测试**：`node --check main.js` 通过；`tests/jam-deck-test.js` 命中半径无显式断言，不破坏既有测试。
+- 版本 0.29.1（manifest/package/CHANGELOG 同步）。修复已部署。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
+## 2026-08-06 — 0.29.0 文件夹外观还原 NZS4 Figma「文件夹样式」
+
+- Jam 反馈：测试 canvas 里打组的文件夹，文字和颜色都不够满意；新样式做在 Figma NZS4「文件夹样式」frame（node 134:143），要还原外观颜色和字体属性。
+- **取数**：Figma Desktop Bridge 已连 NZS4。`figma_get_file_data` 对变体返回空 children（REST 视图缺运行时子树），改 `figma_execute` 走 `getNodeByIdAsync` 递归 dump，拿到全部精确属性：
+  - 六变体底板实色（BOOLEAN_OPERATION）：纸灰 #C1C1C1 / 浅红 #F7BDB1 / 樱粉 #F0C5DA / 月黄 #EDD0AE / 草绿 #BBE0AF / 天蓝 #AFD0E0，圆角 10，阴影 DROP_SHADOW 0 4 blur20 黑@0.10。
+  - 封面（前片）：200×100 @y=50，GRADIENT_LINEAR，每变体独立 tint（#E7E7E7/#FAC0C0/#F8CECE/#FBE2BB/#CCF2C0/#BEE1F3），stop0 a=0.5 → stop1 a=1；BACKDROP blur 20。
+  - 文字：编组 Inter Regular 16 黑@0.5 @(12,124)；N个节点 Inter Regular 10 黑@0.3 @(12,110)。
+  - 双凹槽 12×4 @x=188,y=129/137（现有 slot 已吻合，不动）。
+- **渐变方向裁决**：API gradientTransform 矩阵换算与截图视觉一度矛盾（矩阵说 stop0 在底）。尝试 exportAsync 像素采样时桥已掉线；最终以截图为真——代表图在前片顶部透出、底部实色 → 定案「顶 50% 透明 → 底实色」。
+- **实现**：
+  - main.js：`JAM_DECK_CANVAS_FOLDER_COLORS` 换六色；`JAM_DECK_CANVAS_FOLDER_LEGACY_COLORS` 由 Set 改 Map（旧值语义迁移：#8EAFCC→#F7BDB1、#DDDCDC→#C1C1C1、#9BC287→#BBE0AF、#CC96BA→#F0C5DA、#E9B85C→#EDD0AE、#E3846A→#F7BDB1、#5E9BD6→#AFD0E0），`normalizeColor` 返回迁移值；新增 `JAM_DECK_CANVAS_FOLDER_FRONT_TINTS`，`updateFolderView` 注入 `--jd-folder-color`（迁移后）与 `--jd-folder-front-tint`；tint-strength 判定改 `#C1C1C1 ? 0% : 100%`。
+  - styles.css：`--jd-folder-panel` = 实色、`--jd-folder-panel-edge` 透明、`--jd-folder-shadow` = 0 4px 20px 黑@0.10；front 背景改单层 tint 渐变（`front-start 50% transparent → front-end`），删白色 screen 层与 inset 高光；label/count 生效规则（2925–2977 行块）改 Inter 栈 + 16/10px + top 82.67%/73.33%（Figma y=124/110）；基础 label/count 规则同步 16/10 与 Inter。
+- **测试**：默认色断言 #DDDCDC→#C1C1C1；legacy-blue 断言改期望 #F7BDB1（迁移）+ 新增 legacy-0286→#C1C1C1；tint 断言改 `#C1C1C1 ? 0% : 100%`；新增六色 deepStrictEqual、front tint 注入、渐变 50%、Inter 栈断言；旧 frosted 材质与旧定位断言更新为 NZS4 值。`npm run verify` 全绿。
+- 版本 0.29.0（manifest/package/CHANGELOG 同步）。待部署与实机视觉核对。
+- 处理模型签名：Qwen3.8-Max（主代理，WorkBuddy）
+
 ## 2026-08-05 — 0.28.9 追加：矮图拖不进文件夹（旧堆叠隔离 + 中心点命中）
 
 - Jam 反馈：拖高度较矮的图到文件夹，没进文件夹，反而变小叠在上面。

@@ -1295,11 +1295,13 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  color: var(--jd-folder-panel-ink);
-  font-size: 12px;
-  font-weight: 620;
-  line-height: 1.25;
-  letter-spacing: 0.01em;
+  color: var(--jd-folder-label-ink);
+  /* NZS4 Figma 134:143: Inter Regular 16, black @ 50%. */
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1308,9 +1310,11 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  color: color-mix(in srgb, var(--jd-folder-panel-ink) 70%, transparent);
+  color: var(--jd-folder-count-ink);
+  /* NZS4 Figma 134:143: Inter Regular 10, black @ 30%. */
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 10px;
-  font-weight: 560;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -1437,8 +1441,9 @@
   margin: 0;
   padding: 0;
   border: 0;
+  /* Swatch previews the lifted backboard, not the raw preset solid. */
+  background: color-mix(in srgb, var(--jd-folder-swatch-color, var(--jd-canvas-folder-color-1)) 85%, #fff 15%);
   border-radius: 50%;
-  background: var(--jd-folder-swatch-color, var(--jd-canvas-folder-color-1));
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 0 0 1px rgb(0 0 0 / 0.28);
   appearance: none;
   cursor: pointer;
@@ -2923,7 +2928,8 @@
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-count {
   position: absolute;
   z-index: 2;
-  top: 76.666667%;
+  /* NZS4 Figma 134:143: count baseline sits at y=110 of the 150 shell. */
+  top: 73.333333%;
   right: auto;
   bottom: auto;
   left: 6%;
@@ -2934,8 +2940,8 @@
   padding: 0;
   overflow: hidden;
   color: #000;
-  font-family: Inter, var(--font-interface), sans-serif;
-  font-size: 8px;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 10px;
   font-weight: 400;
   line-height: normal;
   letter-spacing: 0;
@@ -2950,7 +2956,8 @@
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-header > .jam-deck-canvas-folder-label {
   position: absolute;
   z-index: 2;
-  top: 84.666667%;
+  /* NZS4 Figma 134:143: label top sits at y=124 of the 150 shell. */
+  top: 82.666667%;
   right: auto;
   bottom: auto;
   left: 6%;
@@ -2961,8 +2968,8 @@
   padding: 0;
   overflow: hidden;
   color: #000;
-  font-family: Inter, var(--font-interface), sans-serif;
-  font-size: 12px;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
   font-weight: 400;
   line-height: normal;
   letter-spacing: 0;
@@ -3047,34 +3054,28 @@
   transform-style: preserve-3d;
   will-change: auto;
   --jd-folder-color: var(--jd-canvas-folder-color-1);
-  --jd-folder-panel: color-mix(in srgb, var(--jd-folder-color) 90%, #edf3f5 10%);
-  --jd-folder-panel-edge: color-mix(in srgb, var(--jd-folder-color) 54%, #fff 46%);
-  --jd-folder-panel-ink: color-mix(in srgb, #28343d 84%, var(--jd-folder-color) 16%);
-  --jd-folder-control-ink: color-mix(in srgb, #28343d 76%, var(--jd-folder-color) 24%);
-  --jd-folder-shadow: 0 2px 5px rgb(18 27 34 / 0.14), 0 11px 24px rgb(18 27 34 / 0.16);
+  /* NZS4 Figma 134:143 base; no painted edge on either surface.  The back /
+     front leaves get their lightness lift where they are consumed below. */
+  --jd-folder-panel: var(--jd-folder-color);
+  --jd-folder-panel-edge: transparent;
+  --jd-folder-panel-ink: rgb(0 0 0 / 0.5);
+  --jd-folder-control-ink: rgb(0 0 0 / 0.5);
+  --jd-folder-shadow: 0 4px 20px rgb(0 0 0 / 0.10);
   position: absolute;
   min-width: 0;
   min-height: 0;
   pointer-events: none;
   transform-origin: 50% 50%;
-  --jd-folder-neutral: #dddcdc;
+  --jd-folder-neutral: #c1c1c1;
   --jd-folder-tint-strength: 0%;
-  --jd-folder-backboard-color: color-mix(
-    in srgb,
-    var(--jd-folder-neutral) calc(100% - var(--jd-folder-tint-strength)),
-    var(--jd-folder-color, var(--jd-folder-neutral)) var(--jd-folder-tint-strength)
-  );
-  --jd-folder-front-start: color-mix(
-    in srgb,
-    #e7e7e7 calc(100% - var(--jd-folder-tint-strength)),
-    var(--jd-folder-color, var(--jd-folder-neutral)) var(--jd-folder-tint-strength)
-  );
-  --jd-folder-front-end: color-mix(
-    in srgb,
-    #f2f2f2 calc(100% - var(--jd-folder-tint-strength)),
-    var(--jd-folder-color, var(--jd-folder-neutral)) var(--jd-folder-tint-strength)
-  );
-  --jd-folder-count-ink: rgb(0 0 0 / 0.20);
+  /* Jam 2026-08-06 tune: back leaf (backboard) +15% lightness, front leaf
+     (frosted flap) +10% lightness.  Both realized as a white mix so the hue
+     survives instead of clipping toward near-white. */
+  --jd-folder-backboard-color: color-mix(in srgb, var(--jd-folder-color, var(--jd-folder-neutral)) 85%, #fff 15%);
+  --jd-folder-front-tint: #e7e7e7;
+  --jd-folder-front-start: color-mix(in srgb, var(--jd-folder-front-tint) 90%, #fff 10%);
+  --jd-folder-front-end: color-mix(in srgb, var(--jd-folder-front-tint) 90%, #fff 10%);
+  --jd-folder-count-ink: rgb(0 0 0 / 0.30);
   --jd-folder-label-ink: rgb(0 0 0 / 0.50);
   --jd-folder-slot-shadow: inset 0 1px 4px rgb(0 0 0 / 0.10);
   color: var(--jd-folder-backboard-color);
@@ -3197,17 +3198,16 @@
   overflow: hidden;
   border: 0;
   border-radius: 10px;
-  background: linear-gradient(to bottom, rgb(255 255 255 / 0.50), rgb(255 255 255 / 0.38)),
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--jd-folder-front-start) 64%, transparent),
-      color-mix(in srgb, var(--jd-folder-front-end) 48%, transparent)
-    );
-  background-blend-mode: screen, normal;
+  /* NZS4 Figma 封面: single tint gradient, top 50% alpha to bottom solid,
+     over the frosted blur; no white screen layer, no painted edge. */
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--jd-folder-front-start) 50%, transparent),
+    var(--jd-folder-front-end)
+  );
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   backdrop-filter: blur(16px) saturate(180%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.74),
-    0 -4px 8px rgb(0 0 0 / 0.05);
+  box-shadow: 0 -4px 8px rgb(0 0 0 / 0.05);
   transform-origin: 50% 100%;
   transform-style: preserve-3d;
   backface-visibility: hidden;
