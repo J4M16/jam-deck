@@ -1,5 +1,12 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-06 — 0.30.2 canvas-embed 引导态「新建 Canvas」+ 行尾规范化
+
+- Jam 反馈：新用户可能没有画布，「选择一个 Canvas」引导卡片应能直接新建一个未命名画布并打开。
+- 实现：模块级纯函数 `jamDeckNextCanvasFileName(fileExists)`（`未命名.canvas`，重名自动递增 `未命名 1.canvas`…）；`JamDeckView.createCanvasForWidget` 创建空 canvas 文件（`{"nodes":[],"edges":[]}`）并写回 `widget.config.filePath` + saveSettings；`showCanvasEmbedState` 在未配置分支（无 filePath）加「新建 Canvas」按钮，成功后重渲染挂载。静态挂载 `JamDeckPlugin.nextCanvasFileName` 供测试；测试补 3 个命名递增断言。
+- 行尾事故：发布流程 `git checkout` 时 Windows `core.autocrlf=true` 把工作区文本文件全部转成 CRLF，测试断言按 LF 匹配导致 113 行源码头断言失败（磁盘 CRLF vs 仓库 LF）。修复：新增 `.gitattributes`（`* text=auto eol=lf`、`*.ps1 text eol=crlf`、png binary），全部文本文件转回 LF。另发现 5 个 docs 文件磁盘缺失（推测 checkout 异常），已从 HEAD 恢复。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 2026-08-06 — 0.30.1 默认工作台布局改为 Jam 当前布局
 
 - Jam 反馈：工作台默认组件布局"有点糟糕"，希望按自己当前的布局设为默认。

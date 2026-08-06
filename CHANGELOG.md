@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.30.2 — 2026-08-06
+
+- **canvas-embed 引导态新增「新建 Canvas」**：新用户没有画布时，点击引导卡片上的「新建 Canvas」即可创建一个空画布（`未命名.canvas`，重名自动递增）并直接挂载，无需手动准备文件。
+- **行尾规范化**：新增 `.gitattributes`（文本 `eol=lf`、ps1 `eol=crlf`），修复 Windows `core.autocrlf` 检出导致工作区文件变 CRLF 后测试断言（按 LF 匹配）失败的问题。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 0.30.1 — 2026-08-06
 
 - **默认工作台布局更新**：新 vault 首次打开时的组件排布改为按 Jam 当前布局（时钟 + 音乐 + 快捷方式顶栏，左侧待办/日历/剪贴板，右侧大块原生 Canvas）。组件用稳定 id（`canvas-embed-1` 等），快捷方式列表与 Canvas 文件路径留空（新用户自选），canvas-embed 未配置时显示「选择一个 Canvas」引导态（已有容错）。

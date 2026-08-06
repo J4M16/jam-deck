@@ -2108,6 +2108,16 @@ function jamDeckEagleItemPath(libraryRoot, id, metadata) {
   return `${root}/images/${cleanId}.info/${name}.${ext}`;
 }
 
+function jamDeckNextCanvasFileName(fileExists) {
+  let path = "未命名.canvas";
+  let index = 1;
+  while (fileExists(path)) {
+    path = `未命名 ${index}.canvas`;
+    index += 1;
+  }
+  return path;
+}
+
 function jamDeckEagleResultGridLayout(sourceRect, items, gap = EAGLE_SEARCH_GRID_GAP) {
   const rect = jamDeckCanvasStackRect(sourceRect);
   if (!rect || !Array.isArray(items) || !items.length) return null;
@@ -11141,6 +11151,16 @@ class JamDeckView extends ItemView {
     body.createDiv({ text: `四周内截止 ${rangeTaskCount} 项${overdueCount ? ` · 已逾期 ${overdueCount}` : ""}`, cls: "jam-deck-calendar-foot" });
   }
 
+  async createCanvasForWidget(widget) {
+    const path = jamDeckNextCanvasFileName((candidate) => !!this.app.vault.getAbstractFileByPath(candidate));
+    await this.app.vault.create(path, '{"nodes":[],"edges":[]}');
+    widget.config = widget.config || {};
+    widget.config.filePath = path;
+    widget.config.schemaVersion = 1;
+    await this.plugin.saveSettings();
+    return path;
+  }
+
   showCanvasEmbedState(host, widget, message, canRetry) {
     host.empty();
     host.classList.remove("is-loading", "is-ready");
@@ -11152,6 +11172,23 @@ class JamDeckView extends ItemView {
     const actions = state.createDiv({ cls: "jam-deck-canvas-embed-state-actions" });
     const choose = actions.createEl("button", { text: "选择 Canvas" });
     choose.addEventListener("click", () => new CanvasFilePickerModal(this.app, this.plugin, widget.id).open());
+    // 新用户没有画布时，直接新建一个未命名 Canvas 并挂载。
+    if (!widget.config || !widget.config.filePath) {
+      const create = actions.createEl("button", { text: "新建 Canvas" });
+      create.addEventListener("click", async () => {
+        try {
+          const path = await this.createCanvasForWidget(widget);
+          const body = host.closest(".jam-deck-widget-body");
+          if (body) {
+            body.empty();
+            this.renderCanvasEmbed(body, widget);
+          }
+          new Notice(`Jam Deck：已创建 ${path}`);
+        } catch (error) {
+          new Notice(`Jam Deck：创建 Canvas 失败：${error && error.message || "未知错误"}`);
+        }
+      });
+    }
     if (canRetry) {
       const retry = actions.createEl("button", { text: "重新加载" });
       retry.addEventListener("click", () => {
@@ -16445,4 +16482,5 @@ class JamDeckSettingTab extends PluginSettingTab {
   }
 }
 
+JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
 module.exports = JamDeckPlugin;

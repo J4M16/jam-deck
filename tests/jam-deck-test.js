@@ -886,6 +886,20 @@ async function testCanvasNativeConflictLifecycle() {
   }
 }
 
+async function testCanvasCreateName() {
+  assert.strictEqual(JamDeckPlugin.nextCanvasFileName(() => false), "未命名.canvas", "free name must stay bare");
+  assert.strictEqual(
+    JamDeckPlugin.nextCanvasFileName((candidate) => candidate === "未命名.canvas"),
+    "未命名 1.canvas",
+    "first occupied name must bump to 1"
+  );
+  assert.strictEqual(
+    JamDeckPlugin.nextCanvasFileName((candidate) => candidate === "未命名.canvas" || candidate === "未命名 1.canvas"),
+    "未命名 2.canvas",
+    "two occupied names must bump to 2"
+  );
+}
+
 async function testCanvasAsyncTeardown() {
   let releaseDrop;
   const dropGate = new Promise((resolve) => { releaseDrop = resolve; });
@@ -2986,6 +3000,7 @@ async function testArchiveIntegration() {
   assert.strictEqual(customWorkRef.kind, "work-daily-v3", "work archive ref must use the unified simple kind");
 }
 
+testCanvasCreateName();
 testArchiveIntegration().then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
