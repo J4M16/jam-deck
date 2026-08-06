@@ -1,5 +1,7 @@
 param(
-  [string]$TargetPluginDir = "D:\jam16\Jamnote\.obsidian\plugins\jam-deck"
+  # 开发者部署目标目录（个人环境路径，按需自行修改）：
+  # 默认指向 Obsidian 运行副本 .obsidian/plugins/jam-deck。
+  [string]$TargetPluginDir = "$env:USERPROFILE\path\to\vault\.obsidian\plugins\jam-deck"
 )
 
 Set-StrictMode -Version Latest
