@@ -7,7 +7,7 @@
 - Obsidian 运行副本位于 `D:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
 - 修改后至少运行 `npm run verify`。
-- 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），直接 `npm run deploy`；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
+- 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），`npm run deploy`（部署目标 = 环境变量 `JAM_DECK_TARGET_PLUGIN_DIR`，未设置则需 `npm run deploy -- -TargetPluginDir <目录>` 显式传参；脚本拒绝无目标静默执行）；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
 - Obsidian 启停：**GUI 启动用 `Obsidian.exe`**（不是 Obsidian.com——它只是 CLI wrapper）。**RDP 会话下 GPU 进程常崩溃**（`GPU process isn't usable`），必须带参数：
   ```
   Obsidian.exe --disable-gpu --disable-gpu-sandbox --in-process-gpu

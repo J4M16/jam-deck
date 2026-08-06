@@ -1,7 +1,9 @@
-param(
+﻿param(
   # 开发者部署目标目录（个人环境路径，按需自行修改）：
-  # 默认指向 Obsidian 运行副本 .obsidian/plugins/jam-deck。
-  [string]$TargetPluginDir = "$env:USERPROFILE\path\to\vault\.obsidian\plugins\jam-deck"
+  # 1) 显式传参 -TargetPluginDir
+  # 2) 设环境变量 JAM_DECK_TARGET_PLUGIN_DIR（推荐，不污染仓库）
+  # 3) 默认指向 Obsidian 运行副本 .obsidian/plugins/jam-deck
+  [string]$TargetPluginDir = ""
 )
 
 Set-StrictMode -Version Latest
@@ -11,6 +13,11 @@ $requiredFiles = @("main.js", "styles.css", "manifest.json")
 $assetFiles = @("assets/jam-deck-folder-shell.svg")
 $files = @($requiredFiles + $assetFiles)
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..")).TrimEnd([IO.Path]::DirectorySeparatorChar)
+# 参数 → 环境变量 → 中性占位（缺失时给出明确报错而非静默指向错误路径）
+if (-not $TargetPluginDir) { $TargetPluginDir = $env:JAM_DECK_TARGET_PLUGIN_DIR }
+if (-not $TargetPluginDir) {
+  throw "未指定部署目标。请用 -TargetPluginDir <目录> 或设置环境变量 JAM_DECK_TARGET_PLUGIN_DIR（参考 scripts/deploy.ps1 头部注释）。"
+}
 $target = [IO.Path]::GetFullPath($TargetPluginDir).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $separator = [IO.Path]::DirectorySeparatorChar
 
