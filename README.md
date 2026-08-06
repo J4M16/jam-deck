@@ -1,5 +1,39 @@
 ﻿# Jam Deck
 
+Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴板、快捷方式、音乐播放器与可实时编辑的内嵌 Canvas 工作区，内置 AI 对话助手（DeepSeek / 千问）。
+
+## 安装
+
+**方式 A —— Release 手动安装**
+
+1. 前往 [Releases](https://github.com/J4M16/jam-deck/releases) 下载最新版的 `main.js`、`styles.css`、`manifest.json` 三个文件
+2. 在 vault 目录下创建 `.obsidian/plugins/jam-deck/`（若不存在）
+3. 把三个文件放入该目录
+4. Obsidian 设置 → 第三方插件 → 刷新插件列表 → 启用 **Jam Deck**
+
+**方式 B —— BRAT 安装（beta 体验）**
+
+1. 安装社区插件 [BRAT](https://github.com/TfTHacker/obsidian42-brat)
+2. BRAT 设置 → Add Beta plugin → 填入 `J4M16/jam-deck`
+3. 启用后刷新插件列表即可
+
+## 快速上手
+
+1. 启用插件后，在命令面板（`Ctrl+P`）执行 **Jam Deck: 打开工作台**，或按插件设置的侧边栏图标打开
+2. 点击工作台顶部的「添加组件」，加入时钟、待办、Canvas 工作区等
+3. 需要 AI 对话时，点击工作台右下角的 **AI** 按钮；首次使用前先到插件设置页填写 API Key（见下）
+
+## 配置 API Key
+
+设置 → 第三方插件 → Jam Deck → AI 设置：
+
+| Provider | Key 获取 | 端点（插件自动路由，无需填写） |
+|---|---|---|
+| 千问 | 阿里云[百炼](https://bailian.console.aliyun.com/)或 Token Plan 申请 | `sk-sp-` 前缀 → Token Plan 专属端点；`sk-` 前缀 → 百炼通用端点 |
+| DeepSeek | [DeepSeek 开放平台](https://platform.deepseek.com/) | `api.deepseek.com`（固定） |
+
+> 千问 key 前缀决定端点：**`sk-sp-` 开头的 key 必须配套 Token Plan 专属端点**，`sk-` 开头的通用 key 配套百炼端点——插件按前缀自动路由，混用会报 `401 Incorrect API key provided`。
+
 ## 音乐播放器
 
 - 在“添加组件”中选择“音乐播放器”，即可读取 Windows 当前公开的系统媒体会话。
@@ -25,8 +59,6 @@
 - 归档采用可重试流程：先复制并校验附件，再更新带任务 ID 的日记块，最后保存待办状态；保存确认前不会删除旧图片。
 - 恢复待办不会把图片搬回任务临时目录；彻底删除归档也不会删除工作日记附件。
 - 旧版归档会在插件启动后按稳定任务标记迁移。历史源图片默认保留，避免破坏可能存在的手工引用。
-
-Jam Deck 是 Jam 的 Obsidian 副屏工作台插件，提供时钟、日历、待办、剪贴板、快捷方式、最近 Canvas 文件及可实时编辑的内嵌 Canvas。
 
 ## 工作台编辑布局
 
