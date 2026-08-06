@@ -33,8 +33,8 @@
 
 ## Git 与协作约定
 
-- 主干分支为 `master`；功能开发走 `feat/<主题>` 分支，merge 前必须 `npm run verify` 全绿。
-- 提交纪律：完成一个原子改动就 commit，不留长时间未提交的工作区（未提交窗口是多 agent 互踩的唯一时机）。
-- 多 agent 协作：同一时刻只允许一个 agent 持有写权限（唯一写者）；写操作顺序固定为 代码 → verify → 日志/CHANGELOG → commit，commit 前不放手。
+- 分支策略（0.30.0 起）：`master` 为发布主干，`develop` 为日常开发集成分支；日常功能在 `develop` 上提交（大功能可再开 `feat/<主题>` 从 develop 分出，merge 回 develop），发布时合回 `master` 并打 tag + GitHub Release。merge 前必须 `npm run verify` 全绿。
+- 提交纪律：完成一个原子改动就 commit，**commit 后立即 push 备份**（push 私有仓库 ≠ 发布；发布仅指打 tag + gh release，由 Jam 拍板）。不留长时间未提交/未推送的窗口——只 commit 不 push 是单点，2026-08-06 事故教训。
+- 多 agent 协作：同一时刻只允许一个 agent 持有写权限（唯一写者）；写操作顺序固定为 代码 → verify → 日志/CHANGELOG → commit → push，push 前不放手。**禁止任何会话直接操作主工作区的 `.git` 元数据（gc / filter-repo / reset 等），历史重写必须先征得 Jam 同意**。
 - `CHANGELOG.md`、`docs/DEVELOPMENT_LOG.md` 由完成该任务的写者在 commit 前更新并带模型签名。
 - `data.json` 永不入库；`.workbuddy/`、`debug-backups/` 已 gitignore。
