@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## 0.29.5 — 2026-08-06
+
+- **归档路径可配置（P1-1）**：设置面板新增「工作归档目录」（默认 `Work/工作日记`）与「生活归档文件」（默认 `Life/Daily.md`）两项。`getWorkArchiveDir()` / `getLifeArchivePath()` 读设置、空值回退内置常量，旧 vault 行为完全不变；`ensureVaultFolder` 兜底保留。回归：fixture 补缺省回退 + 自定义路径断言，verify 全绿。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 0.29.4 — 2026-08-06
 
 - **仓库重组：Game Deck 剥离为独立仓库**（纯维护，无功能变化）：`game-deck/` 目录、构建/部署脚本与测试迁至独立仓库 `D:\Project\GameDeck`（id `game-deck`，经 git filter-repo 保留其历史）；本仓库只维护 Jam Deck 主插件。package.json 移除 three/esbuild 依赖与全部 `*:game-deck` scripts，`verify` 简化为 check + test；README/AGENTS.md 同步清理；`.gitignore` 新增 `.workbuddy/` 与 `debug-backups/`。

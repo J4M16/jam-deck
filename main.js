@@ -721,6 +721,9 @@ const DEFAULT_SETTINGS = {
   qwenModel: "qwen3.8-max",
   aiProvider: "deepseek",
   aiFabPos: null,
+  // 归档路径可配置（P1-1）：缺省回退到内置常量，旧 vault 行为不变。
+  workArchiveDir: WORK_JOURNAL_DIR,
+  lifeArchivePath: LIFE_DAILY_PATH,
   widgets: [
     { id: "clock-1", type: "clock", x: 1, y: 1, w: 13, h: 8, config: {} },
     { id: "clipboard-1", type: "clipboard", x: 14, y: 1, w: 13, h: 18, config: {} },
@@ -13868,14 +13871,25 @@ class JamDeckPlugin extends Plugin {
   getLocalDayContext(now) {
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-    return { date, weekday: weekdays[now.getDay()], path: `${WORK_JOURNAL_DIR}/${date}.md` };
+    return { date, weekday: weekdays[now.getDay()], path: `${this.getWorkArchiveDir()}/${date}.md` };
+  }
+
+  // 归档路径解析（P1-1）：读设置，空值/未设置回退内置常量。
+  getWorkArchiveDir() {
+    const dir = this.settings && this.settings.workArchiveDir;
+    return typeof dir === "string" && dir.trim() ? dir.trim() : WORK_JOURNAL_DIR;
+  }
+
+  getLifeArchivePath() {
+    const path = this.settings && this.settings.lifeArchivePath;
+    return typeof path === "string" && path.trim() ? path.trim() : LIFE_DAILY_PATH;
   }
 
   buildArchiveRef(task, dateKey, category) {
     const resolved = category || this.resolveTaskCategory(task);
     return resolved === "work"
-      ? { kind: "work-daily-v2", notePath: `${WORK_JOURNAL_DIR}/${dateKey}.md`, dateKey, blockId: task.id }
-      : { kind: "life-daily", notePath: LIFE_DAILY_PATH, dateKey, blockId: task.id };
+      ? { kind: "work-daily-v2", notePath: `${this.getWorkArchiveDir()}/${dateKey}.md`, dateKey, blockId: task.id }
+      : { kind: "life-daily", notePath: this.getLifeArchivePath(), dateKey, blockId: task.id };
   }
 
   getTaskArchiveRef(task) {
@@ -13883,7 +13897,7 @@ class JamDeckPlugin extends Plugin {
     const path = this.getTaskJournalPath(task);
     if (!path) return null;
     const dateKey = task.archiveDate || task.archiveTargetDate || (String(path).match(/(\d{4}-\d{2}-\d{2})\.md$/) || [])[1] || this.formatLocalDate(new Date(task.archivedAt || Date.now()));
-    return path === LIFE_DAILY_PATH
+    return path === this.getLifeArchivePath()
       ? { kind: "life-daily", notePath: path, dateKey, blockId: task.id }
       : { kind: "work-daily-v2", notePath: path, dateKey, blockId: task.id };
   }
@@ -13990,17 +14004,19 @@ class JamDeckPlugin extends Plugin {
   }
 
   async ensureLifeDailyFile(dateKey) {
-    await this.ensureVaultFolder("Life");
-    let file = this.app.vault.getAbstractFileByPath(LIFE_DAILY_PATH);
+    const lifePath = this.getLifeArchivePath();
+    const lifeParent = lifePath.includes("/") ? lifePath.slice(0, lifePath.lastIndexOf("/")) : "";
+    if (lifeParent) await this.ensureVaultFolder(lifeParent);
+    let file = this.app.vault.getAbstractFileByPath(lifePath);
     if (file) return file;
-    try { await this.app.vault.create(LIFE_DAILY_PATH, `${this.formatLifeDateHeading(dateKey)}\n\n`); }
+    try { await this.app.vault.create(lifePath, `${this.formatLifeDateHeading(dateKey)}\n\n`); }
     catch (error) {
-      file = this.app.vault.getAbstractFileByPath(LIFE_DAILY_PATH);
+      file = this.app.vault.getAbstractFileByPath(lifePath);
       if (!file) throw error;
       return file;
     }
-    file = this.app.vault.getAbstractFileByPath(LIFE_DAILY_PATH);
-    if (!file) throw new Error("无法创建 Life/Daily.md");
+    file = this.app.vault.getAbstractFileByPath(lifePath);
+    if (!file) throw new Error(`无法创建生活归档文件：${lifePath}`);
     return file;
   }
 
@@ -14288,7 +14304,7 @@ class JamDeckPlugin extends Plugin {
 
   async ensureDailyJournalFile(targetPath) {
     const context = targetPath ? this.getDayContextFromPath(targetPath) : this.getLocalDayContext(new Date());
-    await this.ensureVaultFolder(WORK_JOURNAL_DIR);
+    await this.ensureVaultFolder(this.getWorkArchiveDir());
     let file = this.app.vault.getAbstractFileByPath(context.path);
     if (file) return file;
     try {
@@ -14317,8 +14333,8 @@ class JamDeckPlugin extends Plugin {
       ? nextTask.category
       : (oldRef.kind === "life-daily" ? "life" : "work");
     const targetRef = targetCategory === "life"
-      ? { kind: "life-daily", notePath: LIFE_DAILY_PATH, dateKey: oldRef.dateKey, blockId: oldTask.id }
-      : { kind: "work-daily-v2", notePath: `${WORK_JOURNAL_DIR}/${oldRef.dateKey}.md`, dateKey: oldRef.dateKey, blockId: oldTask.id };
+      ? { kind: "life-daily", notePath: this.getLifeArchivePath(), dateKey: oldRef.dateKey, blockId: oldTask.id }
+      : { kind: "work-daily-v2", notePath: `${this.getWorkArchiveDir()}/${oldRef.dateKey}.md`, dateKey: oldRef.dateKey, blockId: oldTask.id };
     const moving = oldRef.kind !== targetRef.kind || oldRef.notePath !== targetRef.notePath;
     oldTask.pendingJournalOp = {
       type: moving ? "move" : "update",
@@ -16290,6 +16306,32 @@ class JamDeckSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "qwen" ? "千问" : "DeepSeek"}`);
         });
+      });
+
+    containerEl.createEl("h3", { text: "归档路径", cls: "jam-deck-setting-h3" });
+
+    new Setting(containerEl)
+      .setName("工作归档目录")
+      .setDesc("工作待办归档到的日记目录（按 vault 内路径填写，如 Journal/Work）。默认 Work/工作日记。")
+      .addText((text) => {
+        text.setPlaceholder("Work/工作日记")
+          .setValue(this.plugin.settings.workArchiveDir || WORK_JOURNAL_DIR)
+          .onChange(async (value) => {
+            this.plugin.settings.workArchiveDir = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("生活归档文件")
+      .setDesc("生活待办归档到的 Markdown 文件（按 vault 内路径填写，如 Journal/Life.md）。默认 Life/Daily.md。")
+      .addText((text) => {
+        text.setPlaceholder("Life/Daily.md")
+          .setValue(this.plugin.settings.lifeArchivePath || LIFE_DAILY_PATH)
+          .onChange(async (value) => {
+            this.plugin.settings.lifeArchivePath = value.trim();
+            await this.plugin.saveSettings();
+          });
       });
   }
 }

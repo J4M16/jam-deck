@@ -1,5 +1,17 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-06 — 0.29.5 归档路径可配置（发布计划 P1-1）
+
+- 背景：发布计划 `docs/RELEASE_PLAN.md` P1-1——工作/生活归档路径写死 `Work/工作日记` 与 `Life/Daily.md`，别人的 vault 语义不通。
+- 实现：
+  - `DEFAULT_SETTINGS` 新增 `workArchiveDir: WORK_JOURNAL_DIR`、`lifeArchivePath: LIFE_DAILY_PATH`（内置常量作默认）。
+  - `JamDeckPlugin` 新增 `getWorkArchiveDir()` / `getLifeArchivePath()`：读 settings，空串/未设回退常量。
+  - 归档使用点全部改走 getter：`getLocalDayContext`、`buildArchiveRef`、`getTaskArchiveRef`（`path === getLifeArchivePath()` 判定 life）、`ensureLifeDailyFile`（父目录从 lifePath 推导，不再硬编码 "Life"）、`ensureDailyJournalFile`、`updateArchivedTaskJournal`。
+  - 设置面板「归档路径」段：工作归档目录 + 生活归档文件两个文本框，placeholder 显示默认值。
+- 测试：fixture 补断言——空设置回退内置常量、自定义值被 `getWorkArchiveDir`/`getLifeArchivePath`/`buildArchiveRef` 正确使用。`npm run verify` 全绿。
+- 版本 0.29.5（manifest/package/CHANGELOG 同步）。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 2026-08-06 — 0.29.4 仓库重组：Game Deck 剥离独立
 
 - 纯维护版本，无功能变化。Game Deck（id `game-deck`）剥离为独立仓库 `D:\Project\GameDeck`：经 git filter-repo `--subdirectory-filter` 提取 game-deck/ 子目录历史（5 commits）并提至仓库根，分支 master；`scripts/build-game-deck.mjs` → `scripts/build.mjs`、`scripts/deploy-game-deck.ps1` → `scripts/deploy.ps1`（sourceDir 改仓库根）、`tests/game-deck-test.mjs` import 路径适配。

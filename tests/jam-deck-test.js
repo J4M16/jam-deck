@@ -2936,6 +2936,20 @@ async function testArchiveIntegration() {
   assert(!files.has(lifeSource), "committed life archive may clean its proven task-owned source");
   assert(await instance.restoreArchivedTask(lifeArchiveTask.id));
   assert(!instance.findLifeTaskBlock(files.get("Life/Daily.md"), lifeArchiveTask.id).range, "life restore must remove only its stable block");
+
+  // P1-1 归档路径设置：缺省回退内置常量，自定义时生效。
+  instance.settings.workArchiveDir = "";
+  instance.settings.lifeArchivePath = "";
+  assert.strictEqual(instance.getWorkArchiveDir(), "Work/工作日记", "empty work archive dir must fall back to the built-in default");
+  assert.strictEqual(instance.getLifeArchivePath(), "Life/Daily.md", "empty life archive path must fall back to the built-in default");
+  instance.settings.workArchiveDir = "Journal/Work";
+  instance.settings.lifeArchivePath = "Journal/Life.md";
+  assert.strictEqual(instance.getWorkArchiveDir(), "Journal/Work", "work archive dir must read the configured setting");
+  assert.strictEqual(instance.getLifeArchivePath(), "Journal/Life.md", "life archive path must read the configured setting");
+  const customRef = instance.buildArchiveRef(lifeArchiveTask, "2026-07-31", "life");
+  assert.strictEqual(customRef.notePath, "Journal/Life.md", "life archive ref must honor the configured path");
+  const customWorkRef = instance.buildArchiveRef(lifeArchiveTask, "2026-07-31", "work");
+  assert.strictEqual(customWorkRef.notePath, "Journal/Work/2026-07-31.md", "work archive ref must honor the configured dir");
 }
 
 testArchiveIntegration().then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
