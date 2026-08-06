@@ -1,27 +1,37 @@
 # 多 Agent 协作约定
 
-JamDeck 由多个 AI agent 协同开发（主模型负责 plan/review，执行子代理负责批量实现）。所有 agent 共享同一个工作目录 `D:\Project\JamDeck`——同一时刻只有一份工作区文件，这个事实决定了以下全部规则。
+JamDeck 由多个 AI agent 协同开发。常见形态：**多个 agent 并行写不同功能**。本约定为此设计。
 
-## 核心原则：唯一写者
+## 核心原则：一个写者，一个工作区
 
-- 同一时刻只允许一个 agent 持有写权限；其他 agent 只读：分析、测试、review。
-- 写操作顺序固定：**代码 → `npm run verify` → CHANGELOG / DEVELOPMENT_LOG → commit**。
-- commit 前不放手：开始写就一口气写到提交，不留半成品在工作区。
-
-## 危险窗口
-
-从「开始改」到「commit」之间是危险窗口：两个 agent 同时写同一文件时，后落盘者整体覆盖前者，没有任何合并过程。对策只有两条：
-
-1. **原子提交**：任务切成小步，每步都是 verify 全绿的完整状态，完成即 commit。
-2. **分支隔离**：功能开发走 `feat/<主题>` 分支，各自提交各自的，merge 时 git 按行三方合并（改不同区域自动合，改同一行才需人工）。
-
-> 真实事故（2026-08-06）：并行会话的 agent 在剥离 Game Deck 时误删本仓库 `docs/`、`scripts/`、`tests/`（未提交），靠 `git restore` 从 HEAD 全数恢复。未提交的一切都是悬空的。
+- git 同一目录只有一份工作区、一个当前分支——**两个 agent 不能在同一个目录里同时写**：后落盘者覆盖前者，或 commit 时卷入对方未提交的半成品。
+- 并行写的正确姿势：每个写者一个独立工作区，用 git 原生命令开出：
+  ```
+  git worktree add D:\Project\JamDeck-<任务名> feat/<主题>
+  ```
+  各写各的目录、各交各的分支，物理隔离，真并行成立。
+- 单目录、单任务时无需 worktree，直接在 `D:\Project\JamDeck` 干。
+- 只读工作（分析、测试、review）不受限，任何时刻可做。
+- 任务合并完成后清理：`git worktree remove` + 删分支，不留残垣。
 
 ## 分支模型
 
-- `master`：主干，始终处于可部署状态。
-- `feat/<主题>`：功能分支，从 master 拉出，verify 全绿后 merge 回 master。
-- 远程仓库为 GitHub 私有库；push 前本地 verify 必须通过。
+- `master`：主干，始终可部署，与 GitHub 同步。
+- `feat/<主题>`：功能分支，从 master 拉出，配独立 worktree 目录。
+- 分支短命（以天计）：做完即合回合删，不养长期分叉。
+
+## 提交纪律
+
+- 原子提交：任务切小步，每步 verify 全绿即 commit，不留长时间未提交的工作区。
+- 危险窗口 = 从开始改到 commit 之间。worktree 隔离后，窗口只威胁本写者自己。
+- push 前本地 verify 必须通过；GitHub CI 再守一道。
+
+## 合并与冲突
+
+- **merge 串行执行**：一次只合一个分支，由 agent 跑，merge 前 verify 全绿。
+- git 是行级三方合并：不同功能改不同区域 → 自动合，无需人工。
+- 改到同一行附近才冲突——由执行 merge 的 agent 读两边代码语义先解；**拿不准的列给 Jam 拍板，不硬猜**。
+- 冲突率控制三件套：小步提交、短命分支、功能边界切清楚。
 
 ## 日志规则
 
@@ -32,4 +42,6 @@ JamDeck 由多个 AI agent 协同开发（主模型负责 plan/review，执行�
 
 - `data.json` 永不入库、不复制、不覆盖、不删除。
 - `.workbuddy/`（AI 工作记忆）、`debug-backups/` 已 gitignore，不入库。
-- 任何 agent 不得在未确认无其他写者的情况下执行 `git filter-repo`、rebase 等历史重写操作。
+- 历史重写（filter-repo / rebase 公共分支）前必须确认无其他写者在场。
+
+> 真实事故（2026-08-06）：两个会话在同一目录同时开写，一方的删除在另一方眼里成了"灵异事件"。worktree 隔离从物理上消灭这类互踩。
