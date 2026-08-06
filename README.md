@@ -63,19 +63,19 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 ```markdown
 # 2026年8月6日
 
-<!-- jam-deck-life-task:任务ID:start:v1 -->
+%% jam-deck-life-task:任务ID:start:v1 %%
 - [x] 任务标题
   - 分类：工作
   - 截止：2026-08-06
   - 说明：补充说明
   - 链接：[Figma](https://www.figma.com/file/xxx)
   - 图片：![[附件路径.png]]
-<!-- jam-deck-life-task:任务ID:end:v1 -->
+%% jam-deck-life-task:任务ID:end:v1 %%
 ```
 
 - **文件模式**：所有日期的任务块都写进同一个文件，按 `# YYYY年M月D日` 标题分节。
 - **目录模式**：每个日期一个文件 `YYYY-MM-DD.md`，文件内同样以日期标题 + 任务块组织。
-- 任务块以 `<!-- jam-deck-life-task:<id>:start:v1 -->` / `...:end:v1 -->` 标记包裹，插件凭标记定位、更新与移除归档块；手工编辑块内内容安全，但请保留首尾标记。
+- 任务块以 Obsidian 隐藏注释 `%% jam-deck-life-task:<id>:start:v1 %%` / `...:end:v1 %%` 标记包裹，阅读与实时预览中不可见（纯代码定位用）；插件凭标记定位、更新与移除归档块；手工编辑块内内容安全，但请保留首尾标记。0.30.2 及以前写入的 `<!-- ... -->` 旧标记仍可读取、更新与移除，重写后自动升级为隐藏注释。
 
 ## 待办归档附件
 

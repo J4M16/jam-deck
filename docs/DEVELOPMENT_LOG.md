@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-06 — 0.30.3 归档标记改 Obsidian 隐藏注释
+
+- Jam 反馈：归档内容常带 `<!-- jam-deck>...` 开头的一串英文，在日记中影响观感，希望能隐藏。
+- 根因：任务块首尾标记用 HTML 注释 `<!-- jam-deck-life-task:... -->`，Obsidian 阅读/实时预览会原样显示（HTML 注释节点无法用 CSS 选中隐藏）。
+- 方案：新数据改用 Obsidian 原生隐藏注释 `%% jam-deck-life-task:<id>:<boundary>:v1 %%`（单行自闭合，预览与阅读模式均不可见）。`lifeTaskMarker` 加 `legacy` 参数生成旧格式；`findLifeTaskBlock` 同时匹配新旧两种标记（精确行匹配 + 双格式数组），旧归档可读/可改/可删，重写后升级为新格式。
+- 测试：新格式断言（`%%` 且无 `<!--`）+ 旧格式定位/改写/删除兼容断言 + 升级断言。README 归档格式章节同步。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 2026-08-06 — 0.30.2 canvas-embed 引导态「新建 Canvas」+ 行尾规范化
 
 - Jam 反馈：新用户可能没有画布，「选择一个 Canvas」引导卡片应能直接新建一个未命名画布并打开。

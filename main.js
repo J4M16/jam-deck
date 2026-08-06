@@ -14019,19 +14019,24 @@ class JamDeckPlugin extends Plugin {
     return `# ${year}年${month}月${day}日`;
   }
 
-  lifeTaskMarker(taskId, boundary) {
-    return `<!-- jam-deck-life-task:${String(taskId).replace(/--/g, "-")}:${boundary}:v1 -->`;
+  lifeTaskMarker(taskId, boundary, legacy = false) {
+    const id = String(taskId).replace(/--/g, "-");
+    // 新数据用 Obsidian 隐藏注释 %%...%%（预览/阅读模式均不显示）；
+    // legacy=true 生成旧版 <!-- ... -->（0.30.2 及以前写入），读取兼容用。
+    return legacy
+      ? `<!-- jam-deck-life-task:${id}:${boundary}:v1 -->`
+      : `%% jam-deck-life-task:${id}:${boundary}:v1 %%`;
   }
 
   findLifeTaskBlock(markdown, taskId, dateKey) {
     const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
-    const startMarker = this.lifeTaskMarker(taskId, "start");
-    const endMarker = this.lifeTaskMarker(taskId, "end");
+    const startMarkers = [this.lifeTaskMarker(taskId, "start"), this.lifeTaskMarker(taskId, "start", true)];
+    const endMarkers = [this.lifeTaskMarker(taskId, "end"), this.lifeTaskMarker(taskId, "end", true)];
     const starts = [];
     const ends = [];
     lines.forEach((line, index) => {
-      if (line === startMarker) starts.push(index);
-      if (line === endMarker) ends.push(index);
+      if (startMarkers.includes(line)) starts.push(index);
+      if (endMarkers.includes(line)) ends.push(index);
     });
     if (!starts.length && !ends.length) return { lines, range: null };
     if (starts.length !== 1 || ends.length !== 1 || starts[0] >= ends[0]) throw new Error("Life/Daily 中的待办归档标记不完整或重复");
