@@ -9,3 +9,5 @@ coverage/
 dist/
 backups/
 *.js.map
+.workbuddy/
+debug-backups/

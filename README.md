@@ -154,21 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1 -TargetPl
 - `scripts/deploy.ps1`：受保护的 Vault 部署。
 - `docs/`：架构、视觉规范和开发日志。
 - `data.example.json`：脱敏配置示例，不参与运行。
-- `game-deck/`：第二个独立插件 Game Deck（见下）。
-
-## Game Deck（同仓库的第二个插件）
-
-`GameDeck` 分支还维护一个独立安装的插件（id `game-deck`）：以 Three.js 把工作台放进一片草原，
-组件是房屋、箱子和音乐盒，草地有风吹草动的循环动画；点「编辑地块」切回 2D 网格用同一套
-填充 / 推挤 / 间距节点算法排布，点「完成」回到 3D。
-
-```powershell
-npm run build:game-deck    # 打包 game-deck/src → game-deck/main.js
-npm run deploy:game-deck   # 部署到 .obsidian/plugins/game-deck
-```
-
-它有自己的 manifest、样式和 `data.json`，与 Jam Deck 互不影响。细节见 `docs/GAME_DECK.md`。
 
 ## 当前状态
 
-版本 0.19.6。工作台标题层采用 Bahnschrift、Microsoft YaHei UI 等工整的工业无衬线字体栈，标题栏操作按钮统一为接近 Beta 标记的 16px 轻量胶囊；组件间距与外框圆角统一为 4px。回归测试覆盖原生 Canvas 冲突的 quiet teardown、异步导入/搜索屏障、Figma 文件夹四状态、内联 SVG 底板/无遮罩层序、逐层 10px 图片裁切、磨砂前片开合、旧堆叠预览、网格排列和既有工作台能力。
+当前版本与最新变更见 `CHANGELOG.md`；视觉与交互规范见 `docs/VISUAL_DESIGN.md`；架构说明见 `docs/ARCHITECTURE.md`。

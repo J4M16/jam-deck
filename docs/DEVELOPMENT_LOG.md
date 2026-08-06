@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-06 — 0.29.4 仓库重组：Game Deck 剥离独立
+
+- 纯维护版本，无功能变化。Game Deck（id `game-deck`）剥离为独立仓库 `D:\Project\GameDeck`：经 git filter-repo `--subdirectory-filter` 提取 game-deck/ 子目录历史（5 commits）并提至仓库根，分支 master；`scripts/build-game-deck.mjs` → `scripts/build.mjs`、`scripts/deploy-game-deck.ps1` → `scripts/deploy.ps1`（sourceDir 改仓库根）、`tests/game-deck-test.mjs` import 路径适配。
+- 本仓库清理：git rm `game-deck/`、`docs/GAME_DECK.md`、`tests/game-deck-test.mjs`、`scripts/build-game-deck.mjs`、`scripts/deploy-game-deck.ps1`；package.json 移除 three/esbuild 与全部 `*:game-deck` scripts（verify 简化为 check + test）；README 删 Game Deck 段；.gitignore 加 `.workbuddy/`、`debug-backups/`。
+- **事故记录**：并行会话的另一 agent 在剥离时误删本仓库 `docs/`、`scripts/`、`tests/` 目录（含 deploy.ps1、回归测试，未提交），经 `git restore` 从 HEAD（7014bf6）全数恢复，无损失。教训：多 agent 共用一个工作目录时，未提交窗口是唯一会互踩的时刻——必须唯一写者 + 勤 commit。
+- Windows 坑记录：`git subtree split` 在 Git Bash 下处理到 18/33 提交时静默失败（无报错退出），改用 git filter-repo 完成提取。
+- 处理模型签名：Deepseek-V4-Flash（WorkBuddy 主对话，plan/整合/执行）
+
 ## 2026-08-06 — 0.29.3 修边缘 widget 角点无 sash handle
 
 - Jam 反馈：0.29.1 修 sash 半径 18→24px 后实测仍触发不了 canvas 组件右下角拉伸（鼠标放红箭头处没出现小绿点）。

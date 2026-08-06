@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## 0.29.4 — 2026-08-06
+
+- **仓库重组：Game Deck 剥离为独立仓库**（纯维护，无功能变化）：`game-deck/` 目录、构建/部署脚本与测试迁至独立仓库 `D:\Project\GameDeck`（id `game-deck`，经 git filter-repo 保留其历史）；本仓库只维护 Jam Deck 主插件。package.json 移除 three/esbuild 依赖与全部 `*:game-deck` scripts，`verify` 简化为 check + test；README/AGENTS.md 同步清理；`.gitignore` 新增 `.workbuddy/` 与 `debug-backups/`。
+- 处理模型签名：Deepseek-V4-Flash（WorkBuddy 主对话，plan/整合/执行）
+
 ## 0.29.3 — 2026-08-06
 
 - **边缘 widget 角点无 sash handle（修 0.29.1 漏的根因）**：`jamDeckCollectLayoutSashes` 之前只把"全局 grid 右/下边界"（`x+w === rightLine` / `y+h === bottomLine`）的 widget 视为 edge，忽略了 widget 自己在网格内部的局部底/右边界（如下方无邻居的 widget bottom）。cross product 因此不会为局部边缘角点生成 xy node——以当前布局为例，canvas-embed `y+h=20` 在 col 8-40 下方无邻居、但不是全局 bottomLine=37，被漏掉，其右下角 (col 41, row 20) 永远没有 sash handle，无法从该角拉伸。修复：改为 per-widget 检测"右/下边界是否有 y/x overlap 邻居"，edge sashes 按 line 分组合并并保留各自 line 字段。回归：verify 全绿。

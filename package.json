@@ -1,23 +1,15 @@
 {
   "name": "jam-deck",
-  "version": "0.29.3",
+  "version": "0.29.4",
   "private": true,
-  "description": "Jam 的 Obsidian 副屏工作台插件（仓库同时维护独立的 Game Deck 3D 插件）",
+  "description": "Jam 的 Obsidian 副屏工作台插件：待办、时钟、音乐、剪贴板与画布组件的自适应网格。",
   "scripts": {
-    "build:game-deck": "node scripts/build-game-deck.mjs",
-    "check": "node --check main.js && node --check game-deck/main.js",
-    "test": "node tests/jam-deck-test.js && node tests/game-deck-test.mjs",
-    "verify": "npm run build:game-deck && npm run check && npm test",
-    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
-    "deploy:game-deck": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-game-deck.ps1"
+    "check": "node --check main.js",
+    "test": "node tests/jam-deck-test.js",
+    "verify": "npm run check && npm test",
+    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"
   },
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "three": "^0.185.1"
-  },
-  "devDependencies": {
-    "esbuild": "^0.28.1"
   }
 }

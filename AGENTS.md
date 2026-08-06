@@ -7,7 +7,6 @@
 - Obsidian 运行副本位于 `D:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
 - 修改后至少运行 `npm run verify`。
-- `GameDeck` 分支同时维护第二个独立插件 Game Deck（id `game-deck`，源码 `game-deck/src`）。改其源码后需 `npm run build:game-deck`（verify 已包含），部署用 `npm run deploy:game-deck`（目标 `.obsidian/plugins/game-deck`）。详见 `docs/GAME_DECK.md`。
 - 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），直接 `npm run deploy`；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
 - Obsidian 启停：**GUI 启动用 `Obsidian.exe`**（不是 Obsidian.com——它只是 CLI wrapper）。**RDP 会话下 GPU 进程常崩溃**（`GPU process isn't usable`），必须带参数：
   ```
@@ -31,3 +30,11 @@
 - 写自己的实现或加新包之前，先看项目里已有依赖能做什么；不先查文档和类型，就不要假设库缺某个能力。
 - 架构决策往长了做。不接受"先这样、以后再换"的临时方案。
 - 先看成熟产品怎么解决同一个问题，用已验证的模式，别从零发明。
+
+## Git 与协作约定
+
+- 主干分支为 `master`；功能开发走 `feat/<主题>` 分支，merge 前必须 `npm run verify` 全绿。
+- 提交纪律：完成一个原子改动就 commit，不留长时间未提交的工作区（未提交窗口是多 agent 互踩的唯一时机）。
+- 多 agent 协作：同一时刻只允许一个 agent 持有写权限（唯一写者）；写操作顺序固定为 代码 → verify → 日志/CHANGELOG → commit，commit 前不放手。
+- `CHANGELOG.md`、`docs/DEVELOPMENT_LOG.md` 由完成该任务的写者在 commit 前更新并带模型签名。
+- `data.json` 永不入库；`.workbuddy/`、`debug-backups/` 已 gitignore。
