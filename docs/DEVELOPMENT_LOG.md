@@ -1,5 +1,18 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-06 — 0.30.0 归档形式可配置 + 统一简单格式（发布计划 P1 体验完善）
+
+- Jam 反馈：工作归档按目录、生活按文件是私人设置，不适合大家；希望设置里自定义「目录 or 文件」选项卡、默认都是文件；并问归档格式是什么、别人会不会有自己的格式文档——体验要完善，做好再发布。
+- **决策（Jam 拍板）**：统一简单格式（工作/生活同构）；旧数据只保留读取兼容，不迁移不动 Jam 自己的数据。
+- **设置字段**：`workArchiveMode`/`lifeArchiveMode`（"file"|"dir" 默认 file）+ `workArchiveFile`（默认 `Work/工作.md`）+ `lifeArchiveDir`（默认 `Life/生活日记`）；`workArchiveDir`/`lifeArchivePath` 保留为目录/文件模式路径。getter 拆为 `getWorkArchiveTargetPath(dateKey)`/`getLifeArchiveTargetPath(dateKey)`（file 固定单文件，dir 拼 `dir/dateKey.md`）。
+- **格式统一**：新 kind `work-daily-v3`，工作归档复用生活简单块逻辑（`renderLifeTaskBlock` 分类行改为动态：工作/生活）；`ensureArchiveFile`/`writeTaskToArchive`/`replaceArchivedTaskInJournal`/`removeTaskFromArchiveRef` 按 kind 分发——`work-daily-v2` 走旧四段式（仅历史数据），其余走 `ensureSimpleArchiveFile` + `upsertTaskInLifeDaily`；删除过时的 `ensureLifeDailyFile`；`ensureDailyJournalFile` 目录取持久化路径父目录（不依赖当前 mode）。
+- **archiveFormat 语义**：新归档写 `simple-v1`，旧数据保留 `section-v2` 标记。
+- **设置面板**：归档路径段重构为「工作/生活归档形式」下拉（文件/目录）+ 各自路径输入，切换自动显隐对应输入行。
+- **README**：新增「归档格式」章节（两种模式产物 + 任务块标记格式），「待办、分类与日历」「待办归档附件」段同步改写。
+- **测试**：工作归档断言改统一简单块（file 单文件 + dir 日期文件），`archiveRef.kind === work-daily-v3`；新增 dir 模式集成断言、mode/path getter 断言；旧四段式历史数据（section-v2）迁移断言保留。`npm run verify` 全绿。
+- 版本 0.30.0（manifest/package/CHANGELOG 同步）。**未发布**，等 Jam 验收后指示。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 2026-08-06 — 0.29.5 归档路径可配置（发布计划 P1-1）
 
 - 背景：发布计划 `docs/RELEASE_PLAN.md` P1-1——工作/生活归档路径写死 `Work/工作日记` 与 `Life/Daily.md`，别人的 vault 语义不通。

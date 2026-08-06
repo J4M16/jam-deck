@@ -721,9 +721,14 @@ const DEFAULT_SETTINGS = {
   qwenModel: "qwen3.8-max",
   aiProvider: "deepseek",
   aiFabPos: null,
-  // 归档路径可配置（P1-1）：缺省回退到内置常量，旧 vault 行为不变。
-  workArchiveDir: WORK_JOURNAL_DIR,
-  lifeArchivePath: LIFE_DAILY_PATH,
+  // 归档路径可配置（P1-1 + 0.30）：mode 决定「文件 / 目录」两种形式，默认都是文件。
+  // 文件模式 = 单个 markdown 按日期分节；目录模式 = 目录下按日期建 YYYY-MM-DD.md。
+  workArchiveMode: "file",   // "file" | "dir"
+  workArchiveFile: "Work/工作.md",     // 文件模式：单文件路径
+  workArchiveDir: WORK_JOURNAL_DIR,    // 目录模式：目录路径
+  lifeArchiveMode: "file",   // "file" | "dir"
+  lifeArchivePath: LIFE_DAILY_PATH,    // 文件模式：单文件路径
+  lifeArchiveDir: "Life/生活日记",     // 目录模式：目录路径
   widgets: [
     { id: "clock-1", type: "clock", x: 1, y: 1, w: 13, h: 8, config: {} },
     { id: "clipboard-1", type: "clipboard", x: 14, y: 1, w: 13, h: 18, config: {} },
@@ -868,6 +873,46 @@ class BrowserConfigModal extends Modal {
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") submit();
     });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class FolderRenameModal extends Modal {
+  constructor(app, initialValue, onConfirm) {
+    super(app);
+    this.initialValue = initialValue || "";
+    this.onConfirm = onConfirm || null;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "重命名文件夹" });
+    const input = contentEl.createEl("input", {
+      type: "text",
+      cls: "jam-deck-folder-rename-input",
+      attr: { placeholder: "文件夹名称" },
+    });
+    input.value = this.initialValue;
+    const submit = (value) => {
+      const trimmed = String(value || "").trim();
+      if (!trimmed) return;
+      if (this.onConfirm) this.onConfirm(trimmed);
+      this.close();
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") submit(input.value);
+    });
+    const actions = contentEl.createDiv({ cls: "jam-deck-folder-rename-actions" });
+    const cancel = actions.createEl("button", { text: "取消", cls: "jam-deck-folder-rename-btn" });
+    cancel.addEventListener("click", () => this.close());
+    const ok = actions.createEl("button", { text: "确定", cls: "mod-cta jam-deck-folder-rename-btn" });
+    ok.addEventListener("click", () => submit(input.value));
+    input.select();
+    setTimeout(() => input.focus(), 0);
   }
 
   onClose() {
@@ -1616,7 +1661,6 @@ class CanvasInkOverlay {
     button.type = "button";
     button.className = "canvas-card-menu-button jam-deck-draw-toggle";
     button.setAttribute("aria-label", "画笔模式");
-    button.setAttribute("title", "画笔模式");
     button.setAttribute("aria-pressed", String(this.active));
     setIcon(button, "pen-tool");
     button.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -1630,7 +1674,7 @@ class CanvasInkOverlay {
   }
 
   makePaletteButton(parent, icon, label, handler, cls = "") {
-    const button = parent.createEl("button", { cls, attr: { type: "button", title: label, "aria-label": label } });
+    const button = parent.createEl("button", { cls, attr: { type: "button", "aria-label": label } });
     if (icon) setIcon(button, icon);
     button.addEventListener("pointerdown", (event) => event.stopPropagation());
     button.addEventListener("click", (event) => {
@@ -5274,7 +5318,6 @@ class CanvasFolderController {
     button.className = "clickable-icon jam-deck-canvas-folder-toolbar";
     button.dataset.folderAction = id;
     button.setAttribute("aria-label", label);
-    button.setAttribute("title", label);
     setIcon(button, icon);
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -6748,7 +6791,6 @@ class CanvasFolderController {
     button.type = "button";
     button.className = `clickable-icon jam-deck-canvas-folder-control ${className}`;
     button.setAttribute("aria-label", label);
-    button.setAttribute("title", label);
     button.style.pointerEvents = "auto";
     setIcon(button, icon);
     button.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); }, true);
@@ -7042,21 +7084,6 @@ class CanvasFolderController {
     const label = this.ownerDocument.createElement("span");
     label.className = "jam-deck-canvas-folder-label";
     label.textContent = "编组";
-    label.title = "双击重命名文件夹";
-    label.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const latest = view.group;
-      if (!latest || !this.isNativeFolder(latest)) return;
-      const value = this.ownerWindow && typeof this.ownerWindow.prompt === "function"
-        ? this.ownerWindow.prompt("文件夹名称", latest.label || "文件夹")
-        : null;
-      if (value != null) {
-        try { this.renameNativeFolder(latest, value); } catch (error) {
-          new Notice(`Jam Deck：${error.message || "文件夹重命名失败"}`);
-        }
-      }
-    });
     meta.append(count, label);
     view.label = label;
     const controls = this.ownerDocument.createElement("div");
@@ -7077,7 +7104,21 @@ class CanvasFolderController {
         new Notice(`Jam Deck：${error.message || "取消编组失败"}`);
       }
     });
-    controls.append(view.color, view.ungroup);
+    view.rename = this.createFolderControl("jam-deck-canvas-folder-rename", "重命名文件夹", "pencil", () => {
+      const latest = view.group;
+      if (!latest || !this.isNativeFolder(latest)) return;
+      // Obsidian 内嵌 canvas 的受限 window 里 window.prompt 会静默失败，
+      // 必须用 Obsidian 标准 Modal（nativeModalEl）承载输入。
+      const app = this.entry && this.entry.leaf && this.entry.leaf.view && this.entry.leaf.view.app;
+      if (!app) return;
+      const modal = new FolderRenameModal(app, latest.label || "文件夹", (value) => {
+        try { this.renameNativeFolder(latest, value); } catch (error) {
+          new Notice(`Jam Deck：${error.message || "文件夹重命名失败"}`);
+        }
+      });
+      modal.open();
+    });
+    controls.append(view.color, view.ungroup, view.rename);
     header.append(meta, controls);
   }
 
@@ -7105,7 +7146,7 @@ class CanvasFolderController {
     view.shell.classList.toggle("is-single-column", Number(group.representativeColumns) <= 1);
     view.shell.setAttribute("aria-expanded", String(state === "expanded" || state === "opening"));
     view.shell.setAttribute("aria-label", this.isNativeFolder(group)
-      ? `文件夹，${group.members.length} 个成员；单击展开，双击名称重命名`
+      ? `文件夹，${group.members.length} 个成员；单击展开，悬浮按钮可换色/取消编组/重命名`
       : `文件夹，${group.members.length} 个成员；单击展开预览`);
     view.shell.style.pointerEvents = state === "expanded" ? "none" : "auto";
     // Legacy persisted presets resolve to their NZS4 Figma equivalents so the
@@ -7156,11 +7197,10 @@ class CanvasFolderController {
     if (count) count.textContent = `${group.members.length} 个节点`;
     if (view.label) {
       view.label.textContent = this.isNativeFolder(group) ? (group.label || "文件夹") : "编组";
-      view.label.title = this.isNativeFolder(group) ? "双击重命名文件夹" : "";
+      view.label.title = this.isNativeFolder(group) ? "单击展开 · 悬浮按钮可重命名" : "";
     }
     if (view.toggle) {
       view.toggle.setAttribute("aria-label", state === "expanded" ? "折叠文件夹" : "展开文件夹");
-      view.toggle.setAttribute("title", state === "expanded" ? "折叠文件夹" : "展开文件夹");
       view.toggle.setAttribute("aria-expanded", String(state === "expanded" || state === "opening"));
       setIcon(view.toggle, state === "expanded" ? "chevron-up" : "chevron-down");
     }
@@ -7620,7 +7660,6 @@ class CanvasImageSearchController {
     button.type = "button";
     button.className = "clickable-icon jam-deck-canvas-image-search-toolbar";
     button.setAttribute("aria-label", "在 Eagle 中以图搜图");
-    button.setAttribute("title", "Eagle 以图搜图");
     setIcon(button, "search");
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -7647,7 +7686,6 @@ class CanvasImageSearchController {
     button.type = "button";
     button.className = "clickable-icon jam-deck-canvas-ai-toolbar";
     button.setAttribute("aria-label", "将选中节点发送给 AI");
-    button.setAttribute("title", "将选中文本/图片发送给 AI 对话");
     setIcon(button, "message-circle");
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -9815,7 +9853,7 @@ class JamDeckView extends ItemView {
 
     const aiFab = root.createDiv({
       cls: "jam-deck-ai-fab",
-      attr: { role: "button", tabindex: "0", title: "AI 对话助手（DeepSeek / 千问）", "aria-label": "AI 对话助手" },
+      attr: { role: "button", tabindex: "0",  "aria-label": "AI 对话助手 AI 对话助手（DeepSeek / 千问）" },
     });
     aiFab.createSpan({ text: "AI", cls: "jam-deck-ai-fab-label" });
     let fabDrag = null;
@@ -10235,7 +10273,7 @@ class JamDeckView extends ItemView {
     const remove = dock.createEl("button", {
       text: "×",
       cls: "jam-deck-ai-image-dock-remove",
-      attr: { type: "button", title: "移除图片", "aria-label": "移除图片" },
+      attr: { type: "button",  "aria-label": "移除图片" },
     });
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -10296,7 +10334,7 @@ class JamDeckView extends ItemView {
     const close = headerActions.createEl("button", {
       text: "×",
       cls: "jam-deck-ai-chat-close",
-      attr: { type: "button", title: "关闭", "aria-label": "关闭 AI 助手" },
+      attr: { type: "button",  "aria-label": "关闭 AI 助手" },
     });
     close.addEventListener("click", () => this.toggleAiChat());
     // 拖动聊天窗口头部 → 同步移动悬浮按钮（两者共用 aiFabPos）
@@ -10512,7 +10550,7 @@ class JamDeckView extends ItemView {
     if (copyable) {
       const copyBtn = bubble.createEl("button", {
         cls: "jam-deck-ai-copy",
-        attr: { type: "button", title: "复制", "aria-label": "复制这条消息" },
+        attr: { type: "button",  "aria-label": "复制这条消息" },
       });
       setIcon(copyBtn, "copy");
       copyBtn.addEventListener("click", (event) => {
@@ -10686,7 +10724,7 @@ class JamDeckView extends ItemView {
       cls: "jam-deck-widget-compact-restore",
       attr: {
         type: "button",
-        title: `恢复${def.label}到最小完整尺寸`,
+        
         "aria-label": `恢复${def.label}到最小完整尺寸`,
       },
     });
@@ -10849,7 +10887,7 @@ class JamDeckView extends ItemView {
           maxlength: "2",
           spellcheck: "false",
           "aria-label": `倒计时${label}`,
-          title: label,
+          
         },
       });
     });
@@ -10930,8 +10968,7 @@ class JamDeckView extends ItemView {
           draggable: "true",
           tabindex: "0",
           role: "group",
-          title: "拖到待办、Canvas 或其他应用",
-          "aria-label": `${item.type === "image" ? "剪贴板图片" : "剪贴板文字"}，${timeLabel}`,
+          "aria-label": `${item.type === "image" ? "剪贴板图片" : "剪贴板文字"}，${timeLabel}。可拖到待办、Canvas 或其他应用`,
         },
       });
 
@@ -10951,14 +10988,14 @@ class JamDeckView extends ItemView {
 
       const toolbar = card.createDiv({ cls: "jam-deck-clip-toolbar", attr: { "aria-label": "剪贴板操作" } });
       toolbar.addEventListener("pointerdown", (event) => event.stopPropagation());
-      const copyBtn = toolbar.createEl("button", { cls: "jam-deck-clip-btn", attr: { type: "button", title: "复制到剪贴板", "aria-label": "复制到剪贴板" } });
+      const copyBtn = toolbar.createEl("button", { cls: "jam-deck-clip-btn", attr: { type: "button",  "aria-label": "复制到剪贴板" } });
       setIcon(copyBtn, "copy");
       copyBtn.addEventListener("click", async (event) => {
         event.stopPropagation();
         await this.plugin.copyClipboardItem(item);
         new Notice("Jam Deck：已复制");
       });
-      const delBtn = toolbar.createEl("button", { cls: "jam-deck-clip-btn is-danger", attr: { type: "button", title: "删除该条记录及附件", "aria-label": "删除该条剪贴板记录" } });
+      const delBtn = toolbar.createEl("button", { cls: "jam-deck-clip-btn is-danger", attr: { type: "button",  "aria-label": "删除该条剪贴板记录 删除该条记录及附件" } });
       setIcon(delBtn, "trash-2");
       delBtn.addEventListener("click", async (event) => {
         event.stopPropagation();
@@ -11006,7 +11043,7 @@ class JamDeckView extends ItemView {
       });
       const taskMain = row.createEl("button", {
         cls: "jam-deck-task-main",
-        attr: { type: "button", title: "打开待办详情", "aria-label": `打开待办详情：${task.text}` },
+        attr: { type: "button",  "aria-label": `打开待办详情：${task.text}` },
       });
       const category = this.plugin.resolveTaskCategory(task);
       taskMain.createSpan({ text: category === "work" ? "工作" : "生活", cls: `jam-deck-task-category is-${category}` });
@@ -11023,14 +11060,14 @@ class JamDeckView extends ItemView {
       this.plugin.enableExistingTaskDrop(row, task.id);
       const taskActions = row.createDiv({ cls: "jam-deck-task-actions" });
       if (task.status === "completed") {
-        const archive = taskActions.createEl("button", { text: "归档", cls: "jam-deck-task-archive", attr: { type: "button", title: "按分类归档", "aria-label": "按分类归档" } });
+        const archive = taskActions.createEl("button", { text: "归档", cls: "jam-deck-task-archive", attr: { type: "button",  "aria-label": "按分类归档" } });
         archive.disabled = isArchiving;
         archive.addEventListener("click", async (event) => {
           event.stopPropagation();
           await this.plugin.archiveDeckTask(task.id);
         });
       }
-      const remove = taskActions.createEl("button", { text: "×", cls: "jam-deck-task-delete", attr: { type: "button", title: "删除待办", "aria-label": `删除待办：${task.text}` } });
+      const remove = taskActions.createEl("button", { text: "×", cls: "jam-deck-task-delete", attr: { type: "button",  "aria-label": `删除待办：${task.text}` } });
       remove.disabled = isArchiving;
       remove.addEventListener("click", async (event) => {
         event.stopPropagation();
@@ -11088,13 +11125,13 @@ class JamDeckView extends ItemView {
       rangeTaskCount += tasks.length;
       const cell = days.createDiv({ cls: `jam-deck-calendar-day${dateKey === todayKey ? " is-today" : ""}` });
       const completionText = completedCount ? ` · 已完成 ${completedCount} 项` : "";
-      const dateButton = cell.createEl("button", { text: String(date.getDate()), cls: `jam-deck-calendar-date${completionLevel ? ` has-completed heat-${completionLevel}` : ""}`, attr: { type: "button", title: `${dateKey} · 新建截止待办${completionText}`, "aria-label": `${dateKey} 新建待办${completionText}` } });
+      const dateButton = cell.createEl("button", { text: String(date.getDate()), cls: `jam-deck-calendar-date${completionLevel ? ` has-completed heat-${completionLevel}` : ""}`, attr: { type: "button",  "aria-label": `${dateKey} 新建待办${completionText} ${dateKey} · 新建截止待办${completionText}` } });
       dateButton.addEventListener("click", () => this.plugin.openNewTaskForDate(dateKey));
       if (activeTasks.length) {
         const markers = cell.createDiv({ cls: "jam-deck-calendar-markers" });
         for (const task of activeTasks.slice(0, 3)) {
           const overdue = dateKey < todayKey;
-          const marker = markers.createEl("button", { cls: `jam-deck-calendar-task-marker is-${task.status}${overdue ? " is-overdue" : ""}`, attr: { type: "button", title: task.text, "aria-label": `打开待办：${task.text}` } });
+          const marker = markers.createEl("button", { cls: `jam-deck-calendar-task-marker is-${task.status}${overdue ? " is-overdue" : ""}`, attr: { type: "button",  "aria-label": `打开待办：${task.text}` } });
           marker.addEventListener("click", (event) => { event.stopPropagation(); this.plugin.openTaskDetail(task.id); });
         }
         if (activeTasks.length > 3) cell.createSpan({ text: `+${activeTasks.length - 3}`, cls: "jam-deck-calendar-more" });
@@ -11209,11 +11246,10 @@ class JamDeckView extends ItemView {
       const item = grid.createDiv({
         cls: `jam-deck-launcher-item${isUrl ? " is-url" : ""}`,
         attr: {
-          title: `${target}${isUrl ? "\n域名名称与图标由 Jam Deck 本地生成" : ""}\nAlt + 方向键可排序`,
           tabindex: "0",
           role: "button",
           draggable: "true",
-          "aria-label": `${shortcut.name}，${isUrl ? "网页快捷方式" : shortcut.isFolder ? "文件夹快捷方式" : "本地快捷方式"}。Alt 加方向键可调整顺序`,
+          "aria-label": `${shortcut.name}，${isUrl ? "网页快捷方式" : shortcut.isFolder ? "文件夹快捷方式" : "本地快捷方式"}。Alt 加方向键可调整顺序。目标：${target}${isUrl ? "（域名名称与图标由 Jam Deck 本地生成）" : ""}`,
         },
       });
       item.dataset.shortcutId = shortcut.id;
@@ -11262,7 +11298,7 @@ class JamDeckView extends ItemView {
           new ShortcutEditorModal(this.app, this.plugin, widget.id, shortcut).open();
         });
       }
-      const del = item.createEl("button", { text: "×", cls: "jam-deck-launcher-edit is-danger", attr: { type: "button", title: "删除快捷方式", "aria-label": `删除快捷方式：${shortcut.name}` } });
+      const del = item.createEl("button", { text: "×", cls: "jam-deck-launcher-edit is-danger", attr: { type: "button",  "aria-label": `删除快捷方式：${shortcut.name}` } });
       del.addEventListener("click", async (event) => {
         event.stopPropagation();
         if (window.confirm(`删除快捷方式“${shortcut.name}”？\n\n只会从 Jam Deck 移除，不会删除原文件或文件夹。`)) await this.plugin.deleteShortcut(widget.id, shortcut.id);
@@ -11290,7 +11326,7 @@ class JamDeckView extends ItemView {
       cls: "jam-deck-music-source-button",
       attr: {
         type: "button",
-        title: "选择音源",
+        
         "aria-label": "选择音源",
         "aria-haspopup": "menu",
         "aria-expanded": "false",
@@ -11407,7 +11443,7 @@ class JamDeckView extends ItemView {
     const makeControl = (role, icon, label, handler, extraClass = "") => {
       const button = controls.createEl("button", {
         cls: `jam-deck-music-control ${extraClass}`.trim(),
-        attr: { type: "button", "data-role": role, title: label, "aria-label": label },
+        attr: { type: "button", "data-role": role, "aria-label": label },
       });
       setIcon(button, icon);
       button.addEventListener("click", handler);
@@ -11481,7 +11517,6 @@ class JamDeckView extends ItemView {
     if (sourceButton) {
       const provider = jamDeckMediaProvider(selected && selected.sourceAppId);
       const label = selected ? provider.label : "未连接音源";
-      sourceButton.setAttribute("title", label);
       sourceButton.setAttribute("aria-label", `选择音源，当前${label}`);
       sourceButton.disabled = !sessions.length || connection !== "ready";
     }
@@ -11541,7 +11576,6 @@ class JamDeckView extends ItemView {
       toggle.disabled = connection !== "ready" || !!pending || (!canToggle && !canLaunch);
       toggle.empty();
       setIcon(toggle, playing ? "pause" : "play");
-      toggle.setAttribute("title", playing ? "暂停" : "播放");
       toggle.setAttribute("aria-label", playing ? "暂停" : "播放");
     }
   }
@@ -13729,7 +13763,7 @@ class JamDeckPlugin extends Plugin {
         nextTask.journalPath = result.journalPath;
         nextTask.archiveRef = result.archiveRef;
         archiveMoveOldRef = result.oldRefToRemove;
-        nextTask.archiveFormat = "section-v2";
+        nextTask.archiveFormat = "simple-v1";
         journalUpdated = true;
       }
       task.text = nextTask.text;
@@ -13836,7 +13870,7 @@ class JamDeckPlugin extends Plugin {
       current.status = "archived";
       current.archivedAt = Date.now();
       current.journalPath = journalPath;
-      current.archiveFormat = "section-v2";
+      current.archiveFormat = "simple-v1";
       current.archiveRef = targetRef;
       current.archiveDate = targetRef.dateKey;
       current.archiveTargetDate = null;
@@ -13871,10 +13905,25 @@ class JamDeckPlugin extends Plugin {
   getLocalDayContext(now) {
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-    return { date, weekday: weekdays[now.getDay()], path: `${this.getWorkArchiveDir()}/${date}.md` };
+    return { date, weekday: weekdays[now.getDay()], path: this.getWorkArchiveTargetPath(date) };
   }
 
-  // 归档路径解析（P1-1）：读设置，空值/未设置回退内置常量。
+  // 归档路径解析（P1-1 + 0.30）：读设置，空值/未设置回退内置常量。
+  getWorkArchiveMode() {
+    const mode = this.settings && this.settings.workArchiveMode;
+    return mode === "dir" ? "dir" : "file";
+  }
+
+  getLifeArchiveMode() {
+    const mode = this.settings && this.settings.lifeArchiveMode;
+    return mode === "dir" ? "dir" : "file";
+  }
+
+  getWorkArchiveFile() {
+    const file = this.settings && this.settings.workArchiveFile;
+    return typeof file === "string" && file.trim() ? file.trim() : "Work/工作.md";
+  }
+
   getWorkArchiveDir() {
     const dir = this.settings && this.settings.workArchiveDir;
     return typeof dir === "string" && dir.trim() ? dir.trim() : WORK_JOURNAL_DIR;
@@ -13885,11 +13934,31 @@ class JamDeckPlugin extends Plugin {
     return typeof path === "string" && path.trim() ? path.trim() : LIFE_DAILY_PATH;
   }
 
+  getLifeArchiveDir() {
+    const dir = this.settings && this.settings.lifeArchiveDir;
+    return typeof dir === "string" && dir.trim() ? dir.trim() : "Life/生活日记";
+  }
+
+  // 按当前模式解析归档目标路径：
+  // - file 模式：单文件（固定）
+  // - dir 模式：目录下按日期建 YYYY-MM-DD.md
+  getWorkArchiveTargetPath(dateKey) {
+    return this.getWorkArchiveMode() === "dir"
+      ? `${this.getWorkArchiveDir()}/${dateKey}.md`
+      : this.getWorkArchiveFile();
+  }
+
+  getLifeArchiveTargetPath(dateKey) {
+    return this.getLifeArchiveMode() === "dir"
+      ? `${this.getLifeArchiveDir()}/${dateKey}.md`
+      : this.getLifeArchivePath();
+  }
+
   buildArchiveRef(task, dateKey, category) {
     const resolved = category || this.resolveTaskCategory(task);
     return resolved === "work"
-      ? { kind: "work-daily-v2", notePath: `${this.getWorkArchiveDir()}/${dateKey}.md`, dateKey, blockId: task.id }
-      : { kind: "life-daily", notePath: this.getLifeArchivePath(), dateKey, blockId: task.id };
+      ? { kind: "work-daily-v3", notePath: this.getWorkArchiveTargetPath(dateKey), dateKey, blockId: task.id }
+      : { kind: "life-daily", notePath: this.getLifeArchiveTargetPath(dateKey), dateKey, blockId: task.id };
   }
 
   getTaskArchiveRef(task) {
@@ -13897,7 +13966,13 @@ class JamDeckPlugin extends Plugin {
     const path = this.getTaskJournalPath(task);
     if (!path) return null;
     const dateKey = task.archiveDate || task.archiveTargetDate || (String(path).match(/(\d{4}-\d{2}-\d{2})\.md$/) || [])[1] || this.formatLocalDate(new Date(task.archivedAt || Date.now()));
-    return path === this.getLifeArchivePath()
+    // 兜底判断（仅旧任务未持久化 archiveRef 时）：生活归档 = 单文件（file 模式）或生活目录内的日期文件；
+    // 其余一律视为工作目录模式的历史路径。新任务都有持久化 archiveRef，不走此分支。
+    const lifeFile = this.getLifeArchivePath();
+    const lifeDir = this.getLifeArchiveDir();
+    const isLifePath = path === lifeFile || path === LIFE_DAILY_PATH
+      || (lifeDir && path.startsWith(`${lifeDir}/`));
+    return isLifePath
       ? { kind: "life-daily", notePath: path, dateKey, blockId: task.id }
       : { kind: "work-daily-v2", notePath: path, dateKey, blockId: task.id };
   }
@@ -13943,7 +14018,7 @@ class JamDeckPlugin extends Plugin {
     const lines = [
       this.lifeTaskMarker(task.id, "start"),
       `- [x] ${this.safeMarkdownText(task.text) || "未命名待办"}`,
-      "  - 分类：生活",
+      `  - 分类：${this.resolveTaskCategory(task) === "work" ? "工作" : "生活"}`,
     ];
     if (task.dueDate) lines.push(`  - 截止：${task.dueDate}`);
     for (const note of String(task.description || "").split(/\r?\n/).map((line) => this.safeMarkdownText(line)).filter(Boolean)) lines.push(`  - 说明：${note}`);
@@ -14003,34 +14078,33 @@ class JamDeckPlugin extends Plugin {
     return [...found.lines.slice(0, start), ...found.lines.slice(end + 1)].join("\n").replace(/\n/g, eol);
   }
 
-  async ensureLifeDailyFile(dateKey) {
-    const lifePath = this.getLifeArchivePath();
-    const lifeParent = lifePath.includes("/") ? lifePath.slice(0, lifePath.lastIndexOf("/")) : "";
-    if (lifeParent) await this.ensureVaultFolder(lifeParent);
-    let file = this.app.vault.getAbstractFileByPath(lifePath);
+  async ensureArchiveFile(ref) {
+    // work-daily-v2 = 旧四段式（仅读取历史数据）；life-daily / work-daily-v3 = 统一简单格式。
+    if (ref.kind === "work-daily-v2") return this.ensureDailyJournalFile(ref.notePath);
+    return this.ensureSimpleArchiveFile(ref.notePath, ref.dateKey);
+  }
+
+  async ensureSimpleArchiveFile(notePath, dateKey) {
+    const parent = notePath.includes("/") ? notePath.slice(0, notePath.lastIndexOf("/")) : "";
+    if (parent) await this.ensureVaultFolder(parent);
+    let file = this.app.vault.getAbstractFileByPath(notePath);
     if (file) return file;
-    try { await this.app.vault.create(lifePath, `${this.formatLifeDateHeading(dateKey)}\n\n`); }
+    try { await this.app.vault.create(notePath, `${this.formatLifeDateHeading(dateKey)}\n\n`); }
     catch (error) {
-      file = this.app.vault.getAbstractFileByPath(lifePath);
+      file = this.app.vault.getAbstractFileByPath(notePath);
       if (!file) throw error;
       return file;
     }
-    file = this.app.vault.getAbstractFileByPath(lifePath);
-    if (!file) throw new Error(`无法创建生活归档文件：${lifePath}`);
+    file = this.app.vault.getAbstractFileByPath(notePath);
+    if (!file) throw new Error(`无法创建归档文件：${notePath}`);
     return file;
-  }
-
-  async ensureArchiveFile(ref) {
-    return ref.kind === "life-daily" ? this.ensureLifeDailyFile(ref.dateKey) : this.ensureDailyJournalFile(ref.notePath);
   }
 
   async writeTaskToArchive(task, ref) {
     const file = await this.ensureArchiveFile(ref);
-    if (ref.kind === "life-daily") {
-      await this.app.vault.process(file, (current) => this.upsertTaskInLifeDaily(current, task, ref.dateKey));
-      return ref.notePath;
-    }
-    return this.writeTaskToDailyJournal(task, ref.notePath);
+    if (ref.kind === "work-daily-v2") return this.writeTaskToDailyJournal(task, ref.notePath);
+    await this.app.vault.process(file, (current) => this.upsertTaskInLifeDaily(current, task, ref.dateKey));
+    return ref.notePath;
   }
 
   archiveMarker(id) {
@@ -14304,7 +14378,9 @@ class JamDeckPlugin extends Plugin {
 
   async ensureDailyJournalFile(targetPath) {
     const context = targetPath ? this.getDayContextFromPath(targetPath) : this.getLocalDayContext(new Date());
-    await this.ensureVaultFolder(this.getWorkArchiveDir());
+    // 旧四段式（work-daily-v2）历史数据专用：目录取持久化路径的父目录，不依赖当前 mode 设置。
+    const dir = context.path.includes("/") ? context.path.slice(0, context.path.lastIndexOf("/")) : "";
+    if (dir) await this.ensureVaultFolder(dir);
     let file = this.app.vault.getAbstractFileByPath(context.path);
     if (file) return file;
     try {
@@ -14333,8 +14409,8 @@ class JamDeckPlugin extends Plugin {
       ? nextTask.category
       : (oldRef.kind === "life-daily" ? "life" : "work");
     const targetRef = targetCategory === "life"
-      ? { kind: "life-daily", notePath: this.getLifeArchivePath(), dateKey: oldRef.dateKey, blockId: oldTask.id }
-      : { kind: "work-daily-v2", notePath: `${this.getWorkArchiveDir()}/${oldRef.dateKey}.md`, dateKey: oldRef.dateKey, blockId: oldTask.id };
+      ? { kind: "life-daily", notePath: this.getLifeArchiveTargetPath(oldRef.dateKey), dateKey: oldRef.dateKey, blockId: oldTask.id }
+      : { kind: "work-daily-v3", notePath: this.getWorkArchiveTargetPath(oldRef.dateKey), dateKey: oldRef.dateKey, blockId: oldTask.id };
     const moving = oldRef.kind !== targetRef.kind || oldRef.notePath !== targetRef.notePath;
     oldTask.pendingJournalOp = {
       type: moving ? "move" : "update",
@@ -14367,8 +14443,8 @@ class JamDeckPlugin extends Plugin {
     if (!path) throw new Error("该归档没有可定位的工作日记路径");
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!file) throw new Error(`工作日记不存在：${path}`);
-    if (ref.kind === "life-daily") await this.app.vault.process(file, (current) => this.upsertTaskInLifeDaily(current, nextTask, ref.dateKey));
-    else await this.app.vault.process(file, (current) => this.replaceTaskBlocksInJournal(current, oldTask, nextTask));
+    if (ref.kind === "work-daily-v2") await this.app.vault.process(file, (current) => this.replaceTaskBlocksInJournal(current, oldTask, nextTask));
+    else await this.app.vault.process(file, (current) => this.upsertTaskInLifeDaily(current, nextTask, ref.dateKey));
     return path;
   }
 
@@ -14472,8 +14548,8 @@ class JamDeckPlugin extends Plugin {
     if (!ref || !ref.notePath) throw new Error("该归档没有可定位的日记路径");
     const file = this.app.vault.getAbstractFileByPath(ref.notePath);
     if (!file) return;
-    if (ref.kind === "life-daily") await this.app.vault.process(file, (current) => this.removeTaskFromLifeDaily(current, taskId, ref.dateKey));
-    else await this.app.vault.process(file, (current) => this.removeTaskFromJournal(current, { id: taskId }));
+    if (ref.kind === "work-daily-v2") await this.app.vault.process(file, (current) => this.removeTaskFromJournal(current, { id: taskId }));
+    else await this.app.vault.process(file, (current) => this.removeTaskFromLifeDaily(current, taskId, ref.dateKey));
   }
 
   async removeArchivedTaskFromJournal(task) {
@@ -16310,29 +16386,62 @@ class JamDeckSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h3", { text: "归档路径", cls: "jam-deck-setting-h3" });
 
-    new Setting(containerEl)
-      .setName("工作归档目录")
-      .setDesc("工作待办归档到的日记目录（按 vault 内路径填写，如 Journal/Work）。默认 Work/工作日记。")
-      .addText((text) => {
-        text.setPlaceholder("Work/工作日记")
-          .setValue(this.plugin.settings.workArchiveDir || WORK_JOURNAL_DIR)
-          .onChange(async (value) => {
-            this.plugin.settings.workArchiveDir = value.trim();
+    const buildArchiveModeRow = (label, modeKey, fileKey, dirKey, defaultFile, defaultDir, filePlaceholder, dirPlaceholder) => {
+      const row = new Setting(containerEl)
+        .setName(label)
+        .setDesc("文件 = 单个 Markdown 按日期分节；目录 = 每天一个 YYYY-MM-DD.md。")
+        .addDropdown((dropdown) => {
+          dropdown.addOption("file", "文件");
+          dropdown.addOption("dir", "目录");
+          dropdown.setValue(this.plugin.settings[modeKey] === "dir" ? "dir" : "file");
+          dropdown.onChange(async (value) => {
+            this.plugin.settings[modeKey] = value;
             await this.plugin.saveSettings();
+            refreshArchiveRows();
           });
-      });
+        });
+      const fileRow = new Setting(containerEl)
+        .setName(`${label} · 文件路径`)
+        .setDesc("归档到单个 Markdown 文件，按日期标题分节。")
+        .addText((text) => {
+          text.setPlaceholder(filePlaceholder)
+            .setValue(this.plugin.settings[fileKey] || defaultFile)
+            .onChange(async (value) => {
+              this.plugin.settings[fileKey] = value.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+      const dirRow = new Setting(containerEl)
+        .setName(`${label} · 目录路径`)
+        .setDesc("归档到目录下按日期生成的 YYYY-MM-DD.md。")
+        .addText((text) => {
+          text.setPlaceholder(dirPlaceholder)
+            .setValue(this.plugin.settings[dirKey] || defaultDir)
+            .onChange(async (value) => {
+              this.plugin.settings[dirKey] = value.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+      return { row, fileRow, dirRow, modeKey };
+    };
 
-    new Setting(containerEl)
-      .setName("生活归档文件")
-      .setDesc("生活待办归档到的 Markdown 文件（按 vault 内路径填写，如 Journal/Life.md）。默认 Life/Daily.md。")
-      .addText((text) => {
-        text.setPlaceholder("Life/Daily.md")
-          .setValue(this.plugin.settings.lifeArchivePath || LIFE_DAILY_PATH)
-          .onChange(async (value) => {
-            this.plugin.settings.lifeArchivePath = value.trim();
-            await this.plugin.saveSettings();
-          });
-      });
+    const workRow = buildArchiveModeRow(
+      "工作归档形式", "workArchiveMode", "workArchiveFile", "workArchiveDir",
+      "Work/工作.md", WORK_JOURNAL_DIR, "Work/工作.md", "Work/工作日记"
+    );
+    const lifeRow = buildArchiveModeRow(
+      "生活归档形式", "lifeArchiveMode", "lifeArchivePath", "lifeArchiveDir",
+      LIFE_DAILY_PATH, "Life/生活日记", "Life/Daily.md", "Life/生活日记"
+    );
+    const refreshArchiveRows = () => {
+      const workMode = this.plugin.settings.workArchiveMode === "dir" ? "dir" : "file";
+      const lifeMode = this.plugin.settings.lifeArchiveMode === "dir" ? "dir" : "file";
+      workRow.fileRow.settingEl.style.display = workMode === "file" ? "" : "none";
+      workRow.dirRow.settingEl.style.display = workMode === "dir" ? "" : "none";
+      lifeRow.fileRow.settingEl.style.display = lifeMode === "file" ? "" : "none";
+      lifeRow.dirRow.settingEl.style.display = lifeMode === "dir" ? "" : "none";
+    };
+    refreshArchiveRows();
   }
 }
 

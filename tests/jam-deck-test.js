@@ -2094,8 +2094,10 @@ for (const layer of [folderDomView.backboard, folderDomView.representatives, fol
 }
 folderDomView.shell.dispatchEvent({ type: "click", target: folderDomView.shell, preventDefault() {}, stopPropagation() {} });
 assert.strictEqual(folderDomClickCount, 1, "folder root click must retain the legacy stack preview proxy");
-assert.strictEqual(folderDomView.controls.children.length, 2, "folder hover toolbar must expose color and ungroup actions");
+assert.strictEqual(folderDomView.controls.children.length, 3, "folder hover toolbar must expose color, ungroup and rename actions");
 assert.strictEqual(folderDomView.controls.children[0], folderDomView.color, "folder toolbar keyboard order must start with color");
+assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar order must keep ungroup second");
+assert.strictEqual(folderDomView.controls.children[2], folderDomView.rename, "folder toolbar order must place rename last");
 assert(styleSource.includes("perspective(420px) rotateX(-30deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must hinge on the bottom edge and raise the top edge toward the viewer");
 assert(styleSource.includes(".canvas-node-group") && styleSource.includes("visibility: hidden !important"), "Jam Deck must keep native group frames data-only (shell is the only visible grouping surface)");
 assert(folderControllerSource.includes("JAM_DECK_NATIVE_GROUP_BASE_HEIGHT"), "native group frame must use the explicit 200×180 baseline");
@@ -2713,7 +2715,7 @@ async function testArchiveIntegration() {
   files.set(task.images[0].path, Buffer.from([1, 3, 3, 7]));
   instance.app.fileManager = {
     getAvailablePathForAttachment: async (filename, sourcePath) =>
-      String(sourcePath) === "Life/Daily.md"
+      String(sourcePath) === "Life/Daily.md" || String(sourcePath) === "Life/生活日记.md"
         ? `Life/附件/${filename}`
         : String(sourcePath).endsWith(".md")
         ? `Work/工作日记/附件/${filename}`
@@ -2795,24 +2797,30 @@ async function testArchiveIntegration() {
   await instance.removeClipboardAttachment("clip-persist.png");
   assert(files.has(persistentCanvasImage.path), "clearing a clipboard source must not delete its Canvas attachment");
 
+  // 0.30 统一归档格式：默认 file 模式（单文件按日期分节，简单块）。
+  instance.settings.workArchiveMode = "file";
+  instance.settings.workArchiveFile = "Work/工作.md";
   await instance.archiveDeckTask(task.id);
   assert.strictEqual(instance.settings.deckTasks[0].status, "archived");
   const journalPath = instance.settings.deckTasks[0].journalPath;
-  assert.strictEqual(instance.getTaskBlockRanges(files.get(journalPath), task.id).count, 4);
-  assert.strictEqual(instance.settings.deckTasks[0].archiveFormat, "section-v2");
-  assert(instance.settings.deckTasks[0].images[0].path.startsWith("Work/工作日记/附件/"), "archived task images must move into the journal attachment folder");
-  assert(files.get(journalPath).includes(`![[${instance.settings.deckTasks[0].images[0].path}]]`), "journal must reference the migrated attachment");
+  assert.strictEqual(journalPath, "Work/工作.md", "work archive must honor file mode path");
+  assert.strictEqual(instance.settings.deckTasks[0].archiveFormat, "simple-v1");
+  assert.strictEqual(instance.settings.deckTasks[0].archiveRef.kind, "work-daily-v3", "work archive must use the unified simple format kind");
+  const workMarkdown = files.get(journalPath);
+  assert(instance.findLifeTaskBlock(workMarkdown, task.id).range, "work simple format must create one dated block");
+  assert(workMarkdown.includes("  - 分类：工作"), "work simple block must carry the work category");
+  assert(workMarkdown.includes(`![[${instance.settings.deckTasks[0].images[0].path}]]`), "journal must reference the migrated attachment");
   assert(!files.has(task.images[0].path), "a newly archived task-owned source should be removed only after settings commit");
 
   const archived = instance.settings.deckTasks[0];
   const edited = { ...archived, text: "编辑后的归档" };
   await instance.replaceArchivedTaskInJournal(archived, edited);
   archived.text = edited.text;
-  assert(files.get(journalPath).includes("- 编辑后的归档"));
+  assert(files.get(journalPath).includes("- [x] 编辑后的归档"), "simple format edit must rewrite the task title line");
 
   assert(await instance.restoreArchivedTask(task.id));
   assert.strictEqual(instance.settings.deckTasks[0].status, "active");
-  assert.strictEqual(instance.getTaskBlockRanges(files.get(journalPath), task.id).count, 0);
+  assert(!instance.findLifeTaskBlock(files.get(journalPath), task.id).range, "restore must remove the simple block");
 
   instance.settings.deckTasks[0].status = "completed";
   instance.settings.deckTasks[0].completedAt = 3;
@@ -2821,7 +2829,7 @@ async function testArchiveIntegration() {
   assert(instance.findLifeTaskBlock(files.get("Life/Daily.md"), task.id).range, "re-archive must create one life block");
   assert(await instance.deleteArchivedTask(task.id, true));
   assert.strictEqual(instance.settings.deckTasks.length, 0);
-  assert.strictEqual(instance.getTaskBlockRanges(files.get(journalPath), task.id).count, 0, "purge must remove journal blocks");
+  assert(!instance.findLifeTaskBlock(files.get(journalPath), task.id).range, "purge must remove journal blocks");
 
   await instance.createTaskFromDroppedText("拖入标题\n拖入说明");
   assert.strictEqual(instance.settings.deckTasks[0].text, "拖入标题");
@@ -2876,13 +2884,13 @@ async function testArchiveIntegration() {
   console.error = originalConsoleError;
   assert.strictEqual(retryTask.status, "completed");
   assert(retryTask.archiveTargetPath, "failed final save must retain deterministic target path");
-  assert.strictEqual(instance.getTaskBlockRanges(files.get(retryTask.archiveTargetPath), retryTask.id).count, 4);
+  assert(instance.findLifeTaskBlock(files.get(retryTask.archiveTargetPath), retryTask.id).range, "failed save must still stage a simple block");
   assert(files.has(retrySourcePath), "settings failure must retain the original task attachment");
   instance.saveData = async () => {};
   await instance.archiveDeckTask(retryTask.id);
   assert.strictEqual(retryTask.status, "archived");
-  assert.strictEqual(instance.getTaskBlockRanges(files.get(retryTask.journalPath), retryTask.id).count, 4, "retry must not duplicate section blocks");
-  assert(retryTask.images[0].path.startsWith("Work/工作日记/附件/"));
+  assert.strictEqual(retryTask.journalPath, "Work/工作.md", "retry must keep the file-mode target");
+  assert(instance.findLifeTaskBlock(files.get(retryTask.journalPath), retryTask.id).range, "retry must not duplicate simple blocks");
   assert(!files.has(retrySourcePath), "successful retry may clean the proven task-owned source");
 
   const historicalSource = "attachments/jam-deck-task-assets/2026-07-21/history-task-history.png";
@@ -2906,6 +2914,19 @@ async function testArchiveIntegration() {
   assert(files.has(historicalSource), "historical migration must preserve the old source as a safety copy");
   const repeatedMigration = await instance.migrateArchivedTaskAssets();
   assert.strictEqual(repeatedMigration.migrated, 0, "historical migration must be idempotent");
+
+  // 0.30 目录模式：工作归档落到 dir/dateKey.md，且同样走统一简单块。
+  const dirModeTask = { ...task, id: "task-dirmode", images: [], status: "completed", createdAt: 20, completedAt: 21, archivedAt: null, journalPath: null, archiveFormat: null, archiveTargetDate: null, archiveTargetPath: null };
+  instance.settings.deckTasks.unshift(dirModeTask);
+  instance.settings.workArchiveMode = "dir";
+  instance.settings.workArchiveDir = "Work/工作日记";
+  await instance.archiveDeckTask(dirModeTask.id);
+  assert.strictEqual(dirModeTask.status, "archived");
+  assert.strictEqual(dirModeTask.archiveRef.kind, "work-daily-v3");
+  assert.strictEqual(dirModeTask.journalPath, "Work/工作日记/2026-08-06.md", "dir mode must archive into the dated file");
+  assert(instance.findLifeTaskBlock(files.get("Work/工作日记/2026-08-06.md"), dirModeTask.id).range, "dir mode must write the unified simple block");
+  assert(await instance.deleteArchivedTask(dirModeTask.id, true));
+  instance.settings.workArchiveMode = "file";
 
   const draftId = await instance.createDeckTaskFromDraft({
     text: "体检预约",
@@ -2937,19 +2958,32 @@ async function testArchiveIntegration() {
   assert(await instance.restoreArchivedTask(lifeArchiveTask.id));
   assert(!instance.findLifeTaskBlock(files.get("Life/Daily.md"), lifeArchiveTask.id).range, "life restore must remove only its stable block");
 
-  // P1-1 归档路径设置：缺省回退内置常量，自定义时生效。
-  instance.settings.workArchiveDir = "";
+  // 归档模式与路径（0.30）：缺省回退内置常量，mode 决定 file/dir。
+  instance.settings.workArchiveMode = "file";
+  instance.settings.workArchiveFile = "";
+  instance.settings.lifeArchiveMode = "file";
   instance.settings.lifeArchivePath = "";
-  assert.strictEqual(instance.getWorkArchiveDir(), "Work/工作日记", "empty work archive dir must fall back to the built-in default");
+  assert.strictEqual(instance.getWorkArchiveMode(), "file", "empty work mode must fall back to file");
+  assert.strictEqual(instance.getLifeArchiveMode(), "file", "empty life mode must fall back to file");
+  assert.strictEqual(instance.getWorkArchiveFile(), "Work/工作.md", "empty work file must fall back to the built-in default");
   assert.strictEqual(instance.getLifeArchivePath(), "Life/Daily.md", "empty life archive path must fall back to the built-in default");
+  assert.strictEqual(instance.getWorkArchiveTargetPath("2026-07-31"), "Work/工作.md", "file mode must ignore the date in the target path");
+  assert.strictEqual(instance.getLifeArchiveTargetPath("2026-07-31"), "Life/Daily.md", "file mode must keep the single-file target");
+  instance.settings.workArchiveMode = "dir";
   instance.settings.workArchiveDir = "Journal/Work";
+  instance.settings.lifeArchiveMode = "dir";
+  instance.settings.lifeArchiveDir = "Journal/Life";
+  assert.strictEqual(instance.getWorkArchiveTargetPath("2026-07-31"), "Journal/Work/2026-07-31.md", "dir mode must build a dated work file");
+  assert.strictEqual(instance.getLifeArchiveTargetPath("2026-07-31"), "Journal/Life/2026-07-31.md", "dir mode must build a dated life file");
+  instance.settings.workArchiveMode = "file";
+  instance.settings.workArchiveFile = "Journal/Work.md";
+  instance.settings.lifeArchiveMode = "file";
   instance.settings.lifeArchivePath = "Journal/Life.md";
-  assert.strictEqual(instance.getWorkArchiveDir(), "Journal/Work", "work archive dir must read the configured setting");
-  assert.strictEqual(instance.getLifeArchivePath(), "Journal/Life.md", "life archive path must read the configured setting");
   const customRef = instance.buildArchiveRef(lifeArchiveTask, "2026-07-31", "life");
-  assert.strictEqual(customRef.notePath, "Journal/Life.md", "life archive ref must honor the configured path");
+  assert.strictEqual(customRef.notePath, "Journal/Life.md", "life archive ref must honor the configured file");
   const customWorkRef = instance.buildArchiveRef(lifeArchiveTask, "2026-07-31", "work");
-  assert.strictEqual(customWorkRef.notePath, "Journal/Work/2026-07-31.md", "work archive ref must honor the configured dir");
+  assert.strictEqual(customWorkRef.notePath, "Journal/Work.md", "work archive ref must honor the configured file");
+  assert.strictEqual(customWorkRef.kind, "work-daily-v3", "work archive ref must use the unified simple kind");
 }
 
 testArchiveIntegration().then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {

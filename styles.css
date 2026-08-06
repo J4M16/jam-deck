@@ -1651,6 +1651,16 @@
   max-height: calc(100vh - 32px);
   overflow: hidden;
 }
+
+.jam-deck-folder-rename-input {
+  width: 100%;
+  margin: 10px 0 16px;
+}
+.jam-deck-folder-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .jam-deck-task-modal,
 .jam-deck-task-modal * { box-sizing: border-box; }
 .jam-deck-task-modal {

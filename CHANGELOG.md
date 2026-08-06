@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## 0.30.0 — 2026-08-06
+
+- **归档形式可配置 + 统一简单格式（发布计划 P1 体验完善）**：
+  - 设置面板「归档路径」段改版：工作/生活各一个「归档形式」下拉（**文件 / 目录**，默认都是文件）+ 对应路径输入，切换时自动显隐。
+  - **文件模式**（默认）：归档到单个 Markdown（工作 `Work/工作.md`、生活 `Life/Daily.md`），按 `# YYYY年M月D日` 标题分节。
+  - **目录模式**：归档到目录下按日期生成 `YYYY-MM-DD.md`（工作 `Work/工作日记/`、生活 `Life/生活日记/`）。
+  - **格式统一**：工作归档从旧四段式（`work-daily-v2` frontmatter + 工作内容/效果图/链接/备注）改为与生活一致的**统一简单块格式**（`- [x] 标题` + 分类/截止/说明/链接/图片 + `<!-- jam-deck-life-task:...-->` 标记），新 kind `work-daily-v3`；工作/生活仅「分类」行不同。
+  - **旧数据兼容**：`work-daily-v2` 四段式历史归档仍可读取/恢复/编辑（`archiveFormat: "section-v2"` 保留），不会被新归档覆盖；`getTaskArchiveRef` 兜底判断生活目录模式路径。
+  - README 新增「归档格式」章节：两种模式的产物结构 + 任务块标记说明。
+- 回归：测试重构——工作归档断言改统一简单块（file 模式单文件 + dir 模式日期文件），新增 dir 模式集成断言与 mode/path getter 断言；旧四段式历史数据迁移断言保留。`npm run verify` 全绿。
+- 处理模型签名：MiniMax-M3（WorkBuddy 主对话）
+
 ## 0.29.5 — 2026-08-06
 
 - **归档路径可配置（P1-1）**：设置面板新增「工作归档目录」（默认 `Work/工作日记`）与「生活归档文件」（默认 `Life/Daily.md`）两项。`getWorkArchiveDir()` / `getLifeArchivePath()` 读设置、空值回退内置常量，旧 vault 行为完全不变；`ensureVaultFolder` 兜底保留。回归：fixture 补缺省回退 + 自定义路径断言，verify 全绿。
