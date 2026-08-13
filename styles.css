@@ -2925,6 +2925,8 @@
   min-height: 0;
   margin: 0;
   padding: 0;
+  /* Jam 2026-08-13: move the count and name as one visual group. */
+  transform: translateY(20px);
   pointer-events: none;
   user-select: none;
 }
@@ -3153,6 +3155,7 @@
   gap: 6px;
   min-width: 0;
   overflow: hidden;
+  transform: none;
   pointer-events: auto;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-label {
