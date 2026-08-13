@@ -2865,13 +2865,13 @@
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-open > .jam-deck-canvas-folder-front {
   opacity: 0;
   visibility: visible;
-  transform: perspective(420px) rotateX(-80deg);
+  transform: perspective(420px) rotateX(-48deg);
   transform-origin: 50% 100%;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing > .jam-deck-canvas-folder-front {
   opacity: 0;
   visibility: visible;
-  transform: perspective(420px) rotateX(-80deg);
+  transform: perspective(420px) rotateX(-48deg);
   transform-origin: 50% 100%;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-closing-flap) > .jam-deck-canvas-folder-front {
@@ -2883,14 +2883,14 @@
 .jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-opening, .is-preview-open) > .jam-deck-canvas-folder-header {
   opacity: 0;
   visibility: hidden;
-  transform: perspective(420px) rotateX(-80deg);
+  transform: perspective(420px) rotateX(-48deg);
   transform-origin: 50% 100%;
   pointer-events: none;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing > .jam-deck-canvas-folder-header {
   opacity: 0;
   visibility: hidden;
-  transform: perspective(420px) rotateX(-80deg);
+  transform: perspective(420px) rotateX(-48deg);
   transform-origin: 50% 100%;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing-flap > .jam-deck-canvas-folder-header {
@@ -3308,7 +3308,7 @@
   transition-delay: 0s;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder:not(.is-preview-opening):not(.is-preview-open):not(.is-preview-closing):is(:hover, :focus-within) > .jam-deck-canvas-folder-front {
-  transform: perspective(420px) rotateX(-30deg);
+  transform: perspective(420px) rotateX(-18deg);
   transform-origin: 50% 100%;
   opacity: 1;
   visibility: visible;

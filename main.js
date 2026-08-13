@@ -3756,10 +3756,11 @@ class CanvasImageStackController {
   }
 
   prepareBystanders(cluster, layout, rootRect) {
-    // Explicit folders already have a strong shell/card relationship. Moving
-    // every unrelated Canvas node creates dozens of composited layers on
-    // image-heavy boards and is far more expensive than the four-card motion.
-    if (cluster && cluster.folderId) return [];
+    // Explicit folders only displace nodes actually covered by the opened
+    // cards. Legacy free stacks retain their softer 64px influence field.
+    // This restores the folder's spatial push without recreating dozens of
+    // compositor layers across an image-heavy board.
+    const explicitFolder = Boolean(cluster && cluster.folderId);
     const selectedIds = new Set(cluster.members.map((member) => member.id));
     const focus = {
       left: layout.x,
@@ -3770,6 +3771,17 @@ class CanvasImageStackController {
     const pending = [];
     for (const item of this.getCanvasItems()) {
       if (selectedIds.has(item.id) || !item.node || !item.node.nodeEl || !item.node.nodeEl.isConnected) continue;
+      const jamdeck = item.data && item.data.jamdeck;
+      if (explicitFolder && jamdeck && (jamdeck.folderId || jamdeck.folder || jamdeck.folderGroupId)) continue;
+      if (
+        explicitFolder
+        && item.node.nodeEl.classList
+        && (
+          item.node.nodeEl.classList.contains("is-jam-deck-folder-proxy-hidden")
+          || item.node.nodeEl.classList.contains("is-jam-deck-folder-collapsed")
+          || item.node.nodeEl.classList.contains("is-jam-deck-folder-hidden-member")
+        )
+      ) continue;
       const screen = item.node.nodeEl.getBoundingClientRect();
       const rect = {
         left: screen.left - rootRect.left,
@@ -3781,6 +3793,8 @@ class CanvasImageStackController {
         rect,
         focus,
         { width: rootRect.width, height: rootRect.height },
+        20,
+        explicitFolder ? 0 : 64,
       );
       if (Math.abs(shift.x) < 0.5 && Math.abs(shift.y) < 0.5) continue;
       const scale = jamDeckCanvasStackScreenScale(item);
@@ -5539,7 +5553,7 @@ class CanvasFolderController {
       runtime.animation = null;
     }
     const startTransform = "perspective(260px) rotateX(0deg)";
-    const openTransform = "perspective(260px) rotateX(-80deg)";
+    const openTransform = "perspective(260px) rotateX(-48deg)";
     const start = open ? { transform: startTransform, opacity: 1 } : { transform: openTransform, opacity: 0 };
     const end = open ? { transform: openTransform, opacity: 0 } : { transform: startTransform, opacity: 1 };
     const finish = () => {
@@ -5549,7 +5563,7 @@ class CanvasFolderController {
       // Cancel the fill:"both" WAAPI animation so its persisted end state stops
       // overriding the CSS transform. Without this, one preview open/close cycle
       // leaves front pinned at perspective(260px) rotateX(0deg) and the CSS
-      // :hover/:focus-within flap motion can never re-apply rotateX(-30deg).
+      // :hover/:focus-within flap motion can never re-apply rotateX(-18deg).
       if (latest.animation && typeof latest.animation.cancel === "function") {
         try { latest.animation.cancel(); } catch (error) {}
       }

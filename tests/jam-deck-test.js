@@ -1423,7 +1423,8 @@ assert(folderControllerSource.includes('nodeEl.addClass("is-jam-deck-folder-prox
 assert(!folderControllerSource.includes('nodeEl.style.zIndex =') && !folderControllerSource.includes('nodeEl.style.position ='), "folder presentation must not overwrite native node stacking styles");
 assert(stackControllerSource.includes("ownedPreviewOnly") && stackControllerSource.includes("this.overlay.contains(mutation.target)"), "preview-owned DOM mutations must not rerun the quadratic stack reconciler");
 assert(folderControllerSource.includes("stackOverlay.contains(mutation.target)"), "folder reconciliation must ignore stack-preview mount and cleanup mutations");
-assert(stackControllerSource.includes("if (cluster && cluster.folderId) return []"), "explicit folder previews must not composite every unrelated Canvas node for bystander displacement");
+assert(stackControllerSource.includes("const explicitFolder = Boolean(cluster && cluster.folderId)") && stackControllerSource.includes("explicitFolder ? 0 : 64"), "explicit folder previews must only displace nodes actually covered by the opened cards");
+assert(stackControllerSource.includes("jamdeck.folderId || jamdeck.folder || jamdeck.folderGroupId") && stackControllerSource.includes('classList.contains("is-jam-deck-folder-proxy-hidden")'), "explicit folder displacement must skip hidden folder-owned Canvas nodes");
 assert(stackShowPreviewSource.indexOf("const previewBystanders = this.prepareBystanders") < stackShowPreviewSource.indexOf("this.overlay.appendChild(wrapper)"), "preview geometry reads must finish before mounting the overlay");
 assert(stackControllerSource.includes("const folderSource = cluster && cluster.folderId ? visual.source : null"), "folder cards must return to their visible proxy source instead of hidden native-node geometry");
 assert(stackControllerSource.includes("Number(target.x) || 0") && stackControllerSource.includes("returnLeft - targetLeft"), "preview collapse must convert layout x/y into finite return offsets instead of emitting NaNpx");
@@ -1950,7 +1951,7 @@ assert(pluginSource.includes("entry.folderController.install()"), "Canvas runtim
 assert(pluginSource.includes("if (entry.folderController)"), "Canvas runtime destroy must own folder controller cleanup");
 assert(pluginSource.includes("entry.folderController.destroy()"), "Canvas runtime destroy must destroy the folder controller");
 assert(pluginSource.includes("destroyPromises = new Map()") && pluginSource.includes("this.destroyPromises.get(widgetId)"), "Canvas runtime destroy must serialize repeated lifecycle calls");
-assert(pluginSource.includes("perspective(260px) rotateX(-80deg)"), "folder front must hinge at the bottom edge and lift the top edge toward the viewer so the top edge reads wider");
+assert(pluginSource.includes("perspective(260px) rotateX(-48deg)"), "folder preview flap must use the reduced 48-degree hinge amplitude");
 assert(styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-folder-front,"), "the folder front hinge must stay on the bottom edge");
 assert(pluginSource.includes("const hasSelectedMember = (group.members || []).some((member) => member && member.node && this.canvas.selection.has(member.node));") && pluginSource.includes("if (hasSelectedMember) this.canvas.deselectAll();"), "collapsing a folder must clear selected members so the giant selection box shrinks to the shell");
 
@@ -2140,7 +2141,8 @@ assert.strictEqual(folderDomView.controls.children.length, 3, "folder hover tool
 assert.strictEqual(folderDomView.controls.children[0], folderDomView.color, "folder toolbar keyboard order must start with color");
 assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar order must keep ungroup second");
 assert.strictEqual(folderDomView.controls.children[2], folderDomView.rename, "folder toolbar order must place rename last");
-assert(styleSource.includes("perspective(420px) rotateX(-30deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must hinge on the bottom edge and raise the top edge toward the viewer");
+assert(styleSource.includes("perspective(420px) rotateX(-18deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must use the reduced 18-degree hinge amplitude");
+assert((styleSource.match(/rotateX\(-48deg\)/g) || []).length === 4 && !styleSource.includes("rotateX(-80deg)"), "folder preview CSS fallback and header must share the reduced 48-degree endpoint");
 assert(styleSource.includes(".canvas-node-group") && styleSource.includes("visibility: hidden !important"), "Jam Deck must keep native group frames data-only (shell is the only visible grouping surface)");
 assert(folderControllerSource.includes("JAM_DECK_NATIVE_GROUP_BASE_HEIGHT"), "native group frame must use the explicit 200×180 baseline");
 assert(folderControllerSource.includes('data.type === "group"') && !folderControllerSource.includes('nodeType === "group"'), "native group lookup must match by id + serialized type because 1.13 minifies nodeType");
@@ -2447,6 +2449,19 @@ assert.deepStrictEqual(
   { x: 0, y: 0 },
   "a distant image must not move",
 );
+assert.deepStrictEqual(
+  stackGeometry.bystanderShift({ left: 250, top: 260, right: 290, bottom: 340 }, focusRect, viewportRect, 20, 0),
+  { x: 0, y: 0 },
+  "explicit folder narrow displacement must not move a nearby node that is not covered",
+);
+const narrowFolderShift = stackGeometry.bystanderShift(
+  { left: 290, top: 260, right: 330, bottom: 340 },
+  focusRect,
+  viewportRect,
+  20,
+  0,
+);
+assert(narrowFolderShift.x <= -30, "explicit folder narrow displacement must clear a covered node with the 20px safety gap");
 
 const plugin = new JamDeckPlugin();
 assert.strictEqual(plugin.getCanvasInkSidecarPath("Work/Board.canvas"), "Work/Board.canvas.jam-deck.json");
