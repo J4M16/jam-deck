@@ -2088,6 +2088,20 @@ const folderDomDocument = {
   addEventListener: () => {},
   removeEventListener: () => {},
 };
+
+// Image previews must resolve from the persisted Canvas file path even when
+// the hidden native node has not hydrated a .canvas-node-content element yet.
+const canonicalImageController = new JamDeckPlugin.CanvasImageStackController({
+  deckView: { app: { vault: { adapter: { getResourcePath: (path) => `app://vault/${path}` } } } },
+}, { ownerDocument: folderDomDocument });
+const canonicalImageSurface = canonicalImageController.createPreviewSurface({
+  kind: "image",
+  node: { nodeEl: new FolderDomFixtureElement("div") },
+  data: { type: "file", file: "Assets/folder-preview.png" },
+});
+assert.strictEqual(canonicalImageSurface.children.length, 1, "image preview must create a real image without waiting for native Canvas DOM hydration");
+assert.strictEqual(canonicalImageSurface.children[0].src, "app://vault/Assets/folder-preview.png", "image preview must use the Vault resource URL derived from Canvas data.file");
+assert.strictEqual(canonicalImageSurface.children[0].alt, "", "decorative folder thumbnails must keep empty alt text");
 const folderDomLayer = new FolderDomFixtureElement("div");
 const folderDomController = new JamDeckPlugin.CanvasFolderController({}, { ownerDocument: folderDomDocument });
 folderDomController.layer = folderDomLayer;
@@ -2165,6 +2179,7 @@ assert.strictEqual(proxyAnchorEl.parentNode, proxyScene, "folder rendering must 
 assert.strictEqual(proxyMemberEl.parentNode, proxyScene, "folder rendering must never reparent another real member node");
 assert.strictEqual(proxyHiddenMemberEl.parentNode, proxyScene, "folder rendering must keep non-representative members in the native scene");
 assert.strictEqual(proxyView.representatives.children.length, 2, "folder shell must contain one sanitized proxy for each representative");
+assert(proxyView.representatives.children[0].children[0].classList.contains("jam-deck-canvas-folder-proxy-surface"), "folder representative surfaces must receive the scoped thumbnail sizing class");
 proxyView.shell.rect = { left: 200, top: 120, width: 200, height: 150 };
 proxyView.representatives.children[0].rect = { left: 220, top: 130, width: 90, height: 70 };
 proxyView.representatives.children[1].rect = { left: 280, top: 126, width: 90, height: 70 };
@@ -2943,11 +2958,12 @@ async function testArchiveIntegration() {
   instance.settings.deckTasks.unshift(dirModeTask);
   instance.settings.workArchiveMode = "dir";
   instance.settings.workArchiveDir = "Work/工作日记";
+  const dirModeDateKey = instance.getLocalDayContext(new Date()).date;
   await instance.archiveDeckTask(dirModeTask.id);
   assert.strictEqual(dirModeTask.status, "archived");
   assert.strictEqual(dirModeTask.archiveRef.kind, "work-daily-v3");
-  assert.strictEqual(dirModeTask.journalPath, "Work/工作日记/2026-08-06.md", "dir mode must archive into the dated file");
-  assert(instance.findLifeTaskBlock(files.get("Work/工作日记/2026-08-06.md"), dirModeTask.id).range, "dir mode must write the unified simple block");
+  assert.strictEqual(dirModeTask.journalPath, `Work/工作日记/${dirModeDateKey}.md`, "dir mode must archive into the dated file");
+  assert(instance.findLifeTaskBlock(files.get(`Work/工作日记/${dirModeDateKey}.md`), dirModeTask.id).range, "dir mode must write the unified simple block");
   assert(await instance.deleteArchivedTask(dirModeTask.id, true));
   instance.settings.workArchiveMode = "file";
 

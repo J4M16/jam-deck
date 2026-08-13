@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-13 — 0.30.4 修复 Canvas 文件夹图片预览丢失
+
+- Jam 反馈：打开 Canvas 后，文件夹内部的四张示例预览只显示“图片”占位，真实效果图丢失。
+- 根因：折叠壳体与点开后的散开预览共用 `CanvasImageStackController.createPreviewSurface`；旧实现复制 Obsidian 原生 `.canvas-node-content`。文件夹成员在折叠时已被隐藏，首次打开 Canvas 又可能尚未完成图片 DOM 加载，于是复制不到真实内容并退回“图片”占位；折叠代理的稳定签名随后阻止了重建。
+- 修复：图片成员优先读取 `member.node.file.path` / Canvas `data.file`，通过 Vault adapter 生成资源地址并创建只读 `<img>`；只有无法解析路径时才沿用 DOM 克隆兜底。该共享修复同时覆盖折叠代表图与点开文件夹后的散开预览，不修改 Canvas 数据和 `data.json`。
+- 回归：新增“隐藏原生节点尚未 hydration 时，仍由 Canvas 文件路径得到真实图片 URL”的测试；同时把目录归档用例写死的 `2026-08-06` 改为当天日期。`npm run verify` 全绿。
+- 处理模型签名：具体模型标识不可见（主代理）、具体模型标识不可见（只读代码侦察）
+
 ## 2026-08-06 — 0.30.3 归档标记改 Obsidian 隐藏注释
 
 - Jam 反馈：归档内容常带 `<!-- jam-deck>...` 开头的一串英文，在日记中影响观感，希望能隐藏。

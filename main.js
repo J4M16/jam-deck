@@ -3697,6 +3697,37 @@ class CanvasImageStackController {
   }
 
   createPreviewSurface(member) {
+    // Folder members are hidden while collapsed, so Obsidian may never hydrate
+    // their native <img> DOM before the folder asks for a thumbnail.  Resolve
+    // image nodes from the canonical Canvas file path instead of cloning that
+    // timing-dependent DOM; this also keeps the expanded preview deterministic.
+    if (member && member.kind === "image" && this.entry && this.entry.ownerDocument) {
+      const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
+      const filePath = String(
+        member.node && member.node.file && member.node.file.path
+        || member.data && member.data.file
+        || "",
+      ).trim();
+      const adapter = app && app.vault && app.vault.adapter;
+      if (filePath && adapter && typeof adapter.getResourcePath === "function") {
+        try {
+          const src = adapter.getResourcePath(filePath);
+          if (src) {
+            const surface = this.entry.ownerDocument.createElement("div");
+            surface.className = "jam-deck-canvas-stack-preview-surface is-image";
+            surface.setAttribute("aria-hidden", "true");
+            surface.setAttribute("draggable", "false");
+            const image = this.entry.ownerDocument.createElement("img");
+            image.src = src;
+            image.alt = "";
+            image.setAttribute("aria-hidden", "true");
+            image.setAttribute("draggable", "false");
+            surface.appendChild(image);
+            return surface;
+          }
+        } catch (error) {}
+      }
+    }
     const nodeEl = member && member.node && member.node.nodeEl;
     const content = nodeEl && nodeEl.querySelector(".canvas-node-content");
     if (content) {
@@ -6835,7 +6866,10 @@ class CanvasFolderController {
   createFolderProxySurface(member) {
     if (this.stack && typeof this.stack.createPreviewSurface === "function") {
       const surface = this.stack.createPreviewSurface(member);
-      if (surface) return surface;
+      if (surface) {
+        surface.classList && surface.classList.add("jam-deck-canvas-folder-proxy-surface");
+        return surface;
+      }
     }
     const nodeEl = member && member.node && member.node.nodeEl;
     const content = nodeEl && nodeEl.querySelector && nodeEl.querySelector(".canvas-node-content");
