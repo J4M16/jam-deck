@@ -2923,7 +2923,15 @@ class CanvasImageStackController {
     this.disposers.push(() => this.root.removeEventListener("keydown", keydown, true));
     const MutationObserverCtor = this.ownerWindow.MutationObserver;
     if (typeof MutationObserverCtor === "function") {
-      this.observer = new MutationObserverCtor(() => {
+      this.observer = new MutationObserverCtor((mutations) => {
+        // The preview overlay is fully runtime-owned. Its card mount/unmount
+        // does not change Canvas geometry, so feeding those mutations back
+        // into the O(n²) overlap reconciler only burns frames during motion.
+        const ownedPreviewOnly = mutations.length > 0 && mutations.every((mutation) => (
+          this.overlay
+          && (mutation.target === this.overlay || this.overlay.contains(mutation.target))
+        ));
+        if (ownedPreviewOnly) return;
         if (!this.drag) this.scheduleReconcile();
       });
       this.observer.observe(this.root, { subtree: true, childList: true });
@@ -3748,6 +3756,10 @@ class CanvasImageStackController {
   }
 
   prepareBystanders(cluster, layout, rootRect) {
+    // Explicit folders already have a strong shell/card relationship. Moving
+    // every unrelated Canvas node creates dozens of composited layers on
+    // image-heavy boards and is far more expensive than the four-card motion.
+    if (cluster && cluster.folderId) return [];
     const selectedIds = new Set(cluster.members.map((member) => member.id));
     const focus = {
       left: layout.x,
@@ -3755,7 +3767,7 @@ class CanvasImageStackController {
       right: layout.x + layout.width,
       bottom: layout.y + layout.height,
     };
-    const bystanders = [];
+    const pending = [];
     for (const item of this.getCanvasItems()) {
       if (selectedIds.has(item.id) || !item.node || !item.node.nodeEl || !item.node.nodeEl.isConnected) continue;
       const screen = item.node.nodeEl.getBoundingClientRect();
@@ -3772,9 +3784,14 @@ class CanvasImageStackController {
       );
       if (Math.abs(shift.x) < 0.5 && Math.abs(shift.y) < 0.5) continue;
       const scale = jamDeckCanvasStackScreenScale(item);
-      const nodeEl = item.node.nodeEl;
-      nodeEl.style.setProperty("--jd-stack-bystander-x", `${shift.x / scale}px`);
-      nodeEl.style.setProperty("--jd-stack-bystander-y", `${shift.y / scale}px`);
+      pending.push({ nodeEl: item.node.nodeEl, x: shift.x / scale, y: shift.y / scale });
+    }
+    // Keep layout reads above and style writes below so one preview does not
+    // repeatedly force synchronous layout for every bystander.
+    const bystanders = [];
+    for (const { nodeEl, x, y } of pending) {
+      nodeEl.style.setProperty("--jd-stack-bystander-x", `${x}px`);
+      nodeEl.style.setProperty("--jd-stack-bystander-y", `${y}px`);
       nodeEl.addClass("is-jam-deck-stack-bystander");
       bystanders.push(nodeEl);
     }
@@ -3815,7 +3832,6 @@ class CanvasImageStackController {
       const built = this.createPreviewCard(visual, layout.positions[index], rootRect, index);
       if (!built) return;
       wrapper.appendChild(built.card);
-      visual.member.node.nodeEl.addClass("is-jam-deck-stack-source-ghost");
       previewCards.push(built);
     });
     if (previewCards.length < 2) {
@@ -3823,12 +3839,16 @@ class CanvasImageStackController {
       this.externalPreviewClusters.delete(cluster.id);
       return;
     }
+    // Measure the existing Canvas before mounting the overlay or hiding source
+    // nodes. This avoids a write -> full-board layout-read flush on open.
+    const previewBystanders = this.prepareBystanders(cluster, layout, rootRect);
+    for (const visual of previewCards) visual.member.node.nodeEl.addClass("is-jam-deck-stack-source-ghost");
     this.overlay.appendChild(wrapper);
     this.previewWrapper = wrapper;
     this.previewCards = previewCards;
     this.previewCluster = cluster;
     this.previewClusterId = cluster.id;
-    this.previewBystanders = this.prepareBystanders(cluster, layout, rootRect);
+    this.previewBystanders = previewBystanders;
     this.notifyFolderPreview(cluster, "opening", { reason: "stack-open" });
     wrapper.getBoundingClientRect();
     this.ownerWindow.requestAnimationFrame(() => {
@@ -3988,14 +4008,19 @@ class CanvasImageStackController {
     for (const nodeEl of bystanders) nodeEl.removeClass("is-jam-deck-stack-displaced");
     const rootRect = this.root.getBoundingClientRect();
     cards.forEach((visual, index) => {
-      const nodeEl = visual.member && visual.member.node && visual.member.node.nodeEl;
-      const latest = nodeEl && nodeEl.isConnected ? nodeEl.getBoundingClientRect() : null;
       const target = visual.position || visual.source;
-      const returnLeft = latest ? latest.left - rootRect.left : target.left;
-      const returnTop = latest ? latest.top - rootRect.top : target.top;
-      const returnScale = latest && target.width ? latest.width / target.width : 1;
-      visual.card.style.setProperty("--jd-stack-return-x", `${returnLeft - target.left}px`);
-      visual.card.style.setProperty("--jd-stack-return-y", `${returnTop - target.top}px`);
+      const targetLeft = Number.isFinite(Number(target.left)) ? Number(target.left) : Number(target.x) || 0;
+      const targetTop = Number.isFinite(Number(target.top)) ? Number(target.top) : Number(target.y) || 0;
+      const folderSource = cluster && cluster.folderId ? visual.source : null;
+      const nodeEl = visual.member && visual.member.node && visual.member.node.nodeEl;
+      const latest = !folderSource && nodeEl && nodeEl.isConnected ? nodeEl.getBoundingClientRect() : null;
+      const returnLeft = folderSource ? folderSource.left : latest ? latest.left - rootRect.left : targetLeft;
+      const returnTop = folderSource ? folderSource.top : latest ? latest.top - rootRect.top : targetTop;
+      const returnScale = folderSource && target.width
+        ? folderSource.width / target.width
+        : latest && target.width ? latest.width / target.width : 1;
+      visual.card.style.setProperty("--jd-stack-return-x", `${returnLeft - targetLeft}px`);
+      visual.card.style.setProperty("--jd-stack-return-y", `${returnTop - targetTop}px`);
       visual.card.style.setProperty("--jd-stack-return-scale", String(returnScale));
       visual.card.style.setProperty("--jd-stack-exit-delay", `${Math.min(54, (cards.length - index - 1) * 18)}ms`);
     });
@@ -4654,7 +4679,12 @@ class CanvasFolderController {
     const MutationObserverCtor = this.ownerWindow.MutationObserver;
     if (typeof MutationObserverCtor === "function") {
       this.observer = new MutationObserverCtor((mutations) => {
-        const relevant = mutations.some((mutation) => !(this.layer && this.layer.contains(mutation.target)));
+        const stackOverlay = this.stack && this.stack.overlay;
+        const relevant = mutations.some((mutation) => !(
+          this.layer && (mutation.target === this.layer || this.layer.contains(mutation.target))
+          || this.popoverLayer && (mutation.target === this.popoverLayer || this.popoverLayer.contains(mutation.target))
+          || stackOverlay && (mutation.target === stackOverlay || stackOverlay.contains(mutation.target))
+        ));
         if (relevant && !this.drag && !this.shellDrag) this.scheduleReconcile();
         this.scheduleToolbarSync();
       });

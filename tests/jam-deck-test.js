@@ -1393,6 +1393,9 @@ assert.strictEqual(folderGeometry.gridLayout([], folderBounds), null, "empty fol
 // path even when Obsidian's private Canvas DOM is unavailable in CI.
 const folderControllerSourceStart = pluginSource.indexOf("class CanvasFolderController");
 const folderControllerSourceEnd = pluginSource.indexOf("class CanvasImageSearchController", folderControllerSourceStart);
+const stackControllerSourceStart = pluginSource.indexOf("class CanvasImageStackController");
+const stackControllerSource = pluginSource.slice(stackControllerSourceStart, folderControllerSourceStart);
+const stackShowPreviewSource = stackControllerSource.slice(stackControllerSource.indexOf("showPreview(cluster)"), stackControllerSource.indexOf("buildPreviewVisuals(cluster"));
 assert(folderControllerSourceStart >= 0 && folderControllerSourceEnd > folderControllerSourceStart, "Canvas folder controller must remain a standalone runtime class");
 const folderControllerSource = pluginSource.slice(folderControllerSourceStart, folderControllerSourceEnd);
 for (const className of [
@@ -1418,6 +1421,12 @@ assert(folderControllerSource.includes("createFolderProxySurface(member)"), "fol
 assert(folderControllerSource.includes('surface.querySelectorAll("script, iframe, object, embed, form, button, input, textarea, select, video, audio, source")'), "folder proxy sanitization must remove active embedded content");
 assert(folderControllerSource.includes('nodeEl.addClass("is-jam-deck-folder-proxy-hidden")'), "collapsed folders must yield native nodes to owned proxy presentation");
 assert(!folderControllerSource.includes('nodeEl.style.zIndex =') && !folderControllerSource.includes('nodeEl.style.position ='), "folder presentation must not overwrite native node stacking styles");
+assert(stackControllerSource.includes("ownedPreviewOnly") && stackControllerSource.includes("this.overlay.contains(mutation.target)"), "preview-owned DOM mutations must not rerun the quadratic stack reconciler");
+assert(folderControllerSource.includes("stackOverlay.contains(mutation.target)"), "folder reconciliation must ignore stack-preview mount and cleanup mutations");
+assert(stackControllerSource.includes("if (cluster && cluster.folderId) return []"), "explicit folder previews must not composite every unrelated Canvas node for bystander displacement");
+assert(stackShowPreviewSource.indexOf("const previewBystanders = this.prepareBystanders") < stackShowPreviewSource.indexOf("this.overlay.appendChild(wrapper)"), "preview geometry reads must finish before mounting the overlay");
+assert(stackControllerSource.includes("const folderSource = cluster && cluster.folderId ? visual.source : null"), "folder cards must return to their visible proxy source instead of hidden native-node geometry");
+assert(stackControllerSource.includes("Number(target.x) || 0") && stackControllerSource.includes("returnLeft - targetLeft"), "preview collapse must convert layout x/y into finite return offsets instead of emitting NaNpx");
 
 // Folder schema and runtime contracts stay deliberately separate: the portable
 // fields are persisted on the anchor Canvas node, while anchorNodeId,
@@ -1971,6 +1980,10 @@ assert(styleSource.includes("pointer-events: none") && folderControllerSource.in
 assert(styleSource.includes(".jam-deck-canvas-folder:is(.is-expanded, [aria-expanded=\"true\"]):not(.is-opening):not(.is-closing)") && styleSource.includes(".jam-deck-canvas-folder-backboard") && styleSource.includes(".jam-deck-canvas-folder-front") && styleSource.includes("visibility: hidden"), "expanded folders must release the authored paper layers back to native Canvas members");
 assert(styleSource.includes("height: 66.666667%") && styleSource.includes("border-radius: 10px") && styleSource.includes("0 -4px 8px rgb(0 0 0 / 0.05)"), "folder front must preserve the Figma 2:3 geometry and soft top shadow");
 assert(styleSource.includes("backdrop-filter: blur(16px) saturate(180%)") && styleSource.includes("color-mix(in srgb, var(--jd-folder-front-start) 50%, transparent)") && styleSource.includes("var(--jd-folder-front-end)"), "folder front must use the NZS4 single tint gradient over the frosted blur");
+const stackBackdropStyle = styleSource.slice(styleSource.indexOf(".jam-deck-canvas-stack-backdrop {"), styleSource.indexOf(".jam-deck-canvas-stack-preview.is-visible"));
+assert(!stackBackdropStyle.includes("backdrop-filter:"), "full-board stack focus must use a translucent wash without repainting the Canvas through backdrop-filter");
+assert(styleSource.includes(".jam-deck-canvas-stack-preview-surface.is-image > img") && styleSource.includes("object-fit: contain"), "canonical preview images must fill their cards without intrinsic-size pop-in");
+assert(styleSource.includes(".jam-deck-canvas-folder.is-preview-closing .jam-deck-canvas-folder-proxy") && styleSource.includes("opacity: 1"), "folder proxies must fade in while cards return so collapse has no blank handoff");
 assert(styleSource.includes("filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.10))"), "folder backboard must use a path-aware SVG drop shadow instead of a square box shadow");
 assert(styleSource.includes(".jam-deck-canvas-folder-backboard") && styleSource.includes("z-index: 0 !important") && styleSource.includes(".jam-deck-canvas-folder-representatives") && styleSource.includes("z-index: 2 !important") && styleSource.includes(".jam-deck-canvas-folder-front") && styleSource.includes("z-index: 10 !important") && styleSource.includes("z-index: 12 !important"), "folder backboard, proxies, front, and header must interleave inside one local shell context");
 assert(styleSource.includes("isolation: isolate !important") && styleSource.includes("contain: layout style !important"), "each folder shell must be an independently ordered Canvas stack unit");

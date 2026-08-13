@@ -938,12 +938,13 @@
   inset: 0;
   background: rgb(248 249 250 / 0.70);
   opacity: 0;
-  backdrop-filter: saturate(.72) contrast(.92);
+  /* A full-board backdrop-filter repaints every image node during the entire
+     folder transition. The translucent paper wash preserves focus without
+     turning a four-card animation into a full-Canvas GPU effect. */
   transition: opacity 200ms cubic-bezier(.22, 1, .36, 1);
 }
 .theme-dark .jam-deck-canvas-stack-backdrop {
   background: rgb(29 31 35 / 0.62);
-  backdrop-filter: saturate(.68) brightness(.90);
 }
 .jam-deck-canvas-stack-preview.is-visible .jam-deck-canvas-stack-backdrop {
   opacity: 1;
@@ -1130,6 +1131,16 @@
   margin: 0;
   border-radius: inherit;
   object-fit: cover;
+}
+.jam-deck-canvas-stack-preview-card > .jam-deck-canvas-stack-preview-surface.is-image > img {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0;
+  border-radius: inherit;
+  object-fit: contain;
 }
 .jam-deck-canvas-leaf .canvas-node.is-jam-deck-stack-bystander {
   translate: 0 0;
@@ -3299,9 +3310,10 @@
   opacity: 1;
   visibility: visible;
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-opening, .is-preview-open, .is-preview-closing) .jam-deck-canvas-folder-proxy {
+.jam-deck-canvas-leaf .jam-deck-canvas-folder:is(.is-preview-opening, .is-preview-open) .jam-deck-canvas-folder-proxy {
   opacity: 0;
 }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing .jam-deck-canvas-folder-proxy,
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing-flap .jam-deck-canvas-folder-proxy {
   opacity: 1;
 }

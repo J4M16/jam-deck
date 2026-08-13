@@ -1,5 +1,23 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-13 — 0.30.5 Canvas 文件夹开合性能与动效修复
+
+- Jam 反馈：电脑性能足够，但 Jam Deck 内嵌 Canvas 不丝滑；文件夹展开很卡，折叠几乎没有动效，且图片会消失一段时间再以小图出现。
+- 实机基线（同一张 42 节点 Canvas，`requestAnimationFrame` 采样）：静止 16.7ms；文件夹展开平均 62.3ms、峰值 116.7ms；收回平均 22.2ms、峰值 100ms。
+- 性能根因与修复：
+  - 全屏 `.jam-deck-canvas-stack-backdrop` 使用 `backdrop-filter`，预览动画期间持续重绘整张图片画布；改为纯半透明纸面 wash，保留焦点层级但不再做全画布 GPU 滤镜。
+  - explicit folder 展开时对所有无关 Canvas 节点执行 bystander 位移，制造大量合成层；文件夹预览改为只动画自身四张卡，旧式自由堆叠仍保留避让。
+  - Stack/Folder 两个 MutationObserver 会把预览 wrapper 的挂载/删除当成 Canvas 数据变化，各自触发全量 reconcile；现在过滤各自拥有的 overlay 变更，不再为纯展示 DOM 重跑重叠聚类与文件夹同步。
+  - `prepareBystanders` 改为先批量读取布局、再批量写样式；并在 overlay 挂载与 source ghost 写入前完成测量，避免 write→read 强制布局。
+- 动效根因与修复：
+  - `collapsePreview` 的 layout position 是 `{x,y}`，旧代码却读取 `target.left/top`，生成 `--jd-stack-return-x/y: NaNpx`，浏览器丢弃返程 transform，所以视觉上“几乎没有收回动效”。改为归一化 `x/y` 与 `left/top`，实机四张卡均得到有限返程坐标并连续缩回。
+  - 文件夹展开起点来自可见 proxy rect，旧收回终点却读取隐藏 native node；现在 explicit folder 始终回到同一 proxy source rect。
+  - proxy 小图不再等 260ms 后才淡入，而是与卡片返程同时开始，180ms 完全可见；卡片约 260–314ms 到位、340ms 清理，交接期间无空白。
+  - canonical preview image 新增强制 100% 尺寸与 `object-fit: contain`，避免图片加载后按 intrinsic size 弹成小图。
+- 最终实机（同一画布）：静止 16.7ms；展开平均 17.7ms、峰值 33.4ms；收回平均 16.9ms、峰值 33.3ms。逐阶段检查确认 proxy 在 0/80/180ms 透明度约 0/0.47/0.98，340ms 卡片清理前已完全可见；前片随后连续闭合至 closed。
+- 回归：新增 preview owned mutation 过滤、folder bystander 跳过、读写顺序、返程 finite x/y、全屏滤镜移除、canonical image fill/contain 与 proxy 提前交接静态合同；`npm run verify` 全绿。
+- 处理模型签名：具体模型标识不可见（主代理/实现与实机验证）、具体模型标识不可见（只读生命周期侦察）、具体模型标识不可见（只读性能侦察）
+
 ## 2026-08-13 — 0.30.4 修复 Canvas 文件夹图片预览丢失
 
 - Jam 反馈：打开 Canvas 后，文件夹内部的四张示例预览只显示“图片”占位，真实效果图丢失。
