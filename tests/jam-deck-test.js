@@ -2471,7 +2471,9 @@ assert(pluginSource.includes('role: "tablist"') && pluginSource.includes('role: 
 assert(pluginSource.includes('sandbox: "allow-scripts allow-same-origin allow-forms"'), "local AI web must keep its iframe sandbox at the reviewed minimum");
 assert(!pluginSource.includes("allow-downloads") && !pluginSource.includes("allow-popups-to-escape-sandbox"), "local AI web must not gain download or popup escape privileges");
 assert(pluginSource.includes('this.aiActivePage = "assistant";') && pluginSource.includes('this.setAiActivePage("assistant", { focus: false })'), "Canvas AI entry points must return to the built-in assistant tab");
-assert(styleSource.includes(".jam-deck-ai-chat.is-local-web-page") && styleSource.includes("width: 1180px"), "the local workspace page must use the wider bounded layout");
+assert(styleSource.includes(".jam-deck-ai-chat.is-local-web-page") && styleSource.includes("width: clamp(760px, 80vw, 925px)"), "the local workspace page must use the wider floating-panel layout without filling the workspace");
+assert(styleSource.includes(".jam-deck-ai-pages {\n  display: flex;") && styleSource.includes("width: 100%; min-width: 0; min-height: 0; flex-direction: column;"), "AI pages must preserve the full-height flex chain so the composer stays at the bottom");
+assert(pluginSource.includes("this.renderAiChatHeader(header, { assistantPageId, localWebPageId })"), "AI tabs must live inside the single shared header instead of adding a second toolbar row");
 assert(styleSource.includes(".jam-deck-ai-page[hidden] { display: none; }"), "inactive AI pages must remain hidden despite their flex layout");
 
 const plugin = new JamDeckPlugin();

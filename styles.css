@@ -1890,29 +1890,29 @@
   right: 20px;
   bottom: 84px;
   z-index: 60;
-  width: 680px;
-  max-width: calc(100% - 40px);
-  height: 780px;
-  max-height: calc(100% - 110px);
+  width: clamp(600px, 59vw, 680px);
+  max-width: calc(100% - 48px);
+  height: clamp(480px, 70vh, 538px);
+  max-height: calc(100% - 48px);
   display: flex;
   flex-direction: column;
   border: 1px solid var(--jd-line);
-  border-radius: var(--jd-radius-lg);
+  border-radius: 14px;
   background: var(--jd-surface-raised);
-  box-shadow: var(--jd-shadow-lift);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
   overflow: hidden;
 }
 .jam-deck-root .jam-deck-ai-chat.is-local-web-page {
-  width: 1180px;
-  height: 860px;
-  max-width: calc(100% - 32px);
-  max-height: calc(100% - 32px);
+  width: clamp(760px, 80vw, 925px);
+  height: clamp(520px, 78vh, 600px);
 }
 .jam-deck-root .jam-deck-ai-chat-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 8px 8px 14px;
+  gap: 12px;
+  flex: 0 0 52px;
+  min-height: 52px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--jd-line);
   cursor: grab;
   user-select: none;
@@ -1922,21 +1922,23 @@
 .jam-deck-root .jam-deck-ai-chat-title-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 .jam-deck-root .jam-deck-ai-chat-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
 }
-.jam-deck-root .jam-deck-ai-chat-title { font-size: 12px; color: var(--jd-muted); letter-spacing: 0.04em; }
+.jam-deck-root .jam-deck-ai-chat-title { font-size: 13px; font-weight: 600; color: var(--jd-ink); letter-spacing: 0.01em; }
 .jam-deck-root .jam-deck-ai-provider-btn {
-  min-height: 22px;
-  padding: 2px 10px;
-  border: 1px solid var(--jd-line);
-  border-radius: 999px;
-  background: var(--jd-surface);
-  color: var(--jd-ink);
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--jd-muted);
   font-size: 11px;
   cursor: pointer;
   transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
@@ -1945,10 +1947,10 @@
 .jam-deck-root .jam-deck-ai-provider-btn:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-ai-archive,
 .jam-deck-root .jam-deck-ai-clear {
-  min-height: 22px;
-  padding: 2px 9px;
-  border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  min-height: 32px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
   color: var(--jd-ink);
   font-size: 11px;
@@ -1970,8 +1972,8 @@
 .jam-deck-root .jam-deck-ai-archive:focus-visible,
 .jam-deck-root .jam-deck-ai-clear:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-ai-chat-close {
-  width: 26px;
-  height: 26px;
+  width: 36px;
+  height: 36px;
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -1987,77 +1989,76 @@
 .jam-deck-root .jam-deck-ai-tabs {
   display: flex;
   align-items: center;
-  gap: 18px;
-  min-height: 36px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--jd-line);
+  gap: 2px;
+  height: 32px;
+  padding: 2px;
+  border: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--jd-ink) 6%, transparent);
 }
 .jam-deck-root .jam-deck-ai-tab {
-  position: relative;
-  align-self: stretch;
-  padding: 0 2px;
+  min-width: 92px;
+  height: 28px;
+  padding: 0 12px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--jd-muted);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color 150ms cubic-bezier(0.23, 1, 0.32, 1), color 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 90ms ease-out;
 }
-.jam-deck-root .jam-deck-ai-tab::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
-.jam-deck-root .jam-deck-ai-tab.is-active { color: var(--jd-ink); }
-.jam-deck-root .jam-deck-ai-tab.is-active::after { background: var(--jd-accent); }
+.jam-deck-root .jam-deck-ai-tab:hover { color: var(--jd-ink); }
+.jam-deck-root .jam-deck-ai-tab:active { transform: scale(0.97); }
+.jam-deck-root .jam-deck-ai-tab.is-active { color: var(--jd-ink); font-weight: 600; background: var(--jd-surface-raised); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
 .jam-deck-root .jam-deck-ai-tab:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
-.jam-deck-root .jam-deck-ai-pages,
-.jam-deck-root .jam-deck-ai-page {
+.jam-deck-root .jam-deck-ai-pages {
+  display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
 }
-.jam-deck-root .jam-deck-ai-page { display: flex; flex-direction: column; }
+.jam-deck-root .jam-deck-ai-page { display: flex; flex: 1; width: 100%; min-width: 0; min-height: 0; flex-direction: column; }
 .jam-deck-root .jam-deck-ai-page[hidden] { display: none; }
 .jam-deck-root .jam-deck-ai-chat.is-local-web-page .jam-deck-ai-provider-btn,
 .jam-deck-root .jam-deck-ai-chat.is-local-web-page .jam-deck-ai-archive,
 .jam-deck-root .jam-deck-ai-chat.is-local-web-page .jam-deck-ai-clear { display: none; }
-.jam-deck-root .jam-deck-ai-local-chrome {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-height: 38px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--jd-line);
-  background: var(--jd-surface);
-}
-.jam-deck-root .jam-deck-ai-local-title { color: var(--jd-ink); font-size: 12px; }
-.jam-deck-root .jam-deck-ai-local-hint {
+.jam-deck-root .jam-deck-ai-header-context {
+  display: none;
   min-width: 0;
-  overflow: hidden;
+  margin-left: auto;
   color: var(--jd-muted);
   font-size: 11px;
+}
+.jam-deck-root .jam-deck-ai-chat.is-local-web-page .jam-deck-ai-header-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.jam-deck-root .jam-deck-ai-local-path {
+  max-width: 150px;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .jam-deck-root .jam-deck-ai-local-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--jd-muted);
   font-size: 11px;
   white-space: nowrap;
 }
+.jam-deck-root .jam-deck-ai-local-status::before { content: ""; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--jd-muted); }
+.jam-deck-root .jam-deck-ai-local-status[data-state="ready"]::before { background: var(--jd-accent); }
+.jam-deck-root .jam-deck-ai-local-status[data-state="error"]::before { background: var(--jd-danger); }
 .jam-deck-root .jam-deck-ai-local-status button {
-  min-height: 24px;
-  padding: 2px 10px;
-  border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--jd-ink);
   font-size: 11px;
@@ -2065,22 +2066,21 @@
 }
 .jam-deck-root .jam-deck-ai-local-status button:hover { background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
 .jam-deck-root .jam-deck-ai-local-status button:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
-.jam-deck-root .jam-deck-ai-local-host { flex: 1; min-height: 0; background: var(--jd-surface); }
+.jam-deck-root .jam-deck-ai-local-host { flex: 1; min-height: 0; border-top: 1px solid var(--jd-line); background: var(--jd-surface); }
 .jam-deck-root .jam-deck-ai-local-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--jd-surface); }
-
-@media (max-width: 760px) {
-  .jam-deck-root .jam-deck-ai-local-chrome { grid-template-columns: 1fr auto; }
-  .jam-deck-root .jam-deck-ai-local-hint { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
-}
 
 .jam-deck-root .jam-deck-ai-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 12px;
+  padding: 28px 24px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+.jam-deck-root .jam-deck-ai-empty { max-width: 460px; margin-top: 34px; }
+.jam-deck-root .jam-deck-ai-empty-title { color: var(--jd-ink); font-size: 20px; font-weight: 650; line-height: 1.3; }
+.jam-deck-root .jam-deck-ai-empty-copy { margin-top: 10px; color: var(--jd-muted); font-size: 13px; line-height: 1.55; }
+.jam-deck-root .jam-deck-ai-empty-example { margin-top: 14px; color: color-mix(in srgb, var(--jd-ink) 72%, var(--jd-muted)); font-size: 12px; }
 .jam-deck-root .jam-deck-ai-message {
   position: relative;
   max-width: 88%;
@@ -2167,9 +2167,14 @@
   display: flex;
   gap: 8px;
   align-items: flex-end;
-  padding: 8px 12px 12px;
-  border-top: 1px solid var(--jd-line);
+  margin: 0 20px 20px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--jd-line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--jd-ink) 3%, var(--jd-surface));
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
 }
+.jam-deck-root .jam-deck-ai-row:focus-within { border-color: color-mix(in srgb, var(--jd-accent) 55%, var(--jd-line)); box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-ai-image-dock {
   display: flex;
   align-items: center;
@@ -2226,10 +2231,10 @@
   min-height: 30px;
   max-height: 160px;
   margin: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--jd-line);
-  border-radius: var(--jd-radius-sm);
-  background: var(--jd-surface);
+  padding: 7px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--jd-ink);
   font-size: 13px;
   line-height: 1.5;
@@ -2239,18 +2244,34 @@
 }
 .jam-deck-root .jam-deck-ai-input:focus {
   outline: none;
-  border-color: color-mix(in srgb, var(--jd-accent) 55%, var(--jd-line));
-  box-shadow: var(--jd-focus-ring);
+  box-shadow: none;
 }
 .jam-deck-root .jam-deck-ai-send {
-  min-height: 30px;
-  padding: 4px 14px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 9px;
   background: transparent;
   color: var(--jd-ink);
   font-size: 12px;
   transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+}
+.jam-deck-root .jam-deck-ai-send:active:not(:disabled),
+.jam-deck-root .jam-deck-ai-archive:active,
+.jam-deck-root .jam-deck-ai-clear:active,
+.jam-deck-root .jam-deck-ai-chat-close:active { transform: scale(0.97); }
+
+@media (max-width: 720px) {
+  .jam-deck-root .jam-deck-ai-chat,
+  .jam-deck-root .jam-deck-ai-chat.is-local-web-page { max-width: calc(100% - 32px); }
+  .jam-deck-root .jam-deck-ai-chat-title-group { display: none; }
+  .jam-deck-root .jam-deck-ai-header-context { margin-left: 0; }
+  .jam-deck-root .jam-deck-ai-local-path { display: none; }
+}
+@media (max-height: 560px) {
+  .jam-deck-root .jam-deck-ai-empty-example { display: none; }
+  .jam-deck-root .jam-deck-ai-empty { margin-top: 12px; }
 }
 .jam-deck-root .jam-deck-ai-send:hover:not(:disabled) { border-color: var(--jd-line); background: color-mix(in srgb, var(--jd-ink) 7%, transparent); }
 .jam-deck-root .jam-deck-ai-send:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }

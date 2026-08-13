@@ -10567,28 +10567,10 @@ class JamDeckView extends ItemView {
 
   renderAiChat(chat) {
     chat.empty();
-    const header = chat.createDiv({ cls: "jam-deck-ai-chat-header" });
-    this.renderAiChatHeader(header);
-    const tabs = chat.createDiv({ cls: "jam-deck-ai-tabs", attr: { role: "tablist", "aria-label": "AI 助手页面" } });
     const assistantPageId = `jam-deck-ai-page-assistant-${this.launcherViewId}`;
     const localWebPageId = `jam-deck-ai-page-local-web-${this.launcherViewId}`;
-    const makeTab = (page, text, controls) => {
-      const tab = tabs.createEl("button", {
-        text,
-        cls: "jam-deck-ai-tab",
-        attr: { type: "button", role: "tab", "aria-controls": controls },
-      });
-      tab.dataset.aiPage = page;
-      tab.addEventListener("click", () => this.setAiActivePage(page));
-      return tab;
-    };
-    this.aiAssistantTab = makeTab("assistant", "AI 助手", assistantPageId);
-    this.aiLocalWebTab = makeTab("local-web", "本地工作区", localWebPageId);
-    tabs.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      event.preventDefault();
-      this.setAiActivePage(this.aiActivePage === "assistant" ? "local-web" : "assistant");
-    });
+    const header = chat.createDiv({ cls: "jam-deck-ai-chat-header" });
+    this.renderAiChatHeader(header, { assistantPageId, localWebPageId });
     const pages = chat.createDiv({ cls: "jam-deck-ai-pages" });
     this.aiAssistantPage = pages.createDiv({
       cls: "jam-deck-ai-page is-assistant",
@@ -10633,13 +10615,12 @@ class JamDeckView extends ItemView {
   renderAiLocalWebPanel() {
     if (!this.aiLocalWebPage) return;
     this.aiLocalWebPage.empty();
-    const chrome = this.aiLocalWebPage.createDiv({ cls: "jam-deck-ai-local-chrome" });
-    chrome.createDiv({ text: "Jamnote · 本地工作区", cls: "jam-deck-ai-local-title" });
-    chrome.createDiv({
-      text: "目标：D:\\jam16\\Jamnote。若网页未显示 Jamnote，请在网页侧栏手动选择 Jamnote。",
-      cls: "jam-deck-ai-local-hint",
-    });
-    this.aiLocalWebStatusEl = chrome.createDiv({ cls: "jam-deck-ai-local-status" });
+    if (this.aiHeaderContext) {
+      this.aiHeaderContext.empty();
+      const path = this.aiHeaderContext.createSpan({ text: "Jamnote", cls: "jam-deck-ai-local-path" });
+      path.title = "工作区：D:\\jam16\\Jamnote。若网页未显示 Jamnote，请在网页侧栏手动选择。";
+      this.aiLocalWebStatusEl = this.aiHeaderContext.createDiv({ cls: "jam-deck-ai-local-status" });
+    }
     this.aiLocalWebHost = this.aiLocalWebPage.createDiv({ cls: "jam-deck-ai-local-host" });
     if (this.aiLocalWebFrame) this.aiLocalWebHost.appendChild(this.aiLocalWebFrame);
     this.renderAiLocalWebStatus();
@@ -10648,21 +10629,23 @@ class JamDeckView extends ItemView {
   renderAiLocalWebStatus(error) {
     if (!this.aiLocalWebStatusEl) return;
     this.aiLocalWebStatusEl.empty();
+    this.aiLocalWebStatusEl.dataset.state = this.aiLocalWebState || "idle";
     if (this.aiLocalWebState === "loading") {
-      this.aiLocalWebStatusEl.createSpan({ text: "正在连接本地 Web 并准备 Jamnote…" });
+      this.aiLocalWebStatusEl.createSpan({ text: "连接中" });
       return;
     }
     if (this.aiLocalWebState === "error") {
-      this.aiLocalWebStatusEl.createSpan({ text: `连接失败：${error || "请确认 127.0.0.1:3080 已启动"}` });
+      const message = this.aiLocalWebStatusEl.createSpan({ text: "未连接" });
+      message.title = error || "请确认 127.0.0.1:3080 已启动";
       const retry = this.aiLocalWebStatusEl.createEl("button", { text: "重试", attr: { type: "button" } });
       retry.addEventListener("click", () => void this.ensureAiLocalWeb(true));
       return;
     }
     if (this.aiLocalWebState === "ready") {
-      this.aiLocalWebStatusEl.createSpan({ text: "Jamnote 已注册，会话已准备" });
+      this.aiLocalWebStatusEl.createSpan({ text: "已连接" });
       return;
     }
-    this.aiLocalWebStatusEl.createSpan({ text: "本地 Web 仅在打开本页时连接" });
+    this.aiLocalWebStatusEl.createSpan({ text: "待连接" });
   }
 
   applyAiActivePage() {
@@ -10753,7 +10736,7 @@ class JamDeckView extends ItemView {
     return init;
   }
 
-  renderAiChatHeader(header) {
+  renderAiChatHeader(header, { assistantPageId, localWebPageId }) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
     const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
@@ -10764,6 +10747,25 @@ class JamDeckView extends ItemView {
     });
     this.aiProviderBtn = providerBtn;
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
+    const tabs = header.createDiv({ cls: "jam-deck-ai-tabs", attr: { role: "tablist", "aria-label": "AI 助手页面" } });
+    const makeTab = (page, text, controls) => {
+      const tab = tabs.createEl("button", {
+        text,
+        cls: "jam-deck-ai-tab",
+        attr: { type: "button", role: "tab", "aria-controls": controls },
+      });
+      tab.dataset.aiPage = page;
+      tab.addEventListener("click", () => this.setAiActivePage(page));
+      return tab;
+    };
+    this.aiAssistantTab = makeTab("assistant", "AI 助手", assistantPageId);
+    this.aiLocalWebTab = makeTab("local-web", "本地工作区", localWebPageId);
+    tabs.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      this.setAiActivePage(this.aiActivePage === "assistant" ? "local-web" : "assistant");
+    });
+    this.aiHeaderContext = header.createDiv({ cls: "jam-deck-ai-header-context" });
     const headerActions = header.createDiv({ cls: "jam-deck-ai-chat-actions" });
     const archive = headerActions.createEl("button", {
       text: "归档",
@@ -10811,10 +10813,10 @@ class JamDeckView extends ItemView {
     const messages = chat.createDiv({ cls: "jam-deck-ai-messages" });
     this.aiMessagesEl = messages;
     if (!this.aiMessages || !this.aiMessages.length) {
-      messages.createDiv({
-        text: "用自然语言新增 / 完成 / 删除待办，可指定日期与分类。例：「周一加一条：参考图集归档，工作分类」",
-        cls: "jam-deck-ai-message is-assistant is-hint",
-      });
+      const empty = messages.createDiv({ cls: "jam-deck-ai-empty" });
+      empty.createDiv({ text: "今天想处理什么？", cls: "jam-deck-ai-empty-title" });
+      empty.createDiv({ text: "直接用自然语言新增、完成或删除待办，也可以指定日期和分类。", cls: "jam-deck-ai-empty-copy" });
+      empty.createDiv({ text: "例如：周一加一条「参考图集归档」，工作分类", cls: "jam-deck-ai-empty-example" });
     } else {
       for (const msg of this.aiMessages) this.renderAiMessage(messages, msg);
     }
