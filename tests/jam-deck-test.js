@@ -2463,6 +2463,11 @@ const narrowFolderShift = stackGeometry.bystanderShift(
 );
 assert(narrowFolderShift.x <= -30, "explicit folder narrow displacement must clear a covered node with the 20px safety gap");
 
+assert.deepStrictEqual(JamDeckPlugin.clampAiFabPosition({ x: 2444, y: 1241.1355 }, 1576, 953.515625, 55, 52), { x: 1521, y: 901.515625 }, "AI assistant FAB must return fully inside a smaller restored window using its rendered size");
+assert.deepStrictEqual(JamDeckPlugin.clampAiFabPosition(null, 1576, 953.515625, 55, 52), { x: 1501, y: 881.515625 }, "AI assistant FAB must default to a 20px bottom-right inset");
+assert.strictEqual(JamDeckPlugin.clampAiFabPosition({ x: 10, y: 10 }, 0, 0), null, "AI assistant FAB must wait for a measurable view before clamping persisted coordinates");
+assert(pluginSource.includes("installAiFabLayoutObserver(root)") && pluginSource.includes("this.cleanupAiFabLayout()"), "AI assistant FAB must re-clamp on view resize and release its observer on rerender/close");
+
 const plugin = new JamDeckPlugin();
 assert.strictEqual(plugin.getCanvasInkSidecarPath("Work/Board.canvas"), "Work/Board.canvas.jam-deck.json");
 assert.throws(() => plugin.getCanvasInkSidecarPath("data.json"), /Canvas/);

@@ -8819,6 +8819,25 @@ const JAM_DECK_WIDGET_MIN_H = 2;
 // Roughly 90px wide / 58px tall on a 1920x1080 deck, so the seam stays easy to hit on the dense grid.
 const JAM_DECK_SEAM_HIT = 2.5;
 
+function jamDeckClampAiFabPosition(position, width, height, fabWidth = 52, fabHeight = fabWidth, inset = 20) {
+  const safeWidth = Number(width);
+  const safeHeight = Number(height);
+  const safeFabWidth = Math.max(1, Number(fabWidth) || 52);
+  const safeFabHeight = Math.max(1, Number(fabHeight) || safeFabWidth);
+  const edge = Math.max(0, Number(inset) || 0);
+  if (!Number.isFinite(safeWidth) || !Number.isFinite(safeHeight) || safeWidth < safeFabWidth || safeHeight < safeFabHeight) return null;
+  const maxX = Math.max(0, safeWidth - safeFabWidth);
+  const maxY = Math.max(0, safeHeight - safeFabHeight);
+  const fallbackX = Math.max(0, maxX - edge);
+  const fallbackY = Math.max(0, maxY - edge);
+  const requestedX = position && Number.isFinite(Number(position.x)) ? Number(position.x) : fallbackX;
+  const requestedY = position && Number.isFinite(Number(position.y)) ? Number(position.y) : fallbackY;
+  return {
+    x: Math.min(maxX, Math.max(0, requestedX)),
+    y: Math.min(maxY, Math.max(0, requestedY)),
+  };
+}
+
 function jamDeckWidgetDisplayMinimum(widgetOrType) {
   const type = typeof widgetOrType === "string" ? widgetOrType : widgetOrType && widgetOrType.type;
   const def = type && WIDGET_DEFS[type];
@@ -9809,6 +9828,9 @@ class JamDeckView extends ItemView {
     this.launcherSuppressClick = null;
     this.canvasRuntime = new CanvasRuntimeAdapter(this);
     this.canvasConflictReconcilePromise = null;
+    this._aiLayoutResizeObserver = null;
+    this._aiLayoutResizeFrame = 0;
+    this._aiFabClampSavePending = false;
     this.handleDeckActivation = (event) => {
       if (event.target && event.target.closest && event.target.closest(".jam-deck-canvas-leaf")) return;
       try {
@@ -9837,6 +9859,7 @@ class JamDeckView extends ItemView {
 
   async onClose() {
     this.cleanupLayoutSashes();
+    this.cleanupAiFabLayout();
     this.contentEl.removeEventListener("pointerdown", this.handleDeckActivation, true);
     this.contentEl.removeEventListener("focusin", this.handleDeckActivation, true);
     await this.canvasRuntime.destroyAll();
@@ -9910,6 +9933,7 @@ class JamDeckView extends ItemView {
   render() {
     const root = this.contentEl;
     this.cleanupLayoutSashes();
+    this.cleanupAiFabLayout();
     this.canvasRuntime.parkAll();
     root.empty();
     root.addClass("jam-deck-root");
@@ -9993,6 +10017,7 @@ class JamDeckView extends ItemView {
     this.aiChat = aiChat;
     this.renderAiChat(aiChat);
     this.layoutAiFabChat();
+    this.installAiFabLayoutObserver(root);
 
     const grid = root.createDiv({ cls: "jam-deck-grid" });
     grid.style.setProperty("--deck-cols", String(GRID_COLS));
@@ -10141,12 +10166,37 @@ class JamDeckView extends ItemView {
   updateAiFabPos(x, y) {
     const root = this.contentEl;
     const rect = root.getBoundingClientRect();
-    const pos = {
-      x: Math.min(Math.max(0, x), Math.max(0, rect.width - 52)),
-      y: Math.min(Math.max(0, y), Math.max(0, rect.height - 52)),
-    };
+    const fabRect = this.aiFab && this.aiFab.getBoundingClientRect();
+    const fabWidth = fabRect && fabRect.width > 0 ? Math.ceil(fabRect.width) : 52;
+    const fabHeight = fabRect && fabRect.height > 0 ? Math.ceil(fabRect.height) : 52;
+    const pos = jamDeckClampAiFabPosition({ x, y }, rect.width, rect.height, fabWidth, fabHeight, 0);
+    if (!pos) return;
     this.plugin.settings.aiFabPos = pos;
     this.layoutAiFabChat();
+  }
+
+  cleanupAiFabLayout() {
+    if (this._aiLayoutResizeObserver) {
+      this._aiLayoutResizeObserver.disconnect();
+      this._aiLayoutResizeObserver = null;
+    }
+    const ownerWindow = this.contentEl && this.contentEl.ownerDocument && this.contentEl.ownerDocument.defaultView;
+    if (this._aiLayoutResizeFrame && ownerWindow) ownerWindow.cancelAnimationFrame(this._aiLayoutResizeFrame);
+    this._aiLayoutResizeFrame = 0;
+  }
+
+  installAiFabLayoutObserver(root) {
+    const ownerWindow = root && root.ownerDocument && root.ownerDocument.defaultView;
+    const ResizeObserverCtor = ownerWindow && ownerWindow.ResizeObserver;
+    if (!root || typeof ResizeObserverCtor !== "function") return;
+    this._aiLayoutResizeObserver = new ResizeObserverCtor(() => {
+      if (this._aiLayoutResizeFrame) ownerWindow.cancelAnimationFrame(this._aiLayoutResizeFrame);
+      this._aiLayoutResizeFrame = ownerWindow.requestAnimationFrame(() => {
+        this._aiLayoutResizeFrame = 0;
+        this.layoutAiFabChat();
+      });
+    });
+    this._aiLayoutResizeObserver.observe(root);
   }
 
   layoutAiFabChat() {
@@ -10154,10 +10204,21 @@ class JamDeckView extends ItemView {
     const rect = root.getBoundingClientRect();
     const FAB_W = 52;
     const GAP = 8;
-    const pos = this.plugin.settings.aiFabPos || {
-      x: Math.max(0, rect.width - FAB_W - 20),
-      y: Math.max(0, rect.height - FAB_W - 20),
-    };
+    const storedPos = this.plugin.settings.aiFabPos;
+    const fabRect = this.aiFab && this.aiFab.getBoundingClientRect();
+    const fabWidth = fabRect && fabRect.width > 0 ? Math.ceil(fabRect.width) : FAB_W;
+    const fabHeight = fabRect && fabRect.height > 0 ? Math.ceil(fabRect.height) : FAB_W;
+    const pos = jamDeckClampAiFabPosition(storedPos, rect.width, rect.height, fabWidth, fabHeight, 20);
+    if (!pos) return;
+    if (storedPos && (Number(storedPos.x) !== pos.x || Number(storedPos.y) !== pos.y)) {
+      this.plugin.settings.aiFabPos = pos;
+      if (!this._aiFabClampSavePending) {
+        this._aiFabClampSavePending = true;
+        Promise.resolve(this.plugin.saveSettings()).catch(() => {}).finally(() => {
+          this._aiFabClampSavePending = false;
+        });
+      }
+    }
     if (this.aiFab) {
       this.aiFab.style.left = `${pos.x}px`;
       this.aiFab.style.top = `${pos.y}px`;
@@ -10167,7 +10228,7 @@ class JamDeckView extends ItemView {
     if (this.aiChat && !this.aiChat.hidden) {
       const w = this.aiChat.offsetWidth || 680;
       const h = this.aiChat.offsetHeight || 780;
-      let cx = pos.x + FAB_W + GAP;
+      let cx = pos.x + fabWidth + GAP;
       if (cx + w > rect.width - GAP) cx = pos.x - w - GAP;
       cx = Math.max(GAP, Math.min(cx, Math.max(GAP, rect.width - w - GAP)));
       let cy = pos.y;
@@ -16411,6 +16472,7 @@ JamDeckPlugin.widgetLayoutHelpers = {
   cols: GRID_COLS,
   rows: GRID_ROWS,
 };
+JamDeckPlugin.clampAiFabPosition = jamDeckClampAiFabPosition;
 
 class JamDeckSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
