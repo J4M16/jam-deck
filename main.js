@@ -7715,6 +7715,20 @@ class CanvasFolderController {
   }
 }
 
+function jamDeckSelectedCanvasNodes(canvas) {
+  if (!canvas || !canvas.selection || typeof canvas.selection.values !== "function") return { image: null, text: null };
+  const selected = Array.from(canvas.selection.values());
+  if (selected.length !== 1) return { image: null, text: null };
+  const node = selected[0];
+  let data = null;
+  try { data = node && typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+  const kind = data ? jamDeckCanvasStackKind(data) : null;
+  return {
+    image: kind === "image" ? node : null,
+    text: kind === "text" ? node : null,
+  };
+}
+
 class CanvasImageSearchController {
   constructor(runtime, entry) {
     this.runtime = runtime;
@@ -7779,52 +7793,7 @@ class CanvasImageSearchController {
   }
 
   findSelectedNodes() {
-    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return { image: null, text: null };
-    let image = null;
-    let text = null;
-    let count = 0;
-    for (const node of this.canvas.nodes.values()) {
-      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
-      count += 1;
-      if (count > 1) return { image: null, text: null };
-      let data = null;
-      try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-      const kind = data ? jamDeckCanvasStackKind(data) : null;
-      if (kind === "image") image = node;
-      else if (kind === "text") text = node;
-    }
-    return { image, text };
-  }
-
-  findSelectedImageNode() {
-    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return null;
-    const selected = [];
-    for (const node of this.canvas.nodes.values()) {
-      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
-      selected.push(node);
-      if (selected.length > 1) return null;
-    }
-    const node = selected[0];
-    if (!node) return null;
-    let data = null;
-    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { return null; }
-    return jamDeckCanvasStackKind(data) === "image" ? node : null;
-  }
-
-  findSelectedAiNode() {
-    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return null;
-    const selected = [];
-    for (const node of this.canvas.nodes.values()) {
-      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
-      selected.push(node);
-      if (selected.length > 1) return null;
-    }
-    const node = selected[0];
-    if (!node) return null;
-    let data = null;
-    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { return null; }
-    const kind = jamDeckCanvasStackKind(data);
-    return kind === "text" || kind === "image" ? node : null;
+    return jamDeckSelectedCanvasNodes(this.canvas);
   }
 
   getToolbarMenu() {
@@ -16933,4 +16902,5 @@ JamDeckPlugin.dshRpc = jamDeckDshRpc;
 JamDeckPlugin.prepareDshWorkspace = jamDeckPrepareDshWorkspace;
 JamDeckPlugin.AI_LOCAL_WEB_URL = AI_LOCAL_WEB_URL;
 JamDeckPlugin.AI_LOCAL_WORKSPACE_PATH = AI_LOCAL_WORKSPACE_PATH;
+JamDeckPlugin.selectedCanvasNodes = jamDeckSelectedCanvasNodes;
 module.exports = JamDeckPlugin;

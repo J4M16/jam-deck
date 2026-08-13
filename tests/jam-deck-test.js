@@ -61,7 +61,7 @@ assert(pluginSource.includes("const EAGLE_SEARCH_RESULT_LIMIT = 10"), "Eagle rev
 assert(pluginSource.includes("className = \"clickable-icon jam-deck-canvas-image-search-toolbar\""), "Eagle search must use the native Canvas selection-toolbar button surface");
 assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Eagle search must target the native selection popup, not the bottom card palette");
 assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Eagle search must not resolve the bottom card palette");
-assert(pluginSource.includes("if (selected.length > 1) return null"), "Eagle search must only appear for a single selected image");
+assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas image search and AI must only appear for one authoritative selected node");
 assert(pluginSource.includes("hasNativeCanvasDuplicate(file.path, existing && existing.leaf)"), "embedded Canvas must pause when the same file is open natively");
 assert(pluginSource.includes("getViewState()"), "embedded Canvas duplicate detection must resolve native file paths before the view object finishes loading");
 assert(pluginSource.includes("getCanvasExternalImageDrop"), "embedded Canvas must own external image drops instead of delegating them to the native handler");
@@ -273,6 +273,18 @@ Module._load = function(request, parent, isMain) {
 };
 
 const JamDeckPlugin = require(mainPath);
+const authoritativeTextNode = { getData: () => ({ type: "text", text: "current" }), nodeEl: { matches: () => false } };
+const staleDomNode = { getData: () => ({ type: "file", file: "stale.png" }), nodeEl: { matches: () => true } };
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([authoritativeTextNode]), nodes: new Set([authoritativeTextNode, staleDomNode]) }),
+  { image: null, text: authoritativeTextNode },
+  "Canvas AI must trust the authoritative selection set even when stale selected DOM classes remain",
+);
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([authoritativeTextNode, staleDomNode]) }),
+  { image: null, text: null },
+  "Canvas AI must stay unavailable for a real multi-selection",
+);
 Module._load = originalLoad;
 
 const widgetLayout = JamDeckPlugin.widgetLayoutHelpers;
