@@ -2467,6 +2467,12 @@ assert.deepStrictEqual(JamDeckPlugin.clampAiFabPosition({ x: 2444, y: 1241.1355 
 assert.deepStrictEqual(JamDeckPlugin.clampAiFabPosition(null, 1576, 953.515625, 55, 52), { x: 1501, y: 881.515625 }, "AI assistant FAB must default to a 20px bottom-right inset");
 assert.strictEqual(JamDeckPlugin.clampAiFabPosition({ x: 10, y: 10 }, 0, 0), null, "AI assistant FAB must wait for a measurable view before clamping persisted coordinates");
 assert(pluginSource.includes("installAiFabLayoutObserver(root)") && pluginSource.includes("this.cleanupAiFabLayout()"), "AI assistant FAB must re-clamp on view resize and release its observer on rerender/close");
+assert(pluginSource.includes('role: "tablist"') && pluginSource.includes('role: "tabpanel"'), "AI assistant must expose accessible assistant and local-workspace tabs");
+assert(pluginSource.includes('sandbox: "allow-scripts allow-same-origin allow-forms"'), "local AI web must keep its iframe sandbox at the reviewed minimum");
+assert(!pluginSource.includes("allow-downloads") && !pluginSource.includes("allow-popups-to-escape-sandbox"), "local AI web must not gain download or popup escape privileges");
+assert(pluginSource.includes('this.aiActivePage = "assistant";') && pluginSource.includes('this.setAiActivePage("assistant", { focus: false })'), "Canvas AI entry points must return to the built-in assistant tab");
+assert(styleSource.includes(".jam-deck-ai-chat.is-local-web-page") && styleSource.includes("width: 1180px"), "the local workspace page must use the wider bounded layout");
+assert(styleSource.includes(".jam-deck-ai-page[hidden] { display: none; }"), "inactive AI pages must remain hidden despite their flex layout");
 
 const plugin = new JamDeckPlugin();
 assert.strictEqual(plugin.getCanvasInkSidecarPath("Work/Board.canvas"), "Work/Board.canvas.jam-deck.json");
@@ -2595,6 +2601,85 @@ const removed = plugin.removeTaskFromJournal(legacyUpgraded, task);
 assert.strictEqual(plugin.getTaskBlockRanges(removed, task.id).count, 0);
 assert(removed.includes("- 原工作"), "unrelated journal content must survive removal");
 assert.throws(() => plugin.upgradeLegacyTaskInJournal(legacy.replace("- 【设计】Jam Deck 详情", "- 用户改过的标题"), task), /无法安全同步/);
+
+async function testAiLocalWebBootstrap() {
+  assert.strictEqual(JamDeckPlugin.AI_LOCAL_WEB_URL, "http://127.0.0.1:3080/");
+  assert.strictEqual(JamDeckPlugin.AI_LOCAL_WORKSPACE_PATH, "D:\\jam16\\Jamnote");
+  assert.strictEqual(
+    JamDeckPlugin.canonicalWindowsPath("D:/jam16/Jamnote/../Jamnote/"),
+    "d:\\jam16\\jamnote",
+    "local workspace matching must canonicalize Windows paths",
+  );
+  assert.strictEqual(JamDeckPlugin.canonicalWindowsPath("relative/Jamnote"), null, "local workspace matching must reject relative paths");
+
+  let sent = null;
+  const rpcValue = await JamDeckPlugin.dshRpc("workspace.list", {}, {
+    rpcId: "rpc-fixed",
+    timeoutMs: 100,
+    transport: async (request) => {
+      sent = request;
+      return {
+        status: 200,
+        json: { type: "server-response", rpcId: "rpc-fixed", result: { ok: true, value: { items: [], archivedSessionIds: [] } } },
+      };
+    },
+  });
+  assert.deepStrictEqual(rpcValue, { items: [], archivedSessionIds: [] });
+  assert.strictEqual(sent.url, "http://127.0.0.1:3080/api/workspace.list", "local RPC must stay on the fixed loopback endpoint");
+  assert.deepStrictEqual(JSON.parse(sent.body), { type: "client-request", rpcId: "rpc-fixed", method: "workspace.list", payload: {} });
+  assert.throws(
+    () => JamDeckPlugin.dshValue({ status: 200, json: { type: "server-response", rpcId: "wrong", result: { ok: true, value: {} } } }, "expected", "workspace.list"),
+    /协议数据/,
+    "local RPC must reject a response for another request",
+  );
+
+  const workspace = { workspaceId: "ws-jamnote", path: "D:\\jam16\\Jamnote", title: "Jamnote", sessionIds: ["session-blank"] };
+  const reuseCalls = [];
+  const reused = await JamDeckPlugin.prepareDshWorkspace(async (method, payload) => {
+    reuseCalls.push({ method, payload });
+    if (method === "workspace.create") return { workspace, created: false };
+    if (method === "workspace.list") return { items: [workspace], archivedSessionIds: [] };
+    if (method === "session.list") return { items: [{ sessionId: "session-blank", cwd: "d:/jam16/jamnote", blank: true }] };
+    throw new Error(`unexpected ${method}`);
+  });
+  assert.deepStrictEqual(reused, { workspaceId: "ws-jamnote", sessionId: "session-blank", created: false });
+  assert.deepStrictEqual(reuseCalls.map((call) => call.method), ["workspace.create", "workspace.list", "session.list"]);
+
+  const beforeCreateWorkspace = { ...workspace, sessionIds: ["session-archived"] };
+  const afterCreateWorkspace = { ...workspace, sessionIds: ["session-archived", "session-new"] };
+  let workspaceListCount = 0;
+  const createCalls = [];
+  const created = await JamDeckPlugin.prepareDshWorkspace(async (method, payload) => {
+    createCalls.push({ method, payload });
+    if (method === "workspace.create") return { workspace: beforeCreateWorkspace, created: false };
+    if (method === "workspace.list") {
+      workspaceListCount += 1;
+      return { items: [workspaceListCount === 1 ? beforeCreateWorkspace : afterCreateWorkspace], archivedSessionIds: ["session-archived"] };
+    }
+    if (method === "session.list") {
+      return workspaceListCount === 1
+        ? { items: [{ sessionId: "session-archived", cwd: "D:\\jam16\\Jamnote", blank: true }] }
+        : { items: [{ sessionId: "session-new", cwd: "D:\\jam16\\Jamnote", blank: true }] };
+    }
+    if (method === "session.create") return { sessionId: "session-new" };
+    throw new Error(`unexpected ${method}`);
+  });
+  assert.deepStrictEqual(created, { workspaceId: "ws-jamnote", sessionId: "session-new", created: true });
+  assert.deepStrictEqual(
+    createCalls.map((call) => call.method),
+    ["workspace.create", "workspace.list", "session.list", "session.create", "workspace.list", "session.list"],
+    "local bootstrap must confirm a newly created session against fresh workspace and session baselines",
+  );
+  assert.deepStrictEqual(createCalls[3].payload, { workspaceId: "ws-jamnote" });
+
+  await assert.rejects(
+    JamDeckPlugin.prepareDshWorkspace(async (method) => method === "workspace.create"
+      ? { created: false }
+      : { items: [workspace, { ...workspace, workspaceId: "duplicate" }], archivedSessionIds: [] }),
+    /注册重复/,
+    "ambiguous canonical workspace registrations must fail closed",
+  );
+}
 
 async function testArchiveIntegration() {
   const previousWindow = global.window;
@@ -3060,7 +3145,7 @@ async function testArchiveIntegration() {
 }
 
 testCanvasCreateName();
-testArchiveIntegration().then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
+testAiLocalWebBootstrap().then(() => testArchiveIntegration()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
   console.error(error);
