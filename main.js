@@ -7725,7 +7725,7 @@ function jamDeckSelectedCanvasNodes(canvas) {
   const kind = data ? jamDeckCanvasStackKind(data) : null;
   return {
     image: kind === "image" ? node : null,
-    text: kind === "text" ? node : null,
+    text: kind === "text" || kind === "markdown-note" || data && (data.type === "link" || data.type === "file") ? node : null,
   };
 }
 
@@ -7854,20 +7854,26 @@ class CanvasImageSearchController {
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      const selected = this.findSelectedNodes();
+      this.aiPressedNode = selected.image || selected.text || null;
     }, true);
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (this.selectedAiNode) {
-        const deckView = this.runtime && this.runtime.deckView;
-        if (!deckView) return;
-        let data = null;
-        try { data = typeof this.selectedAiNode.getData === "function" ? this.selectedAiNode.getData() : null; } catch (error) { data = null; }
-        if (jamDeckCanvasStackKind(data) === "image" && typeof deckView.openAiChatWithCanvasImage === "function") {
-          void deckView.openAiChatWithCanvasImage(this.selectedAiNode, this.canvas);
-        } else if (typeof deckView.openAiChatWithCanvasText === "function") {
-          deckView.openAiChatWithCanvasText(this.selectedAiNode, this.canvas);
-        }
+      const selected = this.findSelectedNodes();
+      const node = this.aiPressedNode || selected.image || selected.text || null;
+      this.aiPressedNode = null;
+      const deckView = this.runtime && this.runtime.deckView;
+      if (!node || !deckView) {
+        new Notice("Jam Deck：没有可发送的当前节点");
+        return;
+      }
+      let data = null;
+      try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+      if (jamDeckCanvasStackKind(data) === "image" && typeof deckView.openAiChatWithCanvasImage === "function") {
+        void deckView.openAiChatWithCanvasImage(node, this.canvas);
+      } else if (typeof deckView.openAiChatWithCanvasText === "function") {
+        void deckView.openAiChatWithCanvasText(node, this.canvas);
       }
     }, true);
     menu.appendChild(button);
@@ -10329,10 +10335,24 @@ class JamDeckView extends ItemView {
     }
   }
 
-  openAiChatWithCanvasText(node, canvas) {
+  async openAiChatWithCanvasText(node, canvas) {
     let data = null;
     try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-    const text = data && typeof data.text === "string" ? data.text.trim() : "";
+    let text = data && typeof data.text === "string" ? data.text.trim()
+      : data && data.type === "link" && typeof data.url === "string" ? data.url.trim()
+        : data && data.type === "file" && typeof data.file === "string" ? data.file.trim()
+          : "";
+    if (data && data.type === "file" && typeof data.file === "string" && data.file.toLowerCase().endsWith(".md")) {
+      try {
+        const file = this.plugin.app.vault.getAbstractFileByPath(data.file);
+        if (file) text = String(await this.plugin.app.vault.read(file) || "").trim() || data.file;
+      } catch (error) {
+        text = data.file;
+      }
+    }
+    const nodeLabel = data && data.type === "link" ? "链接节点"
+      : data && data.type === "file" ? "文件节点"
+        : "文本节点";
     this.aiCanvasContext = {
       canvas: canvas || null,
       nodeId: node && node.id || null,
@@ -10345,10 +10365,10 @@ class JamDeckView extends ItemView {
     this.aiMessages = [];
     this.aiArchivedCount = 0;
     this.aiInputValue = "";
-    this.aiQuickDone = false;
+    this.aiQuickDone = !(data && data.type === "text");
     this.aiActivePage = "assistant";
-    this.addAiMessage("user", text ? `[选中文本]\n${text}` : "[选中的文本节点]");
-    this.addAiMessage("assistant", "已载入选中文本。点击下方语种直接翻译，翻译结果会以文本节点贴在原文旁边；也可以直接输入其他要求。");
+    this.addAiMessage("user", text ? `[选中${nodeLabel}]\n${text}` : `[选中的${nodeLabel}]`);
+    this.addAiMessage("assistant", `已载入${nodeLabel}。${data && data.type === "text" ? "点击下方语种可直接翻译；" : ""}也可以直接输入分析、整理或改写要求。`);
     if (this.aiChat) {
       this.aiChat.hidden = false;
       this.refreshAiAssistantPage();

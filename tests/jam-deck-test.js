@@ -285,6 +285,19 @@ assert.deepStrictEqual(
   { image: null, text: null },
   "Canvas AI must stay unavailable for a real multi-selection",
 );
+const selectedLinkNode = { getData: () => ({ type: "link", url: "https://miro.com/board" }) };
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedLinkNode]) }),
+  { image: null, text: selectedLinkNode },
+  "Canvas AI must accept the current link node instead of silently hiding its action",
+);
+const selectedMarkdownNode = { getData: () => ({ type: "file", file: "Work/brief.md" }) };
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedMarkdownNode]) }),
+  { image: null, text: selectedMarkdownNode },
+  "Canvas AI must accept the current Markdown note node",
+);
+assert(pluginSource.includes("this.aiPressedNode = selected.image || selected.text || null"), "Canvas AI must capture the current authoritative node at pointerdown");
 Module._load = originalLoad;
 
 const widgetLayout = JamDeckPlugin.widgetLayoutHelpers;
