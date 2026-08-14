@@ -3444,25 +3444,42 @@ class CanvasImageStackController {
   }
 
   openImageFocus(visual) {
-    if (!visual || this.imageFocus) return;
-    const nodeEl = visual.member && visual.member.node && visual.member.node.nodeEl;
-    const image = nodeEl && nodeEl.querySelector(".canvas-node-content.media-embed > img");
-    if (!image) return;
+    const node = visual && visual.member && visual.member.node;
+    return this.openNodeFocus(node, visual && visual.card);
+  }
+
+  openNodeFocus(node, origin = null) {
+    if (!node || this.imageFocus || !this.overlay || !this.entry || !this.entry.ownerDocument) return false;
+    const nodeEl = node.nodeEl;
+    if (!nodeEl) return false;
+    let data = null;
+    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+    if (data && data.type === "group") return false;
+    const image = nodeEl.querySelector(".canvas-node-content.media-embed > img");
+    const content = nodeEl.querySelector(".canvas-node-content");
+    if (!image && !content) return false;
     const wrapper = this.entry.ownerDocument.createElement("div");
     wrapper.className = "jam-deck-canvas-stack-image-focus";
     wrapper.setAttribute("role", "dialog");
     wrapper.setAttribute("aria-modal", "true");
-    wrapper.setAttribute("aria-label", "图片预览");
+    wrapper.setAttribute("aria-label", image ? "图片预览" : "节点预览");
     const media = this.entry.ownerDocument.createElement("div");
     media.className = "jam-deck-canvas-stack-image-focus-media";
-    const focusedImage = image.cloneNode(true);
-    focusedImage.removeAttribute("id");
-    focusedImage.setAttribute("draggable", "false");
-    media.appendChild(focusedImage);
+    if (image) {
+      const focusedImage = image.cloneNode(true);
+      focusedImage.removeAttribute("id");
+      focusedImage.setAttribute("draggable", "false");
+      media.appendChild(focusedImage);
+    } else {
+      media.classList.add("is-node");
+      const clone = content.cloneNode(true);
+      clone.removeAttribute("id");
+      media.appendChild(clone);
+    }
     const close = this.entry.ownerDocument.createElement("button");
     close.className = "jam-deck-canvas-stack-image-focus-close";
     close.type = "button";
-    close.setAttribute("aria-label", "关闭图片预览");
+    close.setAttribute("aria-label", "关闭预览");
     setIcon(close, "x");
     close.addEventListener("click", (event) => {
       event.preventDefault();
@@ -3472,11 +3489,12 @@ class CanvasImageStackController {
     wrapper.appendChild(media);
     wrapper.appendChild(close);
     this.overlay.appendChild(wrapper);
-    this.imageFocus = { wrapper, origin: visual.card };
+    this.imageFocus = { wrapper, origin };
     this.ownerWindow.requestAnimationFrame(() => {
       wrapper.addClass("is-visible");
       close.focus();
     });
+    return true;
   }
 
   closeImageFocus() {
@@ -7701,6 +7719,16 @@ function jamDeckSelectedCanvasNodes(canvas) {
   };
 }
 
+function jamDeckIsNativeCanvasFocusButton(button) {
+  if (!button || !button.getAttribute) return false;
+  if (button.classList && (button.classList.contains("jam-deck-canvas-ai-toolbar") || button.classList.contains("jam-deck-canvas-folder-toolbar"))) return false;
+  const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""}`;
+  if (/聚焦|缩放到所选|zoom to selection|\bfocus\b/i.test(label)) return true;
+  const svg = typeof button.querySelector === "function" ? button.querySelector("svg") : null;
+  const svgClass = svg && (svg.getAttribute("class") || svg.className) || "";
+  return /\blucide-scan\b/.test(String(svgClass));
+}
+
 class CanvasSelectionToolbarController {
   constructor(runtime, entry) {
     this.runtime = runtime;
@@ -7733,12 +7761,15 @@ class CanvasSelectionToolbarController {
       this.suppressSync = false;
       this.scheduleToolbarSync();
     };
+    const keydown = (event) => this.onFocusHotkey(event);
     this.root.addEventListener("pointerdown", press, true);
     this.ownerWindow.addEventListener("pointerup", release, true);
     this.ownerWindow.addEventListener("pointercancel", release, true);
+    this.ownerWindow.addEventListener("keydown", keydown, true);
     this.disposers.push(() => this.root.removeEventListener("pointerdown", press, true));
     this.disposers.push(() => this.ownerWindow.removeEventListener("pointerup", release, true));
     this.disposers.push(() => this.ownerWindow.removeEventListener("pointercancel", release, true));
+    this.disposers.push(() => this.ownerWindow.removeEventListener("keydown", keydown, true));
     const MutationObserverCtor = this.ownerWindow.MutationObserver;
     if (typeof MutationObserverCtor === "function") {
       this.toolbarObserver = new MutationObserverCtor(() => this.scheduleToolbarSync());
@@ -7819,6 +7850,65 @@ class CanvasSelectionToolbarController {
     return button;
   }
 
+  getSingleSelectedNode() {
+    if (!this.canvas || !this.canvas.selection || typeof this.canvas.selection.values !== "function") return null;
+    const selected = Array.from(this.canvas.selection.values()).filter(Boolean);
+    return selected.length === 1 ? selected[0] : null;
+  }
+
+  isToolbarArmed() {
+    const menu = this.getToolbarMenu();
+    if (!menu) return false;
+    try {
+      const style = this.ownerWindow && typeof this.ownerWindow.getComputedStyle === "function"
+        ? this.ownerWindow.getComputedStyle(menu)
+        : null;
+      if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+    } catch (error) {}
+    return true;
+  }
+
+  hijackNativeFocusButton(menu) {
+    if (!menu || typeof menu.querySelectorAll !== "function") return;
+    const buttons = menu.querySelectorAll("button");
+    for (const button of buttons) {
+      if (!jamDeckIsNativeCanvasFocusButton(button)) continue;
+      if (button.dataset && button.dataset.jamDeckFocusHijack === "1") continue;
+      if (button.dataset) button.dataset.jamDeckFocusHijack = "1";
+      button.setAttribute("aria-label", "全屏预览");
+      button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }, true);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.openSelectedNodeFocus();
+      }, true);
+    }
+  }
+
+  onFocusHotkey(event) {
+    if (this.destroyed || !event || event.repeat) return;
+    const key = String(event.key || "");
+    if (key !== "f" && key !== "F") return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target && event.target.closest && event.target.closest("input, textarea, [contenteditable='true']")) return;
+    const stack = this.entry && this.entry.imageStackController;
+    if (stack && (stack.imageFocus || stack.previewWrapper || stack.drag)) return;
+    if (!this.isToolbarArmed()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this.openSelectedNodeFocus();
+  }
+
+  openSelectedNodeFocus() {
+    const node = this.getSingleSelectedNode();
+    const stack = this.entry && this.entry.imageStackController;
+    if (!node || !stack || typeof stack.openNodeFocus !== "function") return false;
+    return stack.openNodeFocus(node);
+  }
+
   syncToolbar() {
     if (this.destroyed) return;
     const menu = this.getToolbarMenu();
@@ -7827,6 +7917,7 @@ class CanvasSelectionToolbarController {
       this.selectedAiNode = null;
       return;
     }
+    this.hijackNativeFocusButton(menu);
     const aiButton = this.ensureAiToolbarButton(menu);
     const stack = this.entry.imageStackController;
     const blocked = !!(stack && (stack.previewWrapper || stack.imageFocus || stack.drag));
@@ -8047,10 +8138,13 @@ class CanvasRuntimeAdapter {
     const keydown = (event) => {
       activate();
       const stackController = entry.imageStackController;
-      if (stackController && stackController.previewWrapper) {
+      if (stackController && (stackController.previewWrapper || stackController.imageFocus)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (event.key === "Escape") stackController.collapsePreview();
+        if (event.key === "Escape") {
+          if (stackController.imageFocus) stackController.closeImageFocus();
+          else stackController.collapsePreview();
+        }
         return;
       }
       const key = String(event.key || "").toLowerCase();
@@ -16380,6 +16474,7 @@ class JamDeckPlugin extends Plugin {
 JamDeckPlugin.CanvasImageStackController = CanvasImageStackController;
 JamDeckPlugin.CanvasFolderController = CanvasFolderController;
 JamDeckPlugin.CanvasSelectionToolbarController = CanvasSelectionToolbarController;
+JamDeckPlugin.isNativeCanvasFocusButton = jamDeckIsNativeCanvasFocusButton;
 JamDeckPlugin.CanvasRuntimeAdapter = CanvasRuntimeAdapter;
 JamDeckPlugin.CanvasReturnCoordinator = CanvasReturnCoordinator;
 JamDeckPlugin.CanvasLinkNavigationBridge = CanvasLinkNavigationBridge;

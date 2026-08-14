@@ -63,6 +63,11 @@ assert(pluginSource.includes("class CanvasSelectionToolbarController"), "Canvas 
 assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Canvas AI must target the native selection popup, not the bottom card palette");
 assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Canvas AI must not resolve the bottom card palette");
 assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas AI must only appear for one authoritative selected node");
+assert(pluginSource.includes("hijackNativeFocusButton(menu)"), "native Canvas focus must be hijacked on the selection toolbar");
+assert(pluginSource.includes("onFocusHotkey(event)") && pluginSource.includes('key !== "f" && key !== "F"'), "fullscreen preview must bind F only as a selection-toolbar hotkey");
+assert(pluginSource.includes("isToolbarArmed()") && pluginSource.includes("openSelectedNodeFocus()"), "F must require the floating selection toolbar before opening fullscreen preview");
+assert(pluginSource.includes("openNodeFocus(node") && pluginSource.includes('aria-label", "关闭预览"'), "toolbar focus and folder image clicks must share the same closeable fullscreen overlay");
+assert(!pluginSource.includes("zoomToSelection = (") && !pluginSource.includes("zoomToSelection=("), "replacing native focus must not patch zoomToSelection used by new-node placement");
 assert(pluginSource.includes("hasNativeCanvasDuplicate(file.path, existing && existing.leaf)"), "embedded Canvas must pause when the same file is open natively");
 assert(pluginSource.includes("getViewState()"), "embedded Canvas duplicate detection must resolve native file paths before the view object finishes loading");
 assert(pluginSource.includes("getCanvasExternalImageDrop"), "embedded Canvas must own external image drops instead of delegating them to the native handler");
@@ -97,7 +102,7 @@ assert(styleSource.includes(".jam-deck-canvas-stack-overlay"), "Canvas stacks mu
 assert(styleSource.includes(".jam-deck-canvas-stack-preview {") && styleSource.includes("pointer-events: auto;"), "an open stack preview must isolate the Canvas below it");
 assert(pluginSource.includes("this.previewWrapper.contains(event.target)") && pluginSource.includes("event.stopImmediatePropagation();"), "preview dismissal must consume covered pointer input");
 assert(pluginSource.includes('if (event.key === "Escape") this.collapsePreview();'), "preview isolation must retain an Escape exit");
-assert(pluginSource.includes("stackController && stackController.previewWrapper"), "the early Canvas keyboard bridge must yield to an open focus preview");
+assert(pluginSource.includes("stackController && (stackController.previewWrapper || stackController.imageFocus)"), "the early Canvas keyboard bridge must yield to an open stack preview or fullscreen node focus");
 assert(styleSource.includes(".jam-deck-canvas-stack-overlay {\n  position: absolute;\n  z-index: 70;"), "the focus overlay must sit above native Canvas controls");
 assert(!styleSource.includes("prefers-reduced-motion"), "Jam Deck animations must not follow the OS reduced-motion setting");
 assert(pluginSource.includes("getCanvasItems()") && pluginSource.includes("for (const item of this.getCanvasItems())"), "focus displacement must enumerate every Canvas node type");
@@ -290,6 +295,19 @@ assert.deepStrictEqual(
   { image: null, text: null },
   "Canvas AI must stay unavailable for a real multi-selection",
 );
+assert(JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: (name) => name === "aria-label" ? "聚焦" : "",
+  classList: { contains: () => false },
+}), "the native Canvas focus button must be recognized by its Chinese label");
+assert(JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: () => "",
+  classList: { contains: () => false },
+  querySelector: () => ({ getAttribute: (name) => name === "class" ? "svg lucide lucide-scan" : "" }),
+}), "the native Canvas focus button must be recognized by the scan icon");
+assert(!JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: (name) => name === "aria-label" ? "将选中节点发送给 AI" : "",
+  classList: { contains: (name) => name === "jam-deck-canvas-ai-toolbar" },
+}), "Jam Deck toolbar actions must not be treated as the native focus button");
 const selectedLinkNode = { getData: () => ({ type: "link", url: "https://miro.com/board" }) };
 assert.deepStrictEqual(
   JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedLinkNode]) }),

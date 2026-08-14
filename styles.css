@@ -995,6 +995,16 @@
   border-radius: var(--jd-canvas-image-radius);
   box-shadow: 0 28px 80px -24px rgb(0 0 0 / 0.68);
 }
+.jam-deck-canvas-stack-image-focus-media.is-node {
+  width: auto;
+  height: auto;
+  max-width: 90%;
+  max-height: 90%;
+  overflow: auto;
+  background: var(--background-primary);
+  border-radius: var(--jd-canvas-image-radius);
+  box-shadow: 0 28px 80px -24px rgb(0 0 0 / 0.68);
+}
 .jam-deck-canvas-stack-image-focus-close {
   position: absolute;
   top: 18px;

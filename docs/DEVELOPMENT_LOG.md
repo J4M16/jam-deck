@@ -1,5 +1,12 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-14 — 0.31.2 全屏预览替换原生 Canvas 聚焦
+
+- Jam 反馈：原生聚焦只是缩放到选区，鸡肋；希望点该按钮时放大到 Canvas 全屏，遮罩和关闭按钮与文件夹点开后点大图一致；绑定 `F`，且只有选中元件出现悬浮工具栏时才有效。
+- 实现：识别原生聚焦按钮（`聚焦` / Focus / `lucide-scan`）并在捕获阶段拦截 click，改为 `openNodeFocus`；图片仍走既有 90% 视口预览，其他节点克隆内容。`F` 挂在 selection toolbar 的 window capture，条件是工具栏可见、非输入框、没有已打开的预览。不 patch `zoomToSelection`，避免破坏新节点放置后的视野跟随。
+- 验证：标准。新增按钮识别、F 热键与不 patch zoomToSelection 断言；`npm run verify`。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-14 — 0.31.1 大图拖不进文件夹
 
 - Jam 反馈：Radiant Grid 这类大图拖到已有 4 个节点的文件夹上进不去，壳体没有接收态。旁边还有一张更大的 RX-9 底图。
