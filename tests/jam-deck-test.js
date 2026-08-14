@@ -16,6 +16,8 @@ const styleSource = fs.readFileSync(stylePath, "utf8");
 const deploySource = fs.readFileSync(deployPath, "utf8");
 assert(pluginSource.includes("new WorkspaceLeaf(this.app)"), "Canvas widget must create a real WorkspaceLeaf");
 assert(pluginSource.includes("leaf.openFile(file, { active: false })"), "Canvas widget must open the canvas inside its owned leaf");
+assert(pluginSource.includes("leaf.parent = context.root;"), "detached Canvas leaf must inherit only the workspace root, never impersonate a real tab-group child");
+assert(!pluginSource.includes("leaf.parent = context.parent;"), "detached Canvas leaf must not make Obsidian select tab index -1 and fall back to the first journal tab");
 assert(pluginSource.includes("view.saveImmediately"), "Canvas cleanup must flush pending edits");
 assert(pluginSource.includes("leaf.unload"), "Canvas cleanup must release its owned leaf events");
 assert(!pluginSource.includes("MarkdownRenderer"), "Canvas widget must not regress to Markdown preview rendering");
@@ -141,6 +143,7 @@ assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the
 assert(pluginSource.includes('event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")'), "Canvas interaction throttling must never intercept the native floating toolbar");
 assert(pluginSource.includes("if (!this.suppressSync) return;\n      this.suppressSync = false;"), "toolbar pointerup must not schedule a reconcile when pointerdown was an excluded native control");
 assert(!pluginSource.includes("ownerWindow.setTimeout(activate, 0)"), "embedded Canvas controls must not lose their native click to a delayed Jam Deck active-leaf takeover");
+assert(pluginSource.includes("const pointerdown = () => activate();"), "embedded Canvas controls must synchronously keep the real Jam Deck host tab active instead of activating their detached leaf");
 assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");
 assert(pluginSource.includes("CANVAS_DROP_AUTO_GAP"), "multi-image drops must lay out beside the previous image with a fixed world gap");
 assert(pluginSource.includes("dropCursorRect"), "multi-image drops must track the previous placed rect for automatic row layout");

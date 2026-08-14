@@ -8327,10 +8327,7 @@ class CanvasRuntimeAdapter {
     if (!entry || entry.interactionInstalled || !entry.leaf || !entry.leaf.containerEl) return;
     const target = entry.leaf.containerEl;
     const activate = () => this.activate(entry);
-    const pointerdown = (event) => {
-      if (event.target && event.target.closest && event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")) return;
-      activate();
-    };
+    const pointerdown = () => activate();
     const keydown = (event) => {
       activate();
       const stackController = entry.imageStackController;
@@ -8715,7 +8712,7 @@ class CanvasRuntimeAdapter {
       context = this.probe(hostEl);
       leaf = new WorkspaceLeaf(this.app);
       this.assertTreeInvariant(context, leaf);
-      leaf.parent = context.parent;
+      leaf.parent = context.root;
       if (typeof leaf.getRoot !== "function" || leaf.getRoot() !== context.root) throw new Error("Canvas leaf cannot inherit the Jam Deck workspace root");
       this.assertTreeInvariant(context, leaf);
 

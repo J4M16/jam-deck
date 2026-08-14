@@ -7,8 +7,9 @@
 - **权限与限制透明化**：iframe 只开放脚本、同源资源与表单所需的最小 sandbox 权限，URL、RPC 方法和工作区路径均固定。DeepSeek Harness 当前没有外部前台会话切换接口；若网页自身恢复了旧会话，界面会提示在网页侧栏选择 Jamnote，不伪装成已切换。
 - **双分页视觉与高度重做**：修复页面 flex 高度链断开导致输入框悬在顶部的问题；AI 页收为 `680×538`、本地工作区收为 `925×600` 的浮窗尺度。页签、模型、状态与操作合并进唯一 52px 顶栏，本地网页直接占据正文；AI 空态与底部输入区重新建立清楚层级，按钮反馈统一为短促可打断的过渡。
 - **修复 Canvas 当前节点发送给 AI 失效**：节点工具栏改为读取 Canvas 的权威 selection 集合，不再受 Obsidian 偶发残留的 `.is-selected` DOM 标记干扰；按下按钮时锁定真实当前节点，避免依赖上一帧缓存。入口从纯文本/图片扩展到链接、Markdown 笔记和普通附件：链接发送 URL，Markdown 读取正文，其他附件发送文件路径；无法发送时明确提示，不再静默无反应。真实多选仍保持禁用。
-- **修复 Canvas 整块悬浮工具栏无响应**：嵌入 Canvas 的 active-leaf 桥接曾在工具栏 pointerdown 后排队二次激活 Jam Deck host，抢在原生 pointerup/click 前卸下 `.canvas-menu`，因此删除、颜色、聚焦、对齐、图层等全部看似能命中却没有动作。现在原生工具栏完全排除在画布拖拽同步与 active-leaf 接管之外，并移除延迟二次激活。
-- 处理模型签名：GPT-5（主代理/实现与验证）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-terra（Designer）、具体模型标识不可见（只读 UI 侦察）、具体模型标识不可见（只读协议侦察）、具体模型标识不可见（只读高度诊断）、具体模型标识不可见（只读 Canvas AI 回归诊断）
+- **修复 Canvas 整块悬浮工具栏无响应**：嵌入 Canvas 的 active-leaf 桥接曾在工具栏 pointerdown 后排队二次激活 Jam Deck host，抢在原生 pointerup/click 前卸下 `.canvas-menu`，因此删除、颜色、聚焦、对齐、图层等全部看似能命中却没有动作。现在原生工具栏排除在画布拖拽同步之外，并移除会打断 click 的延迟二次激活。
+- **修复多页签时跳回第一个日记**：embedded Canvas 的 leaf 不在 Obsidian 主布局树内，却曾错误引用真实 tab group 作为 parent；原生交互激活它时索引为 `-1`，Obsidian 会夹到索引 `0`。现在 detached leaf 只继承 workspace root，不再冒充真实页签；pointerdown 同步保持 Jam Deck host，同时不安排会打断原生 click 的延迟二次激活。
+- 处理模型签名：GPT-5（主代理/实现与验证）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-terra（Designer）、具体模型标识不可见（只读 UI 侦察）、具体模型标识不可见（只读协议侦察）、具体模型标识不可见（只读高度诊断）、具体模型标识不可见（只读 Canvas AI 回归诊断）、具体模型标识不可见（只读多页签跳转诊断）
 
 ## 0.30.8 — 2026-08-14
 
