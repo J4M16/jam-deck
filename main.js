@@ -2215,6 +2215,36 @@ function jamDeckCanvasStackOverlapRatio(left, right) {
   return smallerArea > 0 ? jamDeckCanvasStackIntersectionArea(a, b) / smallerArea : 0;
 }
 
+function jamDeckClientPointInRect(x, y, rect) {
+  if (!rect) return false;
+  const left = Number(rect.left);
+  const top = Number(rect.top);
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (![x, y, left, top, width, height].every(Number.isFinite) || width < 1 || height < 1) return false;
+  return x >= left && x <= left + width && y >= top && y <= top + height;
+}
+
+function jamDeckCanvasRectContainsPoint(rect, x, y) {
+  const box = jamDeckCanvasStackRect(rect);
+  if (!box || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+  return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+}
+
+// Icon-drop onto a collapsed folder: the dragged centre inside the shell
+// already covers wide/short images, but a larger image can cover the folder
+// while its own centre stays outside the 200×180 shell.  Treating "the
+// folder centre is under this image" as a hit keeps the same icon semantics.
+function jamDeckCanvasFolderShellDropRatio(sourceRect, shellBounds) {
+  const rect = jamDeckCanvasStackRect(sourceRect);
+  const shell = jamDeckCanvasStackRect(shellBounds);
+  if (!rect || !shell) return 0;
+  const sourceCenterInside = jamDeckCanvasRectContainsPoint(shell, rect.x + rect.width / 2, rect.y + rect.height / 2);
+  const shellCenterInside = jamDeckCanvasRectContainsPoint(rect, shell.x + shell.width / 2, shell.y + shell.height / 2);
+  if (sourceCenterInside || shellCenterInside) return 1;
+  return jamDeckCanvasStackOverlapRatio(rect, shell);
+}
+
 function jamDeckCanvasStackAnchor(members) {
   if (!Array.isArray(members) || !members.length) return null;
   const center = members.reduce((result, member) => {
@@ -4805,6 +4835,8 @@ class CanvasFolderController {
       beforeFolderId: schema && schema.id,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
       moved: false,
     };
   }
@@ -4812,12 +4844,16 @@ class CanvasFolderController {
   onPointerMove(event) {
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.lastClientX = event.clientX;
+    drag.lastClientY = event.clientY;
     if (!drag.moved && Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) >= 5) drag.moved = true;
   }
 
   onPointerUp(event, cancelled) {
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.lastClientX = event.clientX;
+    drag.lastClientY = event.clientY;
     this.drag = null;
     if (cancelled || !drag.moved) return;
     this.ownerWindow.setTimeout(() => this.finishDrop(drag), 0);
@@ -6229,7 +6265,19 @@ class CanvasFolderController {
     return id ? this.groups.get(String(id)) || this.collectGroups().find((group) => group.id === String(id)) : null;
   }
 
-  findDropTarget(source, groups) {
+  folderShellPointerHit(group, pointer) {
+    if (!pointer || !group) return false;
+    const view = this.folderViews.get(String(group.id));
+    const shellEl = view && view.shell;
+    if (!shellEl || typeof shellEl.getBoundingClientRect !== "function") return false;
+    try {
+      return jamDeckClientPointInRect(pointer.x, pointer.y, shellEl.getBoundingClientRect());
+    } catch (error) {
+      return false;
+    }
+  }
+
+  findDropTarget(source, groups, pointer = null) {
     if (!source || !source.rect) return null;
     const scored = [];
     for (const group of groups) {
@@ -6239,20 +6287,11 @@ class CanvasFolderController {
         // A collapsed native folder buries its members at the anchor stack;
         // judge drops against the visible 200×180 shell, not the buried
         // (and larger) stacked member rectangles.
-        const shellBounds = this.nativeFolderShellBounds(group);
-        if (!shellBounds) {
-          ratio = 0;
+        if (this.folderShellPointerHit(group, pointer)) {
+          ratio = 1;
         } else {
-          // Dropping onto a folder is icon-drop semantics: the dragged
-          // centre landing inside the shell is a hit regardless of aspect
-          // ratio.  Area ratio alone caps wide/short images at 0.5 (the
-          // shell is narrower than the image), which made them unjoinable.
-          const rect = jamDeckCanvasStackRect(source.rect);
-          const centerX = rect.x + rect.width / 2;
-          const centerY = rect.y + rect.height / 2;
-          const centerInside = centerX >= shellBounds.x && centerX <= shellBounds.x + shellBounds.width
-            && centerY >= shellBounds.y && centerY <= shellBounds.y + shellBounds.height;
-          ratio = centerInside ? 1 : jamDeckCanvasStackOverlapRatio(rect, shellBounds);
+          const shellBounds = this.nativeFolderShellBounds(group);
+          ratio = shellBounds ? jamDeckCanvasFolderShellDropRatio(source.rect, shellBounds) : 0;
         }
       } else {
         const boundsRatio = group.bounds ? jamDeckCanvasStackOverlapRatio(source.rect, group.bounds) : 0;
@@ -6268,10 +6307,19 @@ class CanvasFolderController {
   finishDrop(drag) {
     if (this.destroyed || !drag || !drag.node) return;
     const source = this.findItem(drag.node);
-    if (!source || !source.rect || jamDeckCanvasStackRect(source.rect).x === jamDeckCanvasStackRect(drag.beforeRect).x && jamDeckCanvasStackRect(source.rect).y === jamDeckCanvasStackRect(drag.beforeRect).y && jamDeckCanvasStackRect(source.rect).width === jamDeckCanvasStackRect(drag.beforeRect).width && jamDeckCanvasStackRect(source.rect).height === jamDeckCanvasStackRect(drag.beforeRect).height) return;
+    if (!source || !source.rect) return;
+    const pointer = Number.isFinite(drag.lastClientX) && Number.isFinite(drag.lastClientY)
+      ? { x: drag.lastClientX, y: drag.lastClientY }
+      : null;
     const groups = this.collectGroups();
+    const before = jamDeckCanvasStackRect(drag.beforeRect);
+    const current = jamDeckCanvasStackRect(source.rect);
+    const moved = !!(before && current && (before.x !== current.x || before.y !== current.y || before.width !== current.width || before.height !== current.height));
     const sourceGroup = drag.beforeFolderId ? groups.find((group) => group.id === drag.beforeFolderId) : null;
-    const target = this.findDropTarget(source, groups);
+    const target = this.findDropTarget(source, groups, pointer);
+    // Stale Canvas data still reports the pre-drag rectangle.  World overlap
+    // against that rect is not a drop; only a live pointer hit on the shell is.
+    if (!moved && !(target && this.folderShellPointerHit(target.group, pointer))) return;
     try {
       if (sourceGroup) {
         // A member may be rearranged inside its own expanded folder.  Only a
@@ -16376,6 +16424,8 @@ JamDeckPlugin.canvasStackGeometry = {
 JamDeckPlugin.canvasFolderGeometry = {
   schema: jamDeckCanvasFolderSchema,
   stableId: jamDeckCanvasFolderStableId,
+  shellDropRatio: jamDeckCanvasFolderShellDropRatio,
+  clientPointInRect: jamDeckClientPointInRect,
   memberSort: jamDeckCanvasFolderMemberSort,
   representatives: jamDeckCanvasFolderRepresentatives,
   representativeColumns: jamDeckCanvasFolderRepresentativeColumns,
