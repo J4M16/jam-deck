@@ -67,6 +67,10 @@ assert(pluginSource.includes("hijackNativeFocusButton(menu)"), "native Canvas fo
 assert(pluginSource.includes("onFocusHotkey(event)") && pluginSource.includes('key !== "f" && key !== "F"'), "fullscreen preview must bind F only as a selection-toolbar hotkey");
 assert(pluginSource.includes("isToolbarArmed()") && pluginSource.includes("openSelectedNodeFocus()"), "F must require the floating selection toolbar before opening fullscreen preview");
 assert(pluginSource.includes("openNodeFocus(node") && pluginSource.includes('aria-label", "关闭预览"'), "toolbar focus and folder image clicks must share the same closeable fullscreen overlay");
+assert(pluginSource.includes('setAttribute("aria-label", "放映")'), "the native focus button must be relabeled as present");
+assert(pluginSource.includes("invokeNativeZoomToSelection()"), "unpresentable selections such as groups must still call native zoomToSelection");
+assert(pluginSource.includes("if (this.imageFocus)") && pluginSource.includes('event.type === "wheel" && onMedia'), "fullscreen present must isolate wheel from the Canvas except cloned node scrolling");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media.is-node"), "non-image present must reuse the same overlay with a node media variant");
 assert(!pluginSource.includes("zoomToSelection = (") && !pluginSource.includes("zoomToSelection=("), "replacing native focus must not patch zoomToSelection used by new-node placement");
 assert(pluginSource.includes("hasNativeCanvasDuplicate(file.path, existing && existing.leaf)"), "embedded Canvas must pause when the same file is open natively");
 assert(pluginSource.includes("getViewState()"), "embedded Canvas duplicate detection must resolve native file paths before the view object finishes loading");

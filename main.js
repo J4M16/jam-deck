@@ -2957,6 +2957,14 @@ class CanvasImageStackController {
     this.root.appendChild(this.overlay);
     const pointerdown = (event) => this.onPointerDown(event);
     const collapse = (event) => {
+      if (this.imageFocus) {
+        const onMedia = !!(event.target && event.target.closest && event.target.closest(".jam-deck-canvas-stack-image-focus-media"));
+        if (event.type === "wheel" && onMedia) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === "contextmenu" && !onMedia) this.closeImageFocus();
+        return;
+      }
       if (!this.previewWrapper) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -3474,6 +3482,7 @@ class CanvasImageStackController {
       media.classList.add("is-node");
       const clone = content.cloneNode(true);
       clone.removeAttribute("id");
+      clone.style.pointerEvents = "none";
       media.appendChild(clone);
     }
     const close = this.entry.ownerDocument.createElement("button");
@@ -7857,6 +7866,7 @@ class CanvasSelectionToolbarController {
   }
 
   isToolbarArmed() {
+    if (!this.getSingleSelectedNode()) return false;
     const menu = this.getToolbarMenu();
     if (!menu) return false;
     try {
@@ -7864,6 +7874,8 @@ class CanvasSelectionToolbarController {
         ? this.ownerWindow.getComputedStyle(menu)
         : null;
       if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+      const rect = typeof menu.getBoundingClientRect === "function" ? menu.getBoundingClientRect() : null;
+      if (rect && (rect.width < 8 || rect.height < 8)) return false;
     } catch (error) {}
     return true;
   }
@@ -7875,7 +7887,8 @@ class CanvasSelectionToolbarController {
       if (!jamDeckIsNativeCanvasFocusButton(button)) continue;
       if (button.dataset && button.dataset.jamDeckFocusHijack === "1") continue;
       if (button.dataset) button.dataset.jamDeckFocusHijack = "1";
-      button.setAttribute("aria-label", "全屏预览");
+      button.setAttribute("aria-label", "放映");
+      button.setAttribute("title", "放映");
       button.addEventListener("pointerdown", (event) => {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -7883,7 +7896,7 @@ class CanvasSelectionToolbarController {
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopImmediatePropagation();
-        this.openSelectedNodeFocus();
+        if (!this.openSelectedNodeFocus()) this.invokeNativeZoomToSelection();
       }, true);
     }
   }
@@ -7897,9 +7910,9 @@ class CanvasSelectionToolbarController {
     const stack = this.entry && this.entry.imageStackController;
     if (stack && (stack.imageFocus || stack.previewWrapper || stack.drag)) return;
     if (!this.isToolbarArmed()) return;
+    if (!this.openSelectedNodeFocus()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    this.openSelectedNodeFocus();
   }
 
   openSelectedNodeFocus() {
@@ -7907,6 +7920,12 @@ class CanvasSelectionToolbarController {
     const stack = this.entry && this.entry.imageStackController;
     if (!node || !stack || typeof stack.openNodeFocus !== "function") return false;
     return stack.openNodeFocus(node);
+  }
+
+  invokeNativeZoomToSelection() {
+    if (!this.canvas || typeof this.canvas.zoomToSelection !== "function") return false;
+    try { this.canvas.zoomToSelection(); } catch (error) { return false; }
+    return true;
   }
 
   syncToolbar() {
