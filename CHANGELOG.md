@@ -9,6 +9,7 @@
 - **修复 Canvas 当前节点发送给 AI 失效**：节点工具栏改为读取 Canvas 的权威 selection 集合，不再受 Obsidian 偶发残留的 `.is-selected` DOM 标记干扰；按下按钮时锁定真实当前节点，避免依赖上一帧缓存。入口从纯文本/图片扩展到链接、Markdown 笔记和普通附件：链接发送 URL，Markdown 读取正文，其他附件发送文件路径；无法发送时明确提示，不再静默无反应。真实多选仍保持禁用。
 - **修复 Canvas 整块悬浮工具栏无响应**：嵌入 Canvas 的 active-leaf 桥接曾在工具栏 pointerdown 后排队二次激活 Jam Deck host，抢在原生 pointerup/click 前卸下 `.canvas-menu`，因此删除、颜色、聚焦、对齐、图层等全部看似能命中却没有动作。现在原生工具栏排除在画布拖拽同步之外，并移除会打断 click 的延迟二次激活。
 - **修复多页签时跳回第一个日记**：embedded Canvas 的 leaf 不在 Obsidian 主布局树内，却曾错误引用真实 tab group 作为 parent；原生交互激活它时索引为 `-1`，Obsidian 会夹到索引 `0`。现在 detached leaf 只继承 workspace root，不再冒充真实页签；pointerdown 同步保持 Jam Deck host，同时不安排会打断原生 click 的延迟二次激活。
+- **维护警告——工具栏点击与页签归属不是二选一**：`.canvas-menu` 必须跳过拖拽/selection reconcile，但不能因此跳过同步 host 激活；同步激活用于保持 Jam Deck 页签，延迟激活则会卸下原生 menu、吞掉 click。后续不得把两类排除规则合并，也不得把 detached Canvas leaf 重新挂回真实 tab group。
 - 处理模型签名：GPT-5（主代理/实现与验证）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-terra（Designer）、具体模型标识不可见（只读 UI 侦察）、具体模型标识不可见（只读协议侦察）、具体模型标识不可见（只读高度诊断）、具体模型标识不可见（只读 Canvas AI 回归诊断）、具体模型标识不可见（只读多页签跳转诊断）
 
 ## 0.30.8 — 2026-08-14
