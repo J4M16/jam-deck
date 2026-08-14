@@ -113,7 +113,7 @@ Canvas 适配器使用 Obsidian 桌面端内部视图能力。它不把临时 le
 
 剪贴板图片 drop 在 owned Canvas host 的 capture 阶段处理：同步记录 Canvas 坐标，复制为持久附件，创建图片节点并立即保存。未提交失败只清理本操作创建且未被引用的附件；已经插入节点后不会盲删文件。
 
-同路径原生 Canvas 冲突由纯路径集合驱动：扫描明确排除带 ownership 标记的 detached leaf，高频 workspace 事件只保留一个 timer 并串行 reconcile。冲突时 `CanvasRuntimeAdapter` 先标记 entry closing，停止控制器并 abort/等待图片 drop 等在途任务，再 quiet 卸载 Jam Deck 自有 leaf；该路径不调用原生 Canvas 的 `saveImmediately`、`view.close`、workspace active-leaf 或 layout API。最后一个原生 leaf 关闭后才 fresh mount 一次。节点选择工具栏由 `CanvasSelectionToolbarController` 独立管理，只保留当前节点发送给 AI，并在 entry 销毁时同步释放按钮、observer、rAF 与监听器。
+同路径原生 Canvas 冲突由纯路径集合驱动：扫描明确排除带 ownership 标记的 detached leaf，高频 workspace 事件只保留一个 timer 并串行 reconcile。冲突时 `CanvasRuntimeAdapter` 先标记 entry closing，停止控制器并 abort/等待图片 drop 等在途任务，再 quiet 卸载 Jam Deck 自有 leaf；该路径不调用原生 Canvas 的 `saveImmediately`、`view.close`、workspace active-leaf 或 layout API。最后一个原生 leaf 关闭后才 fresh mount 一次。节点选择工具栏由 `CanvasSelectionToolbarController` 独立管理，负责当前节点发送给 AI，并把原生聚焦按钮改成全屏预览（复用堆叠大图全屏层）。entry 销毁时同步释放按钮、observer、rAF 与监听器。
 
 标注层使用 Pointer Events，鼠标与数位笔都只记录 Canvas 世界坐标 `[x, y]`，并以用户选择的固定粗细渲染；不读取压力、倾角或合并采样。旧笔迹中的扩展点字段会在读取时忽略。画笔模式只拦截主按钮鼠标或笔输入，`Space` 临时让出平移，右键、滚轮和触控保持原生行为。
 
