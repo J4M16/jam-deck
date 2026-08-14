@@ -7760,12 +7760,12 @@ class CanvasImageSearchController {
     // 按下（平移/拖拽）期间暂停同步，松手恢复并补一次——避免 pointermove
     // 高频触发两次全量节点遍历导致大图量画布平移卡顿。
     const press = (event) => {
-      if (this.toolbarButton && (event.target === this.toolbarButton || this.toolbarButton.contains(event.target))) return;
-      if (this.aiToolbarButton && (event.target === this.aiToolbarButton || this.aiToolbarButton.contains(event.target))) return;
+      if (event.target && event.target.closest && event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")) return;
       this.suppressSync = true;
       this.scheduleToolbarSync();
     };
     const release = () => {
+      if (!this.suppressSync) return;
       this.suppressSync = false;
       this.scheduleToolbarSync();
     };
@@ -8327,10 +8327,9 @@ class CanvasRuntimeAdapter {
     if (!entry || entry.interactionInstalled || !entry.leaf || !entry.leaf.containerEl) return;
     const target = entry.leaf.containerEl;
     const activate = () => this.activate(entry);
-    const pointerdown = () => {
+    const pointerdown = (event) => {
+      if (event.target && event.target.closest && event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")) return;
       activate();
-      const ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
-      if (ownerWindow) ownerWindow.setTimeout(activate, 0);
     };
     const keydown = (event) => {
       activate();

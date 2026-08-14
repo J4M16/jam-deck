@@ -138,6 +138,9 @@ assert(pluginSource.includes("await this.writeVaultFile(path"), "the AI conversa
 assert(pluginSource.includes("await this.plugin.ensureVaultFileParent(path)"), "ink strokes must write through the guarded writer");
 assert(!pluginSource.includes("上一张图片仍在写入 Canvas"), "the single-slot drop lock must be gone so queued images are never rejected");
 assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the pointer is down so panning a large Canvas does not rescan every node per move");
+assert(pluginSource.includes('event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")'), "Canvas interaction throttling must never intercept the native floating toolbar");
+assert(pluginSource.includes("if (!this.suppressSync) return;\n      this.suppressSync = false;"), "toolbar pointerup must not schedule a reconcile when pointerdown was an excluded native control");
+assert(!pluginSource.includes("ownerWindow.setTimeout(activate, 0)"), "embedded Canvas controls must not lose their native click to a delayed Jam Deck active-leaf takeover");
 assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");
 assert(pluginSource.includes("CANVAS_DROP_AUTO_GAP"), "multi-image drops must lay out beside the previous image with a fixed world gap");
 assert(pluginSource.includes("dropCursorRect"), "multi-image drops must track the previous placed rect for automatic row layout");
