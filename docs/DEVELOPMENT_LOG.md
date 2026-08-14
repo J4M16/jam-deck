@@ -1,5 +1,20 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-14 — 0.30.9 AI 助手双分页与 Jamnote 本地工作区
+
+- Jam 需求：AI 悬浮窗在现有助手基础上增加第二分页，嵌入 `http://127.0.0.1:3080/`，并以 `D:\jam16\Jamnote` 为工作区读取、修改工作台内容。
+- 协议确认：DeepSeek Harness 提供固定 POST `/api/<method>` 自定义 RPC，可幂等 `workspace.create`、读取 workspace/session baseline 并创建 workspace session；但前台 current session 存在网页自己的 `127.0.0.1` localStorage，现有服务没有 workspace/session deep-link 或 `postMessage` 控制面，外部 RPC 不能强制切换已经打开的网页会话。
+- 实现：AI 窗口新增“AI 助手 / 本地工作区”两个轻量 tab。Canvas 文本/图片入口始终回到第一页；模型切换和清理只刷新第一页，不再销毁本地网页；普通关窗保留成功 iframe，view 重渲染/关闭会失效迟到请求并完整释放。
+- 工作区准备：固定 URL、固定路径和四个 RPC 方法白名单；每次请求校验 `type/rpcId/result`，6 秒超时。注册后按 Windows canonical absolute path 唯一确认 Jamnote，随后仅复用 workspace membership、cwd、`blank===true` 与未归档条件同时成立的会话；没有时创建，并重新读取 workspace/session baseline 验证新 ID 的归属与 cwd。
+- 安全与交互：iframe sandbox 精确为 `allow-scripts allow-same-origin allow-forms`，未开放下载、弹窗逃逸、顶层导航或宿主桥；不读 iframe DOM、不接收可配置 URL/path。Harness 恢复旧 current 的限制收进 Jamnote 路径 tooltip，不再常驻占一条说明栏。
+- 视觉返工：初版 assistant 页面缺少完整 flex 高度链，输入框停在内容顶部；本地页 `1180×860` 配合 `calc(100% - 32px)` 又会在 1156×768 工作区内膨胀到近乎全屏。现修复 pages/page 的完整 flex 填充，AI 页目标 `680×538`、本地页 `925×600`；两页共用唯一 52px header，segmented tabs、模型、Jamnote 状态与操作都在同一层。AI 空态改为标题/说明/示例三级文字，输入区固定底部；本地页移除重复 chrome，让 iframe 成为主体。
+- Canvas AI 回归：第一轮只修了 stale DOM 多选误判，但实机继续深挖发现“当前节点”入口长期只接受纯文本和图片；当前画布的 Miro 链接、Markdown、PPTX 等单选节点都会隐藏 AI 按钮，因此 Jam 仍会感知为失效。现在以 Canvas selection 为唯一事实来源，并在 pointerdown 锁定当前节点；链接发送 URL，Markdown 读取 Vault 正文，普通附件发送路径，无法发送时显示 Notice。实机已分别用真实图片工具栏点击、文本按钮链和 Miro 链接上下文验证 AI 页能打开并得到正确 nodeId/content；真实多选仍禁用。
+- 悬浮工具栏根因：Jam 截图确认并非 AI 单按钮，而是整块原生 Canvas selection menu 无响应。实机 `elementFromPoint` 精确命中原生 button，排除 folder/stack overlay 与 pointer-events；真实点击后 selection 保留、menu 消失但颜色/聚焦等 action 未发生。原因是 `installCanvasInteractionBridge` 在 pointerdown 同步激活后又 `setTimeout(activate, 0)`，原生 Canvas 刚取得的 leaf/menu 活跃状态在 click 前被抢回 Jam Deck host；同时 ImageSearch 的拖拽节流也没有排除原生 menu。现删除延迟激活，并让 `.canvas-menu/.canvas-card-menu/.canvas-controls/绘图条` 跳过拖拽同步，避免 toolbar press 触发中途 reconcile。
+- 多页签补充：embedded Canvas leaf 不在真实 tab group 的 `children`，却曾把该 tab group 设为 parent。Obsidian 激活它时执行 `children.indexOf(leaf)=-1`，随后 `selectTabIndex(-1)` 被夹到索引 0；Jam Deck 独占页签时索引 0 恰好仍是 Jam Deck，所以表面正常。现让 detached leaf 只继承 workspace root，并在 Canvas pointerdown 同步保持真实 Jam Deck host 活跃，同时继续禁止延迟二次激活。实机搭建 `[2026-07-17, Daily, Jam Deck]` 三页签、Jam Deck 位于索引 2，点击真实文本节点与原生颜色按钮后 active leaf 均保持 Jam Deck，menu 继续连接。
+- ⚠️ **功能互斥坑点（后续维护必须同时满足）**：这次连续回归不是“工具栏可点击”和“多页签不跳转”天然互斥，而是两套职责曾被错误合并。`CanvasImageSearchController` 对 `.canvas-menu/.canvas-controls` 的排除只用于避免 pointerup 前执行 selection/reconcile；`CanvasRuntimeAdapter` 的同步 `activate(entry)` 则必须保留，用于锁定真实 Jam Deck host。唯一必须删除的是 pointerdown 后的延迟二次 activate，因为它会在原生 click 前卸载 menu。与此同时 detached Canvas leaf 的 parent 必须保持 workspace root，绝不能重新指向 host 的 tab group。测试修改这一区域时必须同时覆盖“原生工具栏 action 执行”和“Jam Deck 位于第 2/3 个页签仍不跳到索引 0”，只测单页签会掩盖问题。
+- 回归：新增固定 endpoint/envelope、rpcId 关联、Windows 路径规范化、空白会话复用、归档会话排除、新建后二次确认、重复 workspace 拒绝、tab ARIA、最小 sandbox、第一页恢复、单 header 与完整高度链样式合同；`npm run verify` 全绿。部署并热重载后实机确认 iframe 自动显示 Jamnote，权限为 Workspace Write；本地页实测 `925×600`、助手页 `680×538`，输入区稳定贴底，切页后同一 iframe 保留，Obsidian 无运行错误。
+- 处理模型签名：GPT-5（主代理/实现与验证）、gpt-5.6-sol（Planner）、gpt-5.6-terra（Advisor）、gpt-5.6-terra（Designer）、具体模型标识不可见（只读 UI 侦察）、具体模型标识不可见（只读协议侦察）、具体模型标识不可见（只读高度诊断）、具体模型标识不可见（只读 Canvas AI 回归诊断）、具体模型标识不可见（只读多页签跳转诊断）
+
 ## 2026-08-14 — 0.30.8 修复 AI 助手悬浮按钮越界消失
 
 - Jam 反馈：0.30.7 部署后 AI 助手再次不见。
