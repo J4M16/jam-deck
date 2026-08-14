@@ -146,12 +146,6 @@ async function jamDeckPrepareDshWorkspace(rpc = jamDeckDshRpc) {
   }
   return { workspaceId: resolved.workspace.workspaceId, sessionId: session.sessionId, created };
 }
-// Eagle AI 搜索（ai-search 插件本地服务，端口为其默认固定值）；素材仍由 Eagle 管理，库目录软排除在 Obsidian 索引外。
-const EAGLE_SEARCH_API_URL = "http://127.0.0.1:38766/api/search/image";
-const EAGLE_LIBRARY_ROOT = "JAM收集.library";
-const EAGLE_SEARCH_RESULT_LIMIT = 10;
-const EAGLE_SEARCH_GRID_COLUMNS = 5;
-const EAGLE_SEARCH_GRID_GAP = 40;
 // 多图拖入 canvas 时相邻两张的世界坐标间距（同一行横排）。
 const CANVAS_DROP_AUTO_GAP = 28;
 // Canvas 节点按住多久后才判定为"按住"并悬浮（300ms 内松手视为单击，不悬浮）。
@@ -2166,55 +2160,6 @@ function jamDeckCanvasStackKind(data) {
   return JAM_DECK_CANVAS_IMAGE_EXTENSIONS.has(extension) ? "image" : null;
 }
 
-function jamDeckEagleSearchBody(filename, bytes, limit) {
-  const safeName = String(filename || "image.jpg").replace(/["\r\n]/g, "_") || "image.jpg";
-  const boundary = `----jamDeckEagle${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-  const encoder = new TextEncoder();
-  const imageHead = encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${safeName}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
-  const requestedLimit = Number.isFinite(Number(limit)) && Number(limit) >= 1 ? Math.floor(Number(limit)) : EAGLE_SEARCH_RESULT_LIMIT;
-  const safeLimit = Math.min(EAGLE_SEARCH_RESULT_LIMIT, requestedLimit);
-  const limitPart = encoder.encode(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="limit"\r\n\r\n${safeLimit}`);
-  const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
-  const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
-  const body = new Uint8Array(imageHead.length + payload.length + limitPart.length + tail.length);
-  body.set(imageHead, 0);
-  body.set(payload, imageHead.length);
-  body.set(limitPart, imageHead.length + payload.length);
-  body.set(tail, imageHead.length + payload.length + limitPart.length);
-  return { body: body.buffer, contentType: `multipart/form-data; boundary=${boundary}` };
-}
-
-function jamDeckEagleTopResults(payload, limit = EAGLE_SEARCH_RESULT_LIMIT) {
-  const results = payload && Array.isArray(payload.results) ? payload.results : [];
-  const requestedLimit = Number.isFinite(Number(limit)) && Number(limit) >= 1 ? Math.floor(Number(limit)) : EAGLE_SEARCH_RESULT_LIMIT;
-  const cap = Math.min(EAGLE_SEARCH_RESULT_LIMIT, requestedLimit);
-  const out = [];
-  for (const entry of results) {
-    const id = entry && typeof entry.id === "string" ? entry.id.trim() : "";
-    if (!id) continue;
-    out.push({ id, score: Number(entry.score) || 0 });
-    if (out.length >= cap) break;
-  }
-  return out;
-}
-
-function jamDeckEagleMetadataPath(libraryRoot, id) {
-  const root = String(libraryRoot || "").replace(/\/+$/, "");
-  const cleanId = String(id || "").trim();
-  if (!root || !cleanId) return null;
-  return `${root}/images/${cleanId}.info/metadata.json`;
-}
-
-function jamDeckEagleItemPath(libraryRoot, id, metadata) {
-  const root = String(libraryRoot || "").replace(/\/+$/, "");
-  const cleanId = String(id || "").trim();
-  if (!root || !cleanId || !metadata || metadata.isDeleted) return null;
-  const name = typeof metadata.name === "string" ? metadata.name.trim() : "";
-  const ext = typeof metadata.ext === "string" ? metadata.ext.trim() : "";
-  if (!name || !ext) return null;
-  return `${root}/images/${cleanId}.info/${name}.${ext}`;
-}
-
 function jamDeckNextCanvasFileName(fileExists) {
   let path = "未命名.canvas";
   let index = 1;
@@ -2224,27 +2169,6 @@ function jamDeckNextCanvasFileName(fileExists) {
   }
   return path;
 }
-
-function jamDeckEagleResultGridLayout(sourceRect, items, gap = EAGLE_SEARCH_GRID_GAP) {
-  const rect = jamDeckCanvasStackRect(sourceRect);
-  if (!rect || !Array.isArray(items) || !items.length) return null;
-  const safeGap = Number.isFinite(Number(gap)) && Number(gap) >= 0 ? Number(gap) : EAGLE_SEARCH_GRID_GAP;
-  const baseX = rect.x;
-  const baseY = rect.y + rect.height + safeGap;
-  return items.slice(0, EAGLE_SEARCH_RESULT_LIMIT).map((_item, index) => {
-    const column = index % EAGLE_SEARCH_GRID_COLUMNS;
-    const row = Math.floor(index / EAGLE_SEARCH_GRID_COLUMNS);
-    return {
-      x: jamDeckRoundCanvasStackValue(baseX + column * (rect.width + safeGap)),
-      y: jamDeckRoundCanvasStackValue(baseY + row * (rect.height + safeGap)),
-      width: jamDeckRoundCanvasStackValue(rect.width),
-      height: jamDeckRoundCanvasStackValue(rect.height),
-    };
-  });
-}
-
-// 保留旧导出名，避免外部 fixture 断裂；布局语义已改为源图下方的 5×2 网格，不再形成堆叠。
-const jamDeckEagleStackLayout = jamDeckEagleResultGridLayout;
 
 function jamDeckCanvasStackNormalizationKey(kind) {
   return kind === "text" ? "stackTextNormalization" : kind === "image" ? "stackImageNormalization" : null;
@@ -7729,7 +7653,7 @@ function jamDeckSelectedCanvasNodes(canvas) {
   };
 }
 
-class CanvasImageSearchController {
+class CanvasSelectionToolbarController {
   constructor(runtime, entry) {
     this.runtime = runtime;
     this.entry = entry;
@@ -7737,20 +7661,12 @@ class CanvasImageSearchController {
     this.root = entry.leaf && entry.leaf.containerEl;
     this.ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
     this.disposers = [];
-    this.toolbarButton = null;
-    this.toolbarMenu = null;
-    this.selectedNode = null;
     this.aiToolbarButton = null;
+    this.aiPressedNode = null;
     this.selectedAiNode = null;
     this.toolbarFrame = 0;
     this.toolbarObserver = null;
     this.suppressSync = false;
-    this.searching = false;
-    this.generation = 0;
-    this.abortController = null;
-    this.inFlightPromise = null;
-    this.savePromises = new Set();
-    this.destroyPromise = null;
     this.destroyed = false;
   }
 
@@ -7800,8 +7716,8 @@ class CanvasImageSearchController {
     // Obsidian exposes two different horizontal menus:
     // - `cardMenuEl` / `.canvas-card-menu`: the bottom "create a node" palette;
     // - `menu.menuEl` / `.canvas-menu`: the popup above the current selection.
-    // Image search belongs to the latter so it stays attached to the selected
-    // image instead of polluting the persistent bottom palette.
+    // The AI action belongs to the latter so it stays attached to the current
+    // selection instead of polluting the persistent bottom palette.
     const candidates = [
       this.canvas && this.canvas.menu && this.canvas.menu.menuEl,
       this.root && this.root.querySelector(".canvas-menu"),
@@ -7812,32 +7728,6 @@ class CanvasImageSearchController {
       return menu;
     }
     return null;
-  }
-
-  ensureToolbarButton(menu) {
-    if (!menu) return null;
-    if (this.toolbarButton && this.toolbarButton.isConnected && this.toolbarButton.parentElement === menu) return this.toolbarButton;
-    if (this.toolbarButton) this.toolbarButton.remove();
-    const existing = menu.querySelector(".jam-deck-canvas-image-search-toolbar");
-    if (existing) existing.remove();
-    const button = this.entry.ownerDocument.createElement("button");
-    button.type = "button";
-    button.className = "clickable-icon jam-deck-canvas-image-search-toolbar";
-    button.setAttribute("aria-label", "在 Eagle 中以图搜图");
-    setIcon(button, "search");
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }, true);
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (this.selectedNode && !this.searching) void this.performSearch(this.selectedNode);
-    }, true);
-    menu.appendChild(button);
-    this.toolbarButton = button;
-    this.toolbarMenu = menu;
-    return button;
   }
 
   ensureAiToolbarButton(menu) {
@@ -7885,265 +7775,43 @@ class CanvasImageSearchController {
     if (this.destroyed) return;
     const menu = this.getToolbarMenu();
     if (!menu) {
-      if (this.toolbarButton) this.toolbarButton.style.display = "none";
       if (this.aiToolbarButton) this.aiToolbarButton.style.display = "none";
-      this.selectedNode = null;
       this.selectedAiNode = null;
       return;
     }
-    const button = this.ensureToolbarButton(menu);
     const aiButton = this.ensureAiToolbarButton(menu);
     const stack = this.entry.imageStackController;
     const blocked = !!(stack && (stack.previewWrapper || stack.imageFocus || stack.drag));
     const selected = this.findSelectedNodes();
-    this.selectedNode = blocked ? null : selected.image;
     this.selectedAiNode = blocked ? null : (selected.text || selected.image);
-    if (button) {
-      // 内联 display 而非 hidden：原生 .canvas-menu 的 clickable-icon 样式
-      // 可能覆盖 [hidden] 属性，导致非图片节点选中时按钮仍然可见。
-      button.style.display = this.selectedNode ? "" : "none";
-      button.disabled = this.searching;
-      button.classList.toggle("is-loading", this.searching);
-    }
     if (aiButton) {
       aiButton.style.display = this.selectedAiNode ? "" : "none";
     }
   }
 
-  async resolveResultFiles(results) {
-    const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
-    const adapter = app && app.vault && app.vault.adapter;
-    if (!app || !adapter || typeof adapter.read !== "function") return [];
-    const files = [];
-    for (const result of results) {
-      try {
-        const metaPath = jamDeckEagleMetadataPath(EAGLE_LIBRARY_ROOT, result.id);
-        if (!metaPath) continue;
-        const raw = await adapter.read(metaPath);
-        let metadata = null;
-        try { metadata = JSON.parse(raw); } catch (error) { metadata = null; }
-        const itemPath = jamDeckEagleItemPath(EAGLE_LIBRARY_ROOT, result.id, metadata);
-        if (!itemPath) continue;
-        const file = app.vault.getAbstractFileByPath(itemPath);
-        if (!file) continue;
-        files.push({
-          id: result.id,
-          score: result.score,
-          file,
-          width: Number(metadata.width) || 0,
-          height: Number(metadata.height) || 0,
-        });
-      } catch (error) { /* 单个结果解析失败不影响其余结果 */ }
-    }
-    return files;
-  }
-
-  insertResultGrid(sourceRect, files, isCurrent = () => true) {
-    const canvas = this.canvas;
-    if (!canvas || canvas.readonly || typeof canvas.createFileNode !== "function" || typeof canvas.requestSave !== "function") throw new Error("Canvas 节点创建能力不可用");
-    const layouts = jamDeckEagleResultGridLayout(sourceRect, files, EAGLE_SEARCH_GRID_GAP);
-    if (!layouts) throw new Error("原图位置不可用");
-    const created = [];
-    try {
-      for (let index = 0; index < files.length; index += 1) {
-        if (!isCurrent()) {
-          const cancelled = new Error("Canvas image search cancelled");
-          cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-          throw cancelled;
-        }
-        const layout = layouts[index];
-        const node = canvas.createFileNode({
-          pos: { x: layout.x + layout.width / 2, y: layout.y + layout.height / 2 },
-          position: "center",
-          file: files[index].file,
-        });
-        if (!node) continue;
-        created.push(node);
-        if (!isCurrent()) {
-          const cancelled = new Error("Canvas image search cancelled");
-          cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-          throw cancelled;
-        }
-        const data = typeof node.getData === "function" ? node.getData() : null;
-        if (data && typeof node.setData === "function") {
-          if (!isCurrent()) {
-            const cancelled = new Error("Canvas image search cancelled");
-            cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-            throw cancelled;
-          }
-          node.setData({ ...data, x: layout.x, y: layout.y, width: layout.width, height: layout.height });
-        }
-        if (typeof canvas.markMoved === "function") {
-          if (!isCurrent()) {
-            const cancelled = new Error("Canvas image search cancelled");
-            cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-            throw cancelled;
-          }
-          canvas.markMoved(node);
-        }
-        if (typeof node.render === "function") {
-          if (!isCurrent()) {
-            const cancelled = new Error("Canvas image search cancelled");
-            cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-            throw cancelled;
-          }
-          node.render();
-        }
-      }
-      if (!created.length) throw new Error("Canvas 未创建任何结果节点");
-      if (!isCurrent()) {
-        const cancelled = new Error("Canvas image search cancelled");
-        cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-        throw cancelled;
-      }
-      if (canvas.requestPushHistory && typeof canvas.requestPushHistory.run === "function") canvas.requestPushHistory.run();
-      if (!isCurrent()) {
-        const cancelled = new Error("Canvas image search cancelled");
-        cancelled.code = "JAM_DECK_CANVAS_SEARCH_CANCELLED";
-        throw cancelled;
-      }
-      canvas.requestSave();
-      const view = this.entry.leaf && this.entry.leaf.view;
-      if (view && typeof view.saveImmediately === "function" && isCurrent()) {
-        const savePromise = Promise.resolve(view.saveImmediately()).catch(() => {});
-        this.savePromises.add(savePromise);
-        void savePromise.finally(() => this.savePromises.delete(savePromise));
-      }
-    } catch (error) {
-      for (const node of created) {
-        try { if (typeof canvas.removeNode === "function") canvas.removeNode(node); } catch (removeError) {}
-      }
-      if (isCurrent()) {
-        try { canvas.requestSave(); } catch (saveError) {}
-      }
-      throw error;
-    }
-    try {
-      if (typeof canvas.deselectAll === "function") canvas.deselectAll();
-      if (typeof canvas.select === "function") canvas.select(created[0]);
-    } catch (error) {}
-    return created;
-  }
-
-  async performSearch(node) {
-    if (this.searching || this.destroyed) return;
-    const generation = ++this.generation;
-    const controller = new AbortController();
-    this.abortController = controller;
-    const promise = this.performSearchCore(node, generation, controller);
-    this.inFlightPromise = promise;
-    try {
-      await promise;
-    } finally {
-      if (this.inFlightPromise === promise) this.inFlightPromise = null;
-      if (this.abortController === controller) this.abortController = null;
-    }
-  }
-
-  async performSearchCore(node, generation, controller) {
-    if (this.searching || this.destroyed) return;
-    const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
-    if (!app || !app.vault) return;
-    let data = null;
-    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-    const sourceRect = jamDeckCanvasStackRect(data);
-    const sourcePath = data && typeof data.file === "string" ? data.file : null;
-    if (!sourceRect || !sourcePath) {
-      new Notice("Jam Deck：无法读取图片节点");
-      return;
-    }
-    const sourceFile = app.vault.getAbstractFileByPath(sourcePath);
-    if (!sourceFile) {
-      new Notice("Jam Deck：找不到图片文件");
-      return;
-    }
-    const isCurrent = () => !this.destroyed
-      && generation === this.generation
-      && !controller.signal.aborted
-      && !this.entry.closing
-      && !this.entry.nativeConflictSuspended;
-    this.searching = true;
-    this.syncToolbar();
-    try {
-      const bytes = await app.vault.readBinary(sourceFile);
-      if (!isCurrent()) return;
-      const { body, contentType } = jamDeckEagleSearchBody(sourceFile.name || "image.jpg", bytes, EAGLE_SEARCH_RESULT_LIMIT);
-      let response;
-      try {
-        response = await requestUrl({
-          url: EAGLE_SEARCH_API_URL,
-          method: "POST",
-          headers: { "Content-Type": contentType },
-          body,
-          throw: false,
-          signal: controller.signal,
-        });
-      } catch (networkError) {
-        throw new Error("无法连接 Eagle，请确认 Eagle 已启动");
-      }
-      if (!isCurrent()) return;
-      if (!response || response.status !== 200) {
-        const status = response ? response.status : 0;
-        throw new Error(status === 503 ? "Eagle AI 搜索服务未就绪" : `Eagle 搜索请求失败（${status}）`);
-      }
-      const results = jamDeckEagleTopResults(response.json, EAGLE_SEARCH_RESULT_LIMIT);
-      if (!isCurrent()) return;
-      if (!results.length) {
-        new Notice("Jam Deck：Eagle 没有找到相似图片");
-        return;
-      }
-      const files = await this.resolveResultFiles(results);
-      if (!isCurrent()) return;
-      if (!files.length) {
-        new Notice("Jam Deck：相似图片不在当前 Eagle 库中");
-        return;
-      }
-      const created = this.insertResultGrid(sourceRect, files, isCurrent);
-      if (!isCurrent()) return;
-      new Notice(`Jam Deck：已在原图下方放入 ${created.length} 张相似图片`);
-    } catch (error) {
-      if (!isCurrent()) return;
-      console.error("jam-deck eagle image search failed", error);
-      new Notice(`Jam Deck：以图搜图失败 · ${error.message || "未知错误"}`);
-    } finally {
-      this.searching = false;
-      this.syncToolbar();
-    }
-  }
-
   destroy() {
-    if (this.destroyPromise) return this.destroyPromise;
+    if (this.destroyed) return;
     this.destroyed = true;
-    this.generation += 1;
-    if (this.abortController) {
-      try { this.abortController.abort(); } catch (error) {}
+    if (this.toolbarFrame && this.ownerWindow) {
+      try { this.ownerWindow.cancelAnimationFrame(this.toolbarFrame); } catch (error) {}
+      this.toolbarFrame = 0;
     }
-    const pending = this.inFlightPromise;
-    this.destroyPromise = (async () => {
-      if (pending) await Promise.allSettled([pending]);
-      if (this.savePromises.size) await Promise.allSettled([...this.savePromises]);
-      if (this.toolbarFrame && this.ownerWindow) {
-        try { this.ownerWindow.cancelAnimationFrame(this.toolbarFrame); } catch (error) {}
-        this.toolbarFrame = 0;
-      }
-      if (this.toolbarObserver) {
-        try { this.toolbarObserver.disconnect(); } catch (error) {}
-        this.toolbarObserver = null;
-      }
-      for (const dispose of this.disposers) {
-        try { dispose(); } catch (error) {}
-      }
-      this.disposers = [];
-      if (this.toolbarButton) {
-        try { this.toolbarButton.remove(); } catch (error) {}
-        this.toolbarButton = null;
-      }
-      this.toolbarMenu = null;
-      this.selectedNode = null;
-      this.canvas = null;
-      this.root = null;
-    })();
-    return this.destroyPromise;
+    if (this.toolbarObserver) {
+      try { this.toolbarObserver.disconnect(); } catch (error) {}
+      this.toolbarObserver = null;
+    }
+    for (const dispose of this.disposers) {
+      try { dispose(); } catch (error) {}
+    }
+    this.disposers = [];
+    if (this.aiToolbarButton) {
+      try { this.aiToolbarButton.remove(); } catch (error) {}
+      this.aiToolbarButton = null;
+    }
+    this.aiPressedNode = null;
+    this.selectedAiNode = null;
+    this.canvas = null;
+    this.root = null;
   }
 }
 
@@ -8778,8 +8446,8 @@ class CanvasRuntimeAdapter {
       entry.imageStackController.install();
       entry.folderController = new CanvasFolderController(this, entry);
       entry.folderController.install();
-      entry.imageSearchController = new CanvasImageSearchController(this, entry);
-      entry.imageSearchController.install();
+      entry.selectionToolbarController = new CanvasSelectionToolbarController(this, entry);
+      entry.selectionToolbarController.install();
       entry.inkOverlay = await CanvasInkOverlay.create(this, entry);
       try { leaf.onResize(); } catch (error) {}
       return entry;
@@ -8846,9 +8514,9 @@ class CanvasRuntimeAdapter {
       try { entry.imageStackController.destroy(); } catch (error) { console.error("jam-deck canvas stack cleanup failed", error); }
       entry.imageStackController = null;
     }
-    if (entry.imageSearchController) {
-      try { await entry.imageSearchController.destroy(); } catch (error) { console.error("jam-deck canvas image search cleanup failed", error); }
-      entry.imageSearchController = null;
+    if (entry.selectionToolbarController) {
+      try { entry.selectionToolbarController.destroy(); } catch (error) { console.error("jam-deck canvas selection toolbar cleanup failed", error); }
+      entry.selectionToolbarController = null;
     }
     if (entry.inkOverlay) {
       try { await entry.inkOverlay.destroy({ quiet: !!options.quiet }); } catch (error) { console.error("jam-deck canvas ink cleanup failed", error); }
@@ -13592,7 +13260,7 @@ class JamDeckPlugin extends Plugin {
       if (Number(source.file.size) > CANVAS_EXTERNAL_IMAGE_MAX_BYTES) throw new Error("Image is too large; compress it before dropping");
       return { data: new Uint8Array(await source.file.arrayBuffer()), name: source.name || source.file.name || "image.png" };
     }
-    if (!source.path) throw new Error("Eagle image path is unavailable");
+    if (!source.path) throw new Error("External image path is unavailable");
     const fs = require("fs");
     const stat = await fs.promises.stat(source.path);
     if (!stat.isFile() || stat.size > CANVAS_EXTERNAL_IMAGE_MAX_BYTES) throw new Error("Image is too large; compress it before dropping");
@@ -16663,15 +16331,7 @@ class JamDeckPlugin extends Plugin {
 
 JamDeckPlugin.CanvasImageStackController = CanvasImageStackController;
 JamDeckPlugin.CanvasFolderController = CanvasFolderController;
-JamDeckPlugin.CanvasImageSearchController = CanvasImageSearchController;
-JamDeckPlugin.eagleImageSearchHelpers = {
-  buildBody: jamDeckEagleSearchBody,
-  topResults: jamDeckEagleTopResults,
-  metadataPath: jamDeckEagleMetadataPath,
-  itemPath: jamDeckEagleItemPath,
-  resultGridLayout: jamDeckEagleResultGridLayout,
-  stackLayout: jamDeckEagleStackLayout,
-};
+JamDeckPlugin.CanvasSelectionToolbarController = CanvasSelectionToolbarController;
 JamDeckPlugin.CanvasRuntimeAdapter = CanvasRuntimeAdapter;
 JamDeckPlugin.CanvasReturnCoordinator = CanvasReturnCoordinator;
 JamDeckPlugin.CanvasLinkNavigationBridge = CanvasLinkNavigationBridge;

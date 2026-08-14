@@ -59,11 +59,10 @@ assert(styleSource.includes("lightweight Spatial calendar"), "calendar styling m
 assert(styleSource.includes("Embedded Canvas image nodes and geometric stacks"), "embedded Canvas stack styling must remain explicitly scoped");
 assert(styleSource.includes("Jam Deck Canvas Spatial toolbar and fixed-width annotation"), "Canvas annotation visual layer must remain explicit and reversible");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-card-menu.jam-deck-node-toolbar--spatial"), "native Canvas toolbar restyling must stay inside the embedded leaf");
-assert(pluginSource.includes("const EAGLE_SEARCH_RESULT_LIMIT = 10"), "Eagle reverse image search must cap requests at ten results");
-assert(pluginSource.includes("className = \"clickable-icon jam-deck-canvas-image-search-toolbar\""), "Eagle search must use the native Canvas selection-toolbar button surface");
-assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Eagle search must target the native selection popup, not the bottom card palette");
-assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Eagle search must not resolve the bottom card palette");
-assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas image search and AI must only appear for one authoritative selected node");
+assert(pluginSource.includes("class CanvasSelectionToolbarController"), "Canvas AI must keep a dedicated native selection-toolbar controller");
+assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Canvas AI must target the native selection popup, not the bottom card palette");
+assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Canvas AI must not resolve the bottom card palette");
+assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas AI must only appear for one authoritative selected node");
 assert(pluginSource.includes("hasNativeCanvasDuplicate(file.path, existing && existing.leaf)"), "embedded Canvas must pause when the same file is open natively");
 assert(pluginSource.includes("getViewState()"), "embedded Canvas duplicate detection must resolve native file paths before the view object finishes loading");
 assert(pluginSource.includes("getCanvasExternalImageDrop"), "embedded Canvas must own external image drops instead of delegating them to the native handler");
@@ -76,8 +75,8 @@ assert(pluginSource.includes("if (this.hasNativeCanvasDuplicate(file.path, leaf)
 assert(pluginSource.includes("JAM_DECK_CANVAS_CONFLICT"), "embedded Canvas duplicate protection must expose a recoverable conflict state");
 assert(pluginSource.includes("scheduleCanvasNativeConflictReconcile"), "embedded Canvas duplicate protection must reconcile when workspace leaves change");
 assert(pluginSource.includes("reconcileCanvasNativeConflicts"), "embedded Canvas conflicts must reconcile in place");
-assert(!pluginSource.includes("className = \"jam-deck-canvas-image-search\""), "Eagle search must not keep a node-corner hover button");
-assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar"), "Eagle search toolbar button styling must stay inside the embedded leaf");
+assert(!pluginSource.includes("EAGLE_SEARCH_") && !pluginSource.includes("jamDeckEagle") && !pluginSource.includes("以图搜图"), "removed Eagle reverse-image search must leave no runtime path");
+assert(!styleSource.includes("jam-deck-canvas-image-search-toolbar"), "removed Eagle toolbar styling must leave no dead selector");
 assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-drawing-palette"), "drawing palette styles must stay inside the embedded leaf");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img) > .canvas-node-label"), "embedded Canvas image filenames must be hidden without affecting normal Canvas views");
 assert(styleSource.includes("object-fit: cover"), "embedded Canvas images must fill their node without an inset frame");
@@ -836,7 +835,7 @@ async function testCanvasNativeConflictLifecycle() {
     linkNavigationBridge: { destroy() { ownerCalls.push("link-listener"); } },
     folderController: { destroy() { ownerCalls.push("folder-listener"); } },
     imageStackController: { destroy() { ownerCalls.push("stack-listener"); } },
-    imageSearchController: { destroy() { ownerCalls.push("search-listener"); } },
+    selectionToolbarController: { destroy() { ownerCalls.push("selection-toolbar-listener"); } },
     inkOverlay: { async destroy() { ownerCalls.push("ink-listener"); } },
     returnEpoch: 0,
     returnParked: false,
@@ -845,7 +844,7 @@ async function testCanvasNativeConflictLifecycle() {
   await adapter.suspendForNativeConflict(entry.widgetId);
   await adapter.suspendForNativeConflict(entry.widgetId);
   assert.strictEqual(ownerCalls.filter((call) => call === "remove").length, 1, "one conflict burst must park the owned leaf once");
-  assert(ownerCalls.includes("drop-listener") && ownerCalls.includes("link-listener") && ownerCalls.includes("stack-listener"), "quiet conflict teardown must remove owned Canvas interaction listeners");
+  assert(ownerCalls.includes("drop-listener") && ownerCalls.includes("link-listener") && ownerCalls.includes("stack-listener") && ownerCalls.includes("selection-toolbar-listener"), "quiet conflict teardown must remove owned Canvas interaction listeners");
   assert(!adapter.entries.has(entry.widgetId), "suspended conflict entries must not retain a live Canvas view");
   assert(!ownerCalls.includes("save") && !ownerCalls.includes("close"), "conflict suspension must never save/close the owned Canvas view");
   assert.strictEqual(ownerCalls.filter((call) => call === "unload").length, 1, "quiet conflict teardown must unload only the owned leaf");
@@ -996,38 +995,6 @@ async function testCanvasAsyncTeardown() {
   assert.strictEqual(requestSaveCalls, 0, "suspending a pending drop must prevent requestSave after abort");
   assert.strictEqual(saveImmediatelyCalls, 0, "suspending a pending drop must prevent saveImmediately after abort");
 
-  let releaseSearch;
-  const searchGate = new Promise((resolve) => { releaseSearch = resolve; });
-  let searchCreateCalls = 0;
-  const searchCanvas = {
-    createFileNode() { searchCreateCalls++; return { id: "search-node" }; },
-    requestSave() { requestSaveCalls++; },
-    nodes: { values: () => [] },
-  };
-  const sourceFile = { path: "source.png", name: "source.png", extension: "png" };
-  const app = {
-    vault: {
-      getAbstractFileByPath: () => sourceFile,
-      async readBinary() { await searchGate; return new Uint8Array([1, 2, 3]); },
-    },
-  };
-  const searchEntry = {
-    closing: false,
-    nativeConflictSuspended: false,
-    leaf: { view: { canvas: searchCanvas }, containerEl: null },
-    ownerDocument: {},
-  };
-  const searchRuntime = { deckView: { app } };
-  const search = new JamDeckPlugin.CanvasImageSearchController(searchRuntime, searchEntry);
-  const searchNode = { getData: () => ({ file: sourceFile.path, x: 0, y: 0, width: 100, height: 100 }) };
-  const searchPromise = search.performSearch(searchNode);
-  await Promise.resolve();
-  const searchDestroy = search.destroy();
-  releaseSearch();
-  await searchDestroy;
-  await searchPromise;
-  assert.strictEqual(searchCreateCalls, 0, "destroyed Eagle search must not insert a late Canvas node");
-  assert.strictEqual(search.destroyed, true, "image search destroy must stay terminal after async abort");
 }
 
 {
@@ -1423,7 +1390,7 @@ assert.strictEqual(folderGeometry.gridLayout([], folderBounds), null, "empty fol
 // Static controller contracts protect the Canvas lifecycle and interaction
 // path even when Obsidian's private Canvas DOM is unavailable in CI.
 const folderControllerSourceStart = pluginSource.indexOf("class CanvasFolderController");
-const folderControllerSourceEnd = pluginSource.indexOf("class CanvasImageSearchController", folderControllerSourceStart);
+const folderControllerSourceEnd = pluginSource.indexOf("class CanvasSelectionToolbarController", folderControllerSourceStart);
 const stackControllerSourceStart = pluginSource.indexOf("class CanvasImageStackController");
 const stackControllerSource = pluginSource.slice(stackControllerSourceStart, folderControllerSourceStart);
 const stackShowPreviewSource = stackControllerSource.slice(stackControllerSource.indexOf("showPreview(cluster)"), stackControllerSource.indexOf("buildPreviewVisuals(cluster"));
@@ -2322,17 +2289,6 @@ assert(fs.existsSync(path.join(projectRoot, "assets", "jam-deck-folder-shell.svg
 assert(deploySource.includes("assets/jam-deck-folder-shell.svg") && deploySource.includes("$assetFiles"), "deploy must stage the folder shell asset alongside the plugin files");
 assert(deploySource.includes("Protected data.json") && deploySource.includes("Get-DataState"), "asset deployment must retain data.json protection checks");
 
-const eagleSearch = JamDeckPlugin.eagleImageSearchHelpers;
-assert(eagleSearch && typeof eagleSearch.resultGridLayout === "function", "Eagle search must export its result grid layout");
-const eaglePayload = { results: Array.from({ length: 15 }, (_value, index) => ({ id: `eagle-${index}`, score: index })) };
-assert.strictEqual(eagleSearch.topResults(eaglePayload, 20).length, 10, "Eagle search results must remain capped at ten even when a larger limit is requested");
-const eagleGrid = eagleSearch.resultGridLayout({ x: 10, y: 20, width: 100, height: 80 }, Array.from({ length: 15 }, () => ({})), 40);
-assert.strictEqual(eagleGrid.length, 10, "Eagle search grid must create at most ten positions");
-assert.deepStrictEqual(eagleGrid[0], { x: 10, y: 140, width: 100, height: 80 }, "Eagle grid must begin directly below the source image");
-assert.deepStrictEqual(eagleGrid[4], { x: 570, y: 140, width: 100, height: 80 }, "Eagle grid must use five columns");
-assert.deepStrictEqual(eagleGrid[5], { x: 10, y: 260, width: 100, height: 80 }, "Eagle grid must wrap to a second row");
-assert.deepStrictEqual(eagleGrid[9], { x: 570, y: 260, width: 100, height: 80 }, "Eagle grid must end at the fifth column of the second row");
-assert(eagleGrid.every((item) => item.width === 100 && item.height === 80), "Eagle grid results must reuse the source size");
 const stackA = { id: "a", x: 0, y: 0, width: 100, height: 100 };
 const stackHalf = { id: "half", x: 50, y: 0, width: 100, height: 100 };
 const stackOver = { id: "over", x: 49, y: 0, width: 100, height: 100 };

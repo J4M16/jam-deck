@@ -815,9 +815,6 @@
   opacity: 0;
   transition: none;
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar {
-  position: relative;
-}
 .jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar {
   position: relative;
 }
@@ -825,19 +822,6 @@
   pointer-events: none;
   color: var(--jd-accent);
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar.is-loading {
-  pointer-events: none;
-  color: var(--jd-accent);
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar.is-loading svg {
-  animation: jam-deck-canvas-image-search-pulse 900ms ease-in-out infinite;
-}
-@keyframes jam-deck-canvas-image-search-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-
-
 /* Canvas folder v4: one scene-local shell with sanitized thumbnail proxies.
  * The native nodes no longer cross stacking contexts to sit between two
  * overlay surfaces; the complete folder is ordered like one Canvas item. */

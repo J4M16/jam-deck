@@ -1,5 +1,15 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-14 — 0.31.0 Eagle 库移出 Jamnote并删除以图搜图
+
+- Jam 判断：把完整 Eagle 库放入 Jamnote，除 Canvas 以图搜图的直接引用外没有足够收益，希望素材库回归独立管理，同时删除对应工具栏入口。
+- 迁移审计：源 `D:\jam16\Jamnote\JAM收集.library` 为普通目录，迁移前有 42,172 个文件、14,635 个目录、20,034,831,282 bytes；目标 `D:\jam16\JAM收集.library` 不存在，双方位于同一 NTFS 卷。迁移前优雅退出 Eagle 与 Obsidian，保留只做 API 转发且由 WorkBuddy 自动拉起的 Eagle MCP proxy；同盘目录移动一次完成，没有复制中间态。
+- 完整性：迁移后源路径不存在，目标路径文件数、目录数与精确字节数全部一致。通过 Eagle 自身 `Ctrl+L` 资源库切换器选择 `D:\jam16` 下的 JAM收集，界面正常显示 14,242 项、217 个文件夹，Settings `rootDir` 已由旧 Jamnote路径更新为新路径；Jamnote `.obsidian/app.json` 中失效的 `JAM收集.library/` 忽略项已删除。
+- 代码删除：移除 Eagle 固定端口/库路径常量、multipart 请求、结果筛选、metadata/item 解析、5×2 网格插入、通知、异步取消/保存屏障、helper 导出和全部搜索按钮 CSS；README 当前功能说明同步删除，历史 Changelog/开发记录保留原貌。
+- 职责收敛：原 `CanvasImageSearchController` 同时承载 Canvas AI，不能整类删除；现改为 `CanvasSelectionToolbarController`，仅保留权威单选读取、AI 按钮、原生 selection menu 定位、平移期间同步抑制、MutationObserver/rAF 和同步销毁。外部图片拖入及附件复制继续保留，并将遗留的 Eagle 专属错误文案改为通用外部图片路径错误。
+- 回归重点：源码/CSS 无 Eagle runtime 标识；AI 仍覆盖图片、文本、Markdown、链接和普通附件；quiet teardown 仍释放 selection toolbar；图片拖入、Canvas 文件夹/堆叠和多页签 active-leaf 约束不变。`npm run verify` 全绿。0.31.0 已通过部署脚本写入 Jamnote，部署副本确认无 Eagle 搜图 runtime/CSS、仍包含 selection toolbar，且受保护 `data.json` 保持 28,231 bytes 与原哈希不变。
+- 处理模型签名：GPT-5（主代理/实现、迁移与验证）、具体模型标识不可见（只读代码删除范围审计）、具体模型标识不可见（只读迁移审计）
+
 ## 2026-08-14 — 0.30.9 AI 助手双分页与 Jamnote 本地工作区
 
 - Jam 需求：AI 悬浮窗在现有助手基础上增加第二分页，嵌入 `http://127.0.0.1:3080/`，并以 `D:\jam16\Jamnote` 为工作区读取、修改工作台内容。
