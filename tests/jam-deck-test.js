@@ -16,6 +16,8 @@ const styleSource = fs.readFileSync(stylePath, "utf8");
 const deploySource = fs.readFileSync(deployPath, "utf8");
 assert(pluginSource.includes("new WorkspaceLeaf(this.app)"), "Canvas widget must create a real WorkspaceLeaf");
 assert(pluginSource.includes("leaf.openFile(file, { active: false })"), "Canvas widget must open the canvas inside its owned leaf");
+assert(pluginSource.includes("leaf.parent = context.root;"), "detached Canvas leaf must inherit only the workspace root, never impersonate a real tab-group child");
+assert(!pluginSource.includes("leaf.parent = context.parent;"), "detached Canvas leaf must not make Obsidian select tab index -1 and fall back to the first journal tab");
 assert(pluginSource.includes("view.saveImmediately"), "Canvas cleanup must flush pending edits");
 assert(pluginSource.includes("leaf.unload"), "Canvas cleanup must release its owned leaf events");
 assert(!pluginSource.includes("MarkdownRenderer"), "Canvas widget must not regress to Markdown preview rendering");
@@ -61,7 +63,7 @@ assert(pluginSource.includes("const EAGLE_SEARCH_RESULT_LIMIT = 10"), "Eagle rev
 assert(pluginSource.includes("className = \"clickable-icon jam-deck-canvas-image-search-toolbar\""), "Eagle search must use the native Canvas selection-toolbar button surface");
 assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Eagle search must target the native selection popup, not the bottom card palette");
 assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Eagle search must not resolve the bottom card palette");
-assert(pluginSource.includes("if (selected.length > 1) return null"), "Eagle search must only appear for a single selected image");
+assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas image search and AI must only appear for one authoritative selected node");
 assert(pluginSource.includes("hasNativeCanvasDuplicate(file.path, existing && existing.leaf)"), "embedded Canvas must pause when the same file is open natively");
 assert(pluginSource.includes("getViewState()"), "embedded Canvas duplicate detection must resolve native file paths before the view object finishes loading");
 assert(pluginSource.includes("getCanvasExternalImageDrop"), "embedded Canvas must own external image drops instead of delegating them to the native handler");
@@ -138,6 +140,10 @@ assert(pluginSource.includes("await this.writeVaultFile(path"), "the AI conversa
 assert(pluginSource.includes("await this.plugin.ensureVaultFileParent(path)"), "ink strokes must write through the guarded writer");
 assert(!pluginSource.includes("上一张图片仍在写入 Canvas"), "the single-slot drop lock must be gone so queued images are never rejected");
 assert(pluginSource.includes("suppressSync"), "toolbar sync must pause while the pointer is down so panning a large Canvas does not rescan every node per move");
+assert(pluginSource.includes('event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")'), "Canvas interaction throttling must never intercept the native floating toolbar");
+assert(pluginSource.includes("if (!this.suppressSync) return;\n      this.suppressSync = false;"), "toolbar pointerup must not schedule a reconcile when pointerdown was an excluded native control");
+assert(!pluginSource.includes("ownerWindow.setTimeout(activate, 0)"), "embedded Canvas controls must not lose their native click to a delayed Jam Deck active-leaf takeover");
+assert(pluginSource.includes("const pointerdown = () => activate();"), "embedded Canvas controls must synchronously keep the real Jam Deck host tab active instead of activating their detached leaf");
 assert(pluginSource.includes("findSelectedNodes()"), "toolbar sync must classify selected image/text nodes in a single scan");
 assert(pluginSource.includes("CANVAS_DROP_AUTO_GAP"), "multi-image drops must lay out beside the previous image with a fixed world gap");
 assert(pluginSource.includes("dropCursorRect"), "multi-image drops must track the previous placed rect for automatic row layout");
@@ -273,6 +279,31 @@ Module._load = function(request, parent, isMain) {
 };
 
 const JamDeckPlugin = require(mainPath);
+const authoritativeTextNode = { getData: () => ({ type: "text", text: "current" }), nodeEl: { matches: () => false } };
+const staleDomNode = { getData: () => ({ type: "file", file: "stale.png" }), nodeEl: { matches: () => true } };
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([authoritativeTextNode]), nodes: new Set([authoritativeTextNode, staleDomNode]) }),
+  { image: null, text: authoritativeTextNode },
+  "Canvas AI must trust the authoritative selection set even when stale selected DOM classes remain",
+);
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([authoritativeTextNode, staleDomNode]) }),
+  { image: null, text: null },
+  "Canvas AI must stay unavailable for a real multi-selection",
+);
+const selectedLinkNode = { getData: () => ({ type: "link", url: "https://miro.com/board" }) };
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedLinkNode]) }),
+  { image: null, text: selectedLinkNode },
+  "Canvas AI must accept the current link node instead of silently hiding its action",
+);
+const selectedMarkdownNode = { getData: () => ({ type: "file", file: "Work/brief.md" }) };
+assert.deepStrictEqual(
+  JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedMarkdownNode]) }),
+  { image: null, text: selectedMarkdownNode },
+  "Canvas AI must accept the current Markdown note node",
+);
+assert(pluginSource.includes("this.aiPressedNode = selected.image || selected.text || null"), "Canvas AI must capture the current authoritative node at pointerdown");
 Module._load = originalLoad;
 
 const widgetLayout = JamDeckPlugin.widgetLayoutHelpers;
@@ -1423,7 +1454,8 @@ assert(folderControllerSource.includes('nodeEl.addClass("is-jam-deck-folder-prox
 assert(!folderControllerSource.includes('nodeEl.style.zIndex =') && !folderControllerSource.includes('nodeEl.style.position ='), "folder presentation must not overwrite native node stacking styles");
 assert(stackControllerSource.includes("ownedPreviewOnly") && stackControllerSource.includes("this.overlay.contains(mutation.target)"), "preview-owned DOM mutations must not rerun the quadratic stack reconciler");
 assert(folderControllerSource.includes("stackOverlay.contains(mutation.target)"), "folder reconciliation must ignore stack-preview mount and cleanup mutations");
-assert(stackControllerSource.includes("if (cluster && cluster.folderId) return []"), "explicit folder previews must not composite every unrelated Canvas node for bystander displacement");
+assert(stackControllerSource.includes("const explicitFolder = Boolean(cluster && cluster.folderId)") && stackControllerSource.includes("explicitFolder ? 0 : 64"), "explicit folder previews must only displace nodes actually covered by the opened cards");
+assert(stackControllerSource.includes("jamdeck.folderId || jamdeck.folder || jamdeck.folderGroupId") && stackControllerSource.includes('classList.contains("is-jam-deck-folder-proxy-hidden")'), "explicit folder displacement must skip hidden folder-owned Canvas nodes");
 assert(stackShowPreviewSource.indexOf("const previewBystanders = this.prepareBystanders") < stackShowPreviewSource.indexOf("this.overlay.appendChild(wrapper)"), "preview geometry reads must finish before mounting the overlay");
 assert(stackControllerSource.includes("const folderSource = cluster && cluster.folderId ? visual.source : null"), "folder cards must return to their visible proxy source instead of hidden native-node geometry");
 assert(stackControllerSource.includes("Number(target.x) || 0") && stackControllerSource.includes("returnLeft - targetLeft"), "preview collapse must convert layout x/y into finite return offsets instead of emitting NaNpx");
@@ -1950,7 +1982,7 @@ assert(pluginSource.includes("entry.folderController.install()"), "Canvas runtim
 assert(pluginSource.includes("if (entry.folderController)"), "Canvas runtime destroy must own folder controller cleanup");
 assert(pluginSource.includes("entry.folderController.destroy()"), "Canvas runtime destroy must destroy the folder controller");
 assert(pluginSource.includes("destroyPromises = new Map()") && pluginSource.includes("this.destroyPromises.get(widgetId)"), "Canvas runtime destroy must serialize repeated lifecycle calls");
-assert(pluginSource.includes("perspective(260px) rotateX(-80deg)"), "folder front must hinge at the bottom edge and lift the top edge toward the viewer so the top edge reads wider");
+assert(pluginSource.includes("perspective(260px) rotateX(-48deg)"), "folder preview flap must use the reduced 48-degree hinge amplitude");
 assert(styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-folder-front,"), "the folder front hinge must stay on the bottom edge");
 assert(pluginSource.includes("const hasSelectedMember = (group.members || []).some((member) => member && member.node && this.canvas.selection.has(member.node));") && pluginSource.includes("if (hasSelectedMember) this.canvas.deselectAll();"), "collapsing a folder must clear selected members so the giant selection box shrinks to the shell");
 
@@ -2140,7 +2172,8 @@ assert.strictEqual(folderDomView.controls.children.length, 3, "folder hover tool
 assert.strictEqual(folderDomView.controls.children[0], folderDomView.color, "folder toolbar keyboard order must start with color");
 assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar order must keep ungroup second");
 assert.strictEqual(folderDomView.controls.children[2], folderDomView.rename, "folder toolbar order must place rename last");
-assert(styleSource.includes("perspective(420px) rotateX(-30deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must hinge on the bottom edge and raise the top edge toward the viewer");
+assert(styleSource.includes("perspective(420px) rotateX(-18deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must use the reduced 18-degree hinge amplitude");
+assert((styleSource.match(/rotateX\(-48deg\)/g) || []).length === 4 && !styleSource.includes("rotateX(-80deg)"), "folder preview CSS fallback and header must share the reduced 48-degree endpoint");
 assert(styleSource.includes(".canvas-node-group") && styleSource.includes("visibility: hidden !important"), "Jam Deck must keep native group frames data-only (shell is the only visible grouping surface)");
 assert(folderControllerSource.includes("JAM_DECK_NATIVE_GROUP_BASE_HEIGHT"), "native group frame must use the explicit 200×180 baseline");
 assert(folderControllerSource.includes('data.type === "group"') && !folderControllerSource.includes('nodeType === "group"'), "native group lookup must match by id + serialized type because 1.13 minifies nodeType");
@@ -2447,6 +2480,32 @@ assert.deepStrictEqual(
   { x: 0, y: 0 },
   "a distant image must not move",
 );
+assert.deepStrictEqual(
+  stackGeometry.bystanderShift({ left: 250, top: 260, right: 290, bottom: 340 }, focusRect, viewportRect, 20, 0),
+  { x: 0, y: 0 },
+  "explicit folder narrow displacement must not move a nearby node that is not covered",
+);
+const narrowFolderShift = stackGeometry.bystanderShift(
+  { left: 290, top: 260, right: 330, bottom: 340 },
+  focusRect,
+  viewportRect,
+  20,
+  0,
+);
+assert(narrowFolderShift.x <= -30, "explicit folder narrow displacement must clear a covered node with the 20px safety gap");
+
+assert.deepStrictEqual(JamDeckPlugin.clampAiFabPosition({ x: 2444, y: 1241.1355 }, 1576, 953.515625, 55, 52), { x: 1521, y: 901.515625 }, "AI assistant FAB must return fully inside a smaller restored window using its rendered size");
+assert.deepStrictEqual(JamDeckPlugin.clampAiFabPosition(null, 1576, 953.515625, 55, 52), { x: 1501, y: 881.515625 }, "AI assistant FAB must default to a 20px bottom-right inset");
+assert.strictEqual(JamDeckPlugin.clampAiFabPosition({ x: 10, y: 10 }, 0, 0), null, "AI assistant FAB must wait for a measurable view before clamping persisted coordinates");
+assert(pluginSource.includes("installAiFabLayoutObserver(root)") && pluginSource.includes("this.cleanupAiFabLayout()"), "AI assistant FAB must re-clamp on view resize and release its observer on rerender/close");
+assert(pluginSource.includes('role: "tablist"') && pluginSource.includes('role: "tabpanel"'), "AI assistant must expose accessible assistant and local-workspace tabs");
+assert(pluginSource.includes('sandbox: "allow-scripts allow-same-origin allow-forms"'), "local AI web must keep its iframe sandbox at the reviewed minimum");
+assert(!pluginSource.includes("allow-downloads") && !pluginSource.includes("allow-popups-to-escape-sandbox"), "local AI web must not gain download or popup escape privileges");
+assert(pluginSource.includes('this.aiActivePage = "assistant";') && pluginSource.includes('this.setAiActivePage("assistant", { focus: false })'), "Canvas AI entry points must return to the built-in assistant tab");
+assert(styleSource.includes(".jam-deck-ai-chat.is-local-web-page") && styleSource.includes("width: clamp(760px, 80vw, 925px)"), "the local workspace page must use the wider floating-panel layout without filling the workspace");
+assert(styleSource.includes(".jam-deck-ai-pages {\n  display: flex;") && styleSource.includes("width: 100%; min-width: 0; min-height: 0; flex-direction: column;"), "AI pages must preserve the full-height flex chain so the composer stays at the bottom");
+assert(pluginSource.includes("this.renderAiChatHeader(header, { assistantPageId, localWebPageId })"), "AI tabs must live inside the single shared header instead of adding a second toolbar row");
+assert(styleSource.includes(".jam-deck-ai-page[hidden] { display: none; }"), "inactive AI pages must remain hidden despite their flex layout");
 
 const plugin = new JamDeckPlugin();
 assert.strictEqual(plugin.getCanvasInkSidecarPath("Work/Board.canvas"), "Work/Board.canvas.jam-deck.json");
@@ -2575,6 +2634,85 @@ const removed = plugin.removeTaskFromJournal(legacyUpgraded, task);
 assert.strictEqual(plugin.getTaskBlockRanges(removed, task.id).count, 0);
 assert(removed.includes("- 原工作"), "unrelated journal content must survive removal");
 assert.throws(() => plugin.upgradeLegacyTaskInJournal(legacy.replace("- 【设计】Jam Deck 详情", "- 用户改过的标题"), task), /无法安全同步/);
+
+async function testAiLocalWebBootstrap() {
+  assert.strictEqual(JamDeckPlugin.AI_LOCAL_WEB_URL, "http://127.0.0.1:3080/");
+  assert.strictEqual(JamDeckPlugin.AI_LOCAL_WORKSPACE_PATH, "D:\\jam16\\Jamnote");
+  assert.strictEqual(
+    JamDeckPlugin.canonicalWindowsPath("D:/jam16/Jamnote/../Jamnote/"),
+    "d:\\jam16\\jamnote",
+    "local workspace matching must canonicalize Windows paths",
+  );
+  assert.strictEqual(JamDeckPlugin.canonicalWindowsPath("relative/Jamnote"), null, "local workspace matching must reject relative paths");
+
+  let sent = null;
+  const rpcValue = await JamDeckPlugin.dshRpc("workspace.list", {}, {
+    rpcId: "rpc-fixed",
+    timeoutMs: 100,
+    transport: async (request) => {
+      sent = request;
+      return {
+        status: 200,
+        json: { type: "server-response", rpcId: "rpc-fixed", result: { ok: true, value: { items: [], archivedSessionIds: [] } } },
+      };
+    },
+  });
+  assert.deepStrictEqual(rpcValue, { items: [], archivedSessionIds: [] });
+  assert.strictEqual(sent.url, "http://127.0.0.1:3080/api/workspace.list", "local RPC must stay on the fixed loopback endpoint");
+  assert.deepStrictEqual(JSON.parse(sent.body), { type: "client-request", rpcId: "rpc-fixed", method: "workspace.list", payload: {} });
+  assert.throws(
+    () => JamDeckPlugin.dshValue({ status: 200, json: { type: "server-response", rpcId: "wrong", result: { ok: true, value: {} } } }, "expected", "workspace.list"),
+    /协议数据/,
+    "local RPC must reject a response for another request",
+  );
+
+  const workspace = { workspaceId: "ws-jamnote", path: "D:\\jam16\\Jamnote", title: "Jamnote", sessionIds: ["session-blank"] };
+  const reuseCalls = [];
+  const reused = await JamDeckPlugin.prepareDshWorkspace(async (method, payload) => {
+    reuseCalls.push({ method, payload });
+    if (method === "workspace.create") return { workspace, created: false };
+    if (method === "workspace.list") return { items: [workspace], archivedSessionIds: [] };
+    if (method === "session.list") return { items: [{ sessionId: "session-blank", cwd: "d:/jam16/jamnote", blank: true }] };
+    throw new Error(`unexpected ${method}`);
+  });
+  assert.deepStrictEqual(reused, { workspaceId: "ws-jamnote", sessionId: "session-blank", created: false });
+  assert.deepStrictEqual(reuseCalls.map((call) => call.method), ["workspace.create", "workspace.list", "session.list"]);
+
+  const beforeCreateWorkspace = { ...workspace, sessionIds: ["session-archived"] };
+  const afterCreateWorkspace = { ...workspace, sessionIds: ["session-archived", "session-new"] };
+  let workspaceListCount = 0;
+  const createCalls = [];
+  const created = await JamDeckPlugin.prepareDshWorkspace(async (method, payload) => {
+    createCalls.push({ method, payload });
+    if (method === "workspace.create") return { workspace: beforeCreateWorkspace, created: false };
+    if (method === "workspace.list") {
+      workspaceListCount += 1;
+      return { items: [workspaceListCount === 1 ? beforeCreateWorkspace : afterCreateWorkspace], archivedSessionIds: ["session-archived"] };
+    }
+    if (method === "session.list") {
+      return workspaceListCount === 1
+        ? { items: [{ sessionId: "session-archived", cwd: "D:\\jam16\\Jamnote", blank: true }] }
+        : { items: [{ sessionId: "session-new", cwd: "D:\\jam16\\Jamnote", blank: true }] };
+    }
+    if (method === "session.create") return { sessionId: "session-new" };
+    throw new Error(`unexpected ${method}`);
+  });
+  assert.deepStrictEqual(created, { workspaceId: "ws-jamnote", sessionId: "session-new", created: true });
+  assert.deepStrictEqual(
+    createCalls.map((call) => call.method),
+    ["workspace.create", "workspace.list", "session.list", "session.create", "workspace.list", "session.list"],
+    "local bootstrap must confirm a newly created session against fresh workspace and session baselines",
+  );
+  assert.deepStrictEqual(createCalls[3].payload, { workspaceId: "ws-jamnote" });
+
+  await assert.rejects(
+    JamDeckPlugin.prepareDshWorkspace(async (method) => method === "workspace.create"
+      ? { created: false }
+      : { items: [workspace, { ...workspace, workspaceId: "duplicate" }], archivedSessionIds: [] }),
+    /注册重复/,
+    "ambiguous canonical workspace registrations must fail closed",
+  );
+}
 
 async function testArchiveIntegration() {
   const previousWindow = global.window;
@@ -3040,7 +3178,7 @@ async function testArchiveIntegration() {
 }
 
 testCanvasCreateName();
-testArchiveIntegration().then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
+testAiLocalWebBootstrap().then(() => testArchiveIntegration()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
   console.error(error);

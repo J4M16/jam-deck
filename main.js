@@ -3,6 +3,7 @@
 const { ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, normalizePath, requestUrl, setIcon } = require("obsidian");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
+const nodePath = require("path");
 const readline = require("readline");
 const zlib = require("zlib");
 
@@ -39,6 +40,112 @@ const MEDIA_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 const MEDIA_ARTWORK_MAX_BYTES = 768 * 1024;
 const MEDIA_REQUEST_TIMEOUT_MS = 5000;
 const MEDIA_READY_TIMEOUT_MS = 6000;
+const AI_LOCAL_WEB_URL = "http://127.0.0.1:3080/";
+const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
+const AI_LOCAL_WORKSPACE_PATH = "D:\\jam16\\Jamnote";
+const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
+const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
+
+function jamDeckCanonicalWindowsPath(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  if (!nodePath.win32.isAbsolute(raw)) return null;
+  return nodePath.win32.normalize(raw).replace(/[\\/]+$/, "").toLocaleLowerCase("en-US");
+}
+
+function jamDeckDshValue(response, rpcId, method) {
+  if (!response || response.status !== 200) {
+    throw new Error(response ? `本地 Web 返回 HTTP ${response.status}` : "本地 Web 没有响应");
+  }
+  const body = response.json;
+  if (!body || body.type !== "server-response" || body.rpcId !== rpcId || !body.result || typeof body.result.ok !== "boolean") {
+    throw new Error(`${method} 返回了无法识别的协议数据`);
+  }
+  if (!body.result.ok) {
+    const detail = body.result.error && typeof body.result.error.message === "string"
+      ? body.result.error.message
+      : `${method} 执行失败`;
+    throw new Error(detail);
+  }
+  return body.result.value;
+}
+
+async function jamDeckDshRpc(method, payload, options = {}) {
+  if (!AI_LOCAL_RPC_METHODS.has(method)) throw new Error("不允许的本地 Web 请求");
+  const transport = options.transport || requestUrl;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : AI_LOCAL_RPC_TIMEOUT_MS;
+  const rpcId = typeof options.rpcId === "string" ? options.rpcId : crypto.randomUUID();
+  let timer = 0;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("连接本地 Web 超时")), timeoutMs);
+  });
+  try {
+    const response = await Promise.race([
+      transport({
+        url: `${AI_LOCAL_RPC_BASE}${method}`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
+        throw: false,
+      }),
+      timeout,
+    ]);
+    return jamDeckDshValue(response, rpcId, method);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function jamDeckDshWorkspaceFromList(value) {
+  if (!value || !Array.isArray(value.items) || !Array.isArray(value.archivedSessionIds)) {
+    throw new Error("workspace.list 返回缺少工作区数据");
+  }
+  const target = jamDeckCanonicalWindowsPath(AI_LOCAL_WORKSPACE_PATH);
+  const matches = value.items.filter((item) => item
+    && typeof item.workspaceId === "string"
+    && Array.isArray(item.sessionIds)
+    && jamDeckCanonicalWindowsPath(item.path) === target);
+  if (matches.length !== 1) {
+    throw new Error(matches.length ? "Jamnote 工作区注册重复" : "没有找到 Jamnote 工作区");
+  }
+  return { workspace: matches[0], archivedSessionIds: value.archivedSessionIds };
+}
+
+function jamDeckDshSessions(value) {
+  if (!value || !Array.isArray(value.items)) throw new Error("session.list 返回缺少会话数据");
+  return value.items;
+}
+
+async function jamDeckPrepareDshWorkspace(rpc = jamDeckDshRpc) {
+  await rpc("workspace.create", { path: AI_LOCAL_WORKSPACE_PATH });
+  let workspaceList = await rpc("workspace.list", {});
+  let resolved = jamDeckDshWorkspaceFromList(workspaceList);
+  let sessions = jamDeckDshSessions(await rpc("session.list", {}));
+  const target = jamDeckCanonicalWindowsPath(AI_LOCAL_WORKSPACE_PATH);
+  const archived = new Set(resolved.archivedSessionIds.filter((id) => typeof id === "string"));
+  const memberIds = new Set(resolved.workspace.sessionIds.filter((id) => typeof id === "string"));
+  let session = sessions.find((item) => item
+    && typeof item.sessionId === "string"
+    && memberIds.has(item.sessionId)
+    && !archived.has(item.sessionId)
+    && item.blank === true
+    && jamDeckCanonicalWindowsPath(item.cwd) === target);
+  let created = false;
+  if (!session) {
+    const value = await rpc("session.create", { workspaceId: resolved.workspace.workspaceId });
+    if (!value || typeof value.sessionId !== "string") throw new Error("session.create 没有返回会话 ID");
+    created = true;
+    workspaceList = await rpc("workspace.list", {});
+    resolved = jamDeckDshWorkspaceFromList(workspaceList);
+    sessions = jamDeckDshSessions(await rpc("session.list", {}));
+    if (!resolved.workspace.sessionIds.includes(value.sessionId)) throw new Error("新会话没有归入 Jamnote 工作区");
+    session = sessions.find((item) => item && item.sessionId === value.sessionId);
+    if (!session || jamDeckCanonicalWindowsPath(session.cwd) !== target) {
+      throw new Error("新会话的工作区校验失败");
+    }
+  }
+  return { workspaceId: resolved.workspace.workspaceId, sessionId: session.sessionId, created };
+}
 // Eagle AI 搜索（ai-search 插件本地服务，端口为其默认固定值）；素材仍由 Eagle 管理，库目录软排除在 Obsidian 索引外。
 const EAGLE_SEARCH_API_URL = "http://127.0.0.1:38766/api/search/image";
 const EAGLE_LIBRARY_ROOT = "JAM收集.library";
@@ -3756,10 +3863,11 @@ class CanvasImageStackController {
   }
 
   prepareBystanders(cluster, layout, rootRect) {
-    // Explicit folders already have a strong shell/card relationship. Moving
-    // every unrelated Canvas node creates dozens of composited layers on
-    // image-heavy boards and is far more expensive than the four-card motion.
-    if (cluster && cluster.folderId) return [];
+    // Explicit folders only displace nodes actually covered by the opened
+    // cards. Legacy free stacks retain their softer 64px influence field.
+    // This restores the folder's spatial push without recreating dozens of
+    // compositor layers across an image-heavy board.
+    const explicitFolder = Boolean(cluster && cluster.folderId);
     const selectedIds = new Set(cluster.members.map((member) => member.id));
     const focus = {
       left: layout.x,
@@ -3770,6 +3878,17 @@ class CanvasImageStackController {
     const pending = [];
     for (const item of this.getCanvasItems()) {
       if (selectedIds.has(item.id) || !item.node || !item.node.nodeEl || !item.node.nodeEl.isConnected) continue;
+      const jamdeck = item.data && item.data.jamdeck;
+      if (explicitFolder && jamdeck && (jamdeck.folderId || jamdeck.folder || jamdeck.folderGroupId)) continue;
+      if (
+        explicitFolder
+        && item.node.nodeEl.classList
+        && (
+          item.node.nodeEl.classList.contains("is-jam-deck-folder-proxy-hidden")
+          || item.node.nodeEl.classList.contains("is-jam-deck-folder-collapsed")
+          || item.node.nodeEl.classList.contains("is-jam-deck-folder-hidden-member")
+        )
+      ) continue;
       const screen = item.node.nodeEl.getBoundingClientRect();
       const rect = {
         left: screen.left - rootRect.left,
@@ -3781,6 +3900,8 @@ class CanvasImageStackController {
         rect,
         focus,
         { width: rootRect.width, height: rootRect.height },
+        20,
+        explicitFolder ? 0 : 64,
       );
       if (Math.abs(shift.x) < 0.5 && Math.abs(shift.y) < 0.5) continue;
       const scale = jamDeckCanvasStackScreenScale(item);
@@ -5539,7 +5660,7 @@ class CanvasFolderController {
       runtime.animation = null;
     }
     const startTransform = "perspective(260px) rotateX(0deg)";
-    const openTransform = "perspective(260px) rotateX(-80deg)";
+    const openTransform = "perspective(260px) rotateX(-48deg)";
     const start = open ? { transform: startTransform, opacity: 1 } : { transform: openTransform, opacity: 0 };
     const end = open ? { transform: openTransform, opacity: 0 } : { transform: startTransform, opacity: 1 };
     const finish = () => {
@@ -5549,7 +5670,7 @@ class CanvasFolderController {
       // Cancel the fill:"both" WAAPI animation so its persisted end state stops
       // overriding the CSS transform. Without this, one preview open/close cycle
       // leaves front pinned at perspective(260px) rotateX(0deg) and the CSS
-      // :hover/:focus-within flap motion can never re-apply rotateX(-30deg).
+      // :hover/:focus-within flap motion can never re-apply rotateX(-18deg).
       if (latest.animation && typeof latest.animation.cancel === "function") {
         try { latest.animation.cancel(); } catch (error) {}
       }
@@ -7594,6 +7715,20 @@ class CanvasFolderController {
   }
 }
 
+function jamDeckSelectedCanvasNodes(canvas) {
+  if (!canvas || !canvas.selection || typeof canvas.selection.values !== "function") return { image: null, text: null };
+  const selected = Array.from(canvas.selection.values());
+  if (selected.length !== 1) return { image: null, text: null };
+  const node = selected[0];
+  let data = null;
+  try { data = node && typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+  const kind = data ? jamDeckCanvasStackKind(data) : null;
+  return {
+    image: kind === "image" ? node : null,
+    text: kind === "text" || kind === "markdown-note" || data && (data.type === "link" || data.type === "file") ? node : null,
+  };
+}
+
 class CanvasImageSearchController {
   constructor(runtime, entry) {
     this.runtime = runtime;
@@ -7625,12 +7760,12 @@ class CanvasImageSearchController {
     // 按下（平移/拖拽）期间暂停同步，松手恢复并补一次——避免 pointermove
     // 高频触发两次全量节点遍历导致大图量画布平移卡顿。
     const press = (event) => {
-      if (this.toolbarButton && (event.target === this.toolbarButton || this.toolbarButton.contains(event.target))) return;
-      if (this.aiToolbarButton && (event.target === this.aiToolbarButton || this.aiToolbarButton.contains(event.target))) return;
+      if (event.target && event.target.closest && event.target.closest(".canvas-menu, .canvas-card-menu, .canvas-controls, .jam-deck-drawing-palette")) return;
       this.suppressSync = true;
       this.scheduleToolbarSync();
     };
     const release = () => {
+      if (!this.suppressSync) return;
       this.suppressSync = false;
       this.scheduleToolbarSync();
     };
@@ -7658,52 +7793,7 @@ class CanvasImageSearchController {
   }
 
   findSelectedNodes() {
-    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return { image: null, text: null };
-    let image = null;
-    let text = null;
-    let count = 0;
-    for (const node of this.canvas.nodes.values()) {
-      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
-      count += 1;
-      if (count > 1) return { image: null, text: null };
-      let data = null;
-      try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-      const kind = data ? jamDeckCanvasStackKind(data) : null;
-      if (kind === "image") image = node;
-      else if (kind === "text") text = node;
-    }
-    return { image, text };
-  }
-
-  findSelectedImageNode() {
-    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return null;
-    const selected = [];
-    for (const node of this.canvas.nodes.values()) {
-      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
-      selected.push(node);
-      if (selected.length > 1) return null;
-    }
-    const node = selected[0];
-    if (!node) return null;
-    let data = null;
-    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { return null; }
-    return jamDeckCanvasStackKind(data) === "image" ? node : null;
-  }
-
-  findSelectedAiNode() {
-    if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return null;
-    const selected = [];
-    for (const node of this.canvas.nodes.values()) {
-      if (!node || !node.nodeEl || !node.nodeEl.matches || !node.nodeEl.matches(".is-selected, .is-focused")) continue;
-      selected.push(node);
-      if (selected.length > 1) return null;
-    }
-    const node = selected[0];
-    if (!node) return null;
-    let data = null;
-    try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { return null; }
-    const kind = jamDeckCanvasStackKind(data);
-    return kind === "text" || kind === "image" ? node : null;
+    return jamDeckSelectedCanvasNodes(this.canvas);
   }
 
   getToolbarMenu() {
@@ -7764,20 +7854,26 @@ class CanvasImageSearchController {
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      const selected = this.findSelectedNodes();
+      this.aiPressedNode = selected.image || selected.text || null;
     }, true);
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (this.selectedAiNode) {
-        const deckView = this.runtime && this.runtime.deckView;
-        if (!deckView) return;
-        let data = null;
-        try { data = typeof this.selectedAiNode.getData === "function" ? this.selectedAiNode.getData() : null; } catch (error) { data = null; }
-        if (jamDeckCanvasStackKind(data) === "image" && typeof deckView.openAiChatWithCanvasImage === "function") {
-          void deckView.openAiChatWithCanvasImage(this.selectedAiNode, this.canvas);
-        } else if (typeof deckView.openAiChatWithCanvasText === "function") {
-          deckView.openAiChatWithCanvasText(this.selectedAiNode, this.canvas);
-        }
+      const selected = this.findSelectedNodes();
+      const node = this.aiPressedNode || selected.image || selected.text || null;
+      this.aiPressedNode = null;
+      const deckView = this.runtime && this.runtime.deckView;
+      if (!node || !deckView) {
+        new Notice("Jam Deck：没有可发送的当前节点");
+        return;
+      }
+      let data = null;
+      try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+      if (jamDeckCanvasStackKind(data) === "image" && typeof deckView.openAiChatWithCanvasImage === "function") {
+        void deckView.openAiChatWithCanvasImage(node, this.canvas);
+      } else if (typeof deckView.openAiChatWithCanvasText === "function") {
+        void deckView.openAiChatWithCanvasText(node, this.canvas);
       }
     }, true);
     menu.appendChild(button);
@@ -8231,11 +8327,7 @@ class CanvasRuntimeAdapter {
     if (!entry || entry.interactionInstalled || !entry.leaf || !entry.leaf.containerEl) return;
     const target = entry.leaf.containerEl;
     const activate = () => this.activate(entry);
-    const pointerdown = () => {
-      activate();
-      const ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
-      if (ownerWindow) ownerWindow.setTimeout(activate, 0);
-    };
+    const pointerdown = () => activate();
     const keydown = (event) => {
       activate();
       const stackController = entry.imageStackController;
@@ -8620,7 +8712,7 @@ class CanvasRuntimeAdapter {
       context = this.probe(hostEl);
       leaf = new WorkspaceLeaf(this.app);
       this.assertTreeInvariant(context, leaf);
-      leaf.parent = context.parent;
+      leaf.parent = context.root;
       if (typeof leaf.getRoot !== "function" || leaf.getRoot() !== context.root) throw new Error("Canvas leaf cannot inherit the Jam Deck workspace root");
       this.assertTreeInvariant(context, leaf);
 
@@ -8804,6 +8896,25 @@ const JAM_DECK_WIDGET_MIN_W = 2;
 const JAM_DECK_WIDGET_MIN_H = 2;
 // Roughly 90px wide / 58px tall on a 1920x1080 deck, so the seam stays easy to hit on the dense grid.
 const JAM_DECK_SEAM_HIT = 2.5;
+
+function jamDeckClampAiFabPosition(position, width, height, fabWidth = 52, fabHeight = fabWidth, inset = 20) {
+  const safeWidth = Number(width);
+  const safeHeight = Number(height);
+  const safeFabWidth = Math.max(1, Number(fabWidth) || 52);
+  const safeFabHeight = Math.max(1, Number(fabHeight) || safeFabWidth);
+  const edge = Math.max(0, Number(inset) || 0);
+  if (!Number.isFinite(safeWidth) || !Number.isFinite(safeHeight) || safeWidth < safeFabWidth || safeHeight < safeFabHeight) return null;
+  const maxX = Math.max(0, safeWidth - safeFabWidth);
+  const maxY = Math.max(0, safeHeight - safeFabHeight);
+  const fallbackX = Math.max(0, maxX - edge);
+  const fallbackY = Math.max(0, maxY - edge);
+  const requestedX = position && Number.isFinite(Number(position.x)) ? Number(position.x) : fallbackX;
+  const requestedY = position && Number.isFinite(Number(position.y)) ? Number(position.y) : fallbackY;
+  return {
+    x: Math.min(maxX, Math.max(0, requestedX)),
+    y: Math.min(maxY, Math.max(0, requestedY)),
+  };
+}
 
 function jamDeckWidgetDisplayMinimum(widgetOrType) {
   const type = typeof widgetOrType === "string" ? widgetOrType : widgetOrType && widgetOrType.type;
@@ -9795,6 +9906,14 @@ class JamDeckView extends ItemView {
     this.launcherSuppressClick = null;
     this.canvasRuntime = new CanvasRuntimeAdapter(this);
     this.canvasConflictReconcilePromise = null;
+    this._aiLayoutResizeObserver = null;
+    this._aiLayoutResizeFrame = 0;
+    this._aiFabClampSavePending = false;
+    this.aiActivePage = "assistant";
+    this.aiLocalWebState = "idle";
+    this.aiLocalWebGeneration = 0;
+    this.aiLocalWebInitPromise = null;
+    this.aiLocalWebFrame = null;
     this.handleDeckActivation = (event) => {
       if (event.target && event.target.closest && event.target.closest(".jam-deck-canvas-leaf")) return;
       try {
@@ -9823,6 +9942,8 @@ class JamDeckView extends ItemView {
 
   async onClose() {
     this.cleanupLayoutSashes();
+    this.cleanupAiFabLayout();
+    this.cleanupAiLocalWeb();
     this.contentEl.removeEventListener("pointerdown", this.handleDeckActivation, true);
     this.contentEl.removeEventListener("focusin", this.handleDeckActivation, true);
     await this.canvasRuntime.destroyAll();
@@ -9896,6 +10017,8 @@ class JamDeckView extends ItemView {
   render() {
     const root = this.contentEl;
     this.cleanupLayoutSashes();
+    this.cleanupAiFabLayout();
+    this.cleanupAiLocalWeb();
     this.canvasRuntime.parkAll();
     root.empty();
     root.addClass("jam-deck-root");
@@ -9979,6 +10102,7 @@ class JamDeckView extends ItemView {
     this.aiChat = aiChat;
     this.renderAiChat(aiChat);
     this.layoutAiFabChat();
+    this.installAiFabLayoutObserver(root);
 
     const grid = root.createDiv({ cls: "jam-deck-grid" });
     grid.style.setProperty("--deck-cols", String(GRID_COLS));
@@ -10022,7 +10146,7 @@ class JamDeckView extends ItemView {
       this.clearAiImageDock();
       this.addAiMessage("assistant", "已切换到 DeepSeek：图片上下文已移除，纯文本对话继续；需要再看图请重新对图片节点打开 AI 助手或把图片拖进对话框。");
     }
-    if (this.aiChat) this.renderAiChat(this.aiChat);
+    this.refreshAiAssistantPage();
   }
 
   async archiveAiChat() {
@@ -10106,7 +10230,7 @@ class JamDeckView extends ItemView {
     if (this.aiChat) {
       const input = this.aiChat.querySelector("textarea");
       if (input) input.value = "";
-      this.renderAiChat(this.aiChat);
+      this.refreshAiAssistantPage();
     }
     new Notice("Jam Deck：已清空对话窗口（已归档记录不受影响）");
   }
@@ -10117,9 +10241,15 @@ class JamDeckView extends ItemView {
       this.aiChat.hidden = !this.aiChatOpen;
       if (this.aiChatOpen) {
         this.layoutAiFabChat();
-        const input = this.aiChat.querySelector("textarea");
-        if (input) input.focus();
-        this.scrollAiMessages();
+        if (this.aiActivePage === "assistant") {
+          const input = this.aiAssistantPage && this.aiAssistantPage.querySelector("textarea");
+          if (input) input.focus();
+          this.scrollAiMessages();
+        } else {
+          void this.ensureAiLocalWeb();
+        }
+      } else if (this.aiLocalWebState === "loading") {
+        this.cancelAiLocalWebInitialization();
       }
     }
   }
@@ -10127,12 +10257,37 @@ class JamDeckView extends ItemView {
   updateAiFabPos(x, y) {
     const root = this.contentEl;
     const rect = root.getBoundingClientRect();
-    const pos = {
-      x: Math.min(Math.max(0, x), Math.max(0, rect.width - 52)),
-      y: Math.min(Math.max(0, y), Math.max(0, rect.height - 52)),
-    };
+    const fabRect = this.aiFab && this.aiFab.getBoundingClientRect();
+    const fabWidth = fabRect && fabRect.width > 0 ? Math.ceil(fabRect.width) : 52;
+    const fabHeight = fabRect && fabRect.height > 0 ? Math.ceil(fabRect.height) : 52;
+    const pos = jamDeckClampAiFabPosition({ x, y }, rect.width, rect.height, fabWidth, fabHeight, 0);
+    if (!pos) return;
     this.plugin.settings.aiFabPos = pos;
     this.layoutAiFabChat();
+  }
+
+  cleanupAiFabLayout() {
+    if (this._aiLayoutResizeObserver) {
+      this._aiLayoutResizeObserver.disconnect();
+      this._aiLayoutResizeObserver = null;
+    }
+    const ownerWindow = this.contentEl && this.contentEl.ownerDocument && this.contentEl.ownerDocument.defaultView;
+    if (this._aiLayoutResizeFrame && ownerWindow) ownerWindow.cancelAnimationFrame(this._aiLayoutResizeFrame);
+    this._aiLayoutResizeFrame = 0;
+  }
+
+  installAiFabLayoutObserver(root) {
+    const ownerWindow = root && root.ownerDocument && root.ownerDocument.defaultView;
+    const ResizeObserverCtor = ownerWindow && ownerWindow.ResizeObserver;
+    if (!root || typeof ResizeObserverCtor !== "function") return;
+    this._aiLayoutResizeObserver = new ResizeObserverCtor(() => {
+      if (this._aiLayoutResizeFrame) ownerWindow.cancelAnimationFrame(this._aiLayoutResizeFrame);
+      this._aiLayoutResizeFrame = ownerWindow.requestAnimationFrame(() => {
+        this._aiLayoutResizeFrame = 0;
+        this.layoutAiFabChat();
+      });
+    });
+    this._aiLayoutResizeObserver.observe(root);
   }
 
   layoutAiFabChat() {
@@ -10140,10 +10295,21 @@ class JamDeckView extends ItemView {
     const rect = root.getBoundingClientRect();
     const FAB_W = 52;
     const GAP = 8;
-    const pos = this.plugin.settings.aiFabPos || {
-      x: Math.max(0, rect.width - FAB_W - 20),
-      y: Math.max(0, rect.height - FAB_W - 20),
-    };
+    const storedPos = this.plugin.settings.aiFabPos;
+    const fabRect = this.aiFab && this.aiFab.getBoundingClientRect();
+    const fabWidth = fabRect && fabRect.width > 0 ? Math.ceil(fabRect.width) : FAB_W;
+    const fabHeight = fabRect && fabRect.height > 0 ? Math.ceil(fabRect.height) : FAB_W;
+    const pos = jamDeckClampAiFabPosition(storedPos, rect.width, rect.height, fabWidth, fabHeight, 20);
+    if (!pos) return;
+    if (storedPos && (Number(storedPos.x) !== pos.x || Number(storedPos.y) !== pos.y)) {
+      this.plugin.settings.aiFabPos = pos;
+      if (!this._aiFabClampSavePending) {
+        this._aiFabClampSavePending = true;
+        Promise.resolve(this.plugin.saveSettings()).catch(() => {}).finally(() => {
+          this._aiFabClampSavePending = false;
+        });
+      }
+    }
     if (this.aiFab) {
       this.aiFab.style.left = `${pos.x}px`;
       this.aiFab.style.top = `${pos.y}px`;
@@ -10153,7 +10319,7 @@ class JamDeckView extends ItemView {
     if (this.aiChat && !this.aiChat.hidden) {
       const w = this.aiChat.offsetWidth || 680;
       const h = this.aiChat.offsetHeight || 780;
-      let cx = pos.x + FAB_W + GAP;
+      let cx = pos.x + fabWidth + GAP;
       if (cx + w > rect.width - GAP) cx = pos.x - w - GAP;
       cx = Math.max(GAP, Math.min(cx, Math.max(GAP, rect.width - w - GAP)));
       let cy = pos.y;
@@ -10165,10 +10331,24 @@ class JamDeckView extends ItemView {
     }
   }
 
-  openAiChatWithCanvasText(node, canvas) {
+  async openAiChatWithCanvasText(node, canvas) {
     let data = null;
     try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-    const text = data && typeof data.text === "string" ? data.text.trim() : "";
+    let text = data && typeof data.text === "string" ? data.text.trim()
+      : data && data.type === "link" && typeof data.url === "string" ? data.url.trim()
+        : data && data.type === "file" && typeof data.file === "string" ? data.file.trim()
+          : "";
+    if (data && data.type === "file" && typeof data.file === "string" && data.file.toLowerCase().endsWith(".md")) {
+      try {
+        const file = this.plugin.app.vault.getAbstractFileByPath(data.file);
+        if (file) text = String(await this.plugin.app.vault.read(file) || "").trim() || data.file;
+      } catch (error) {
+        text = data.file;
+      }
+    }
+    const nodeLabel = data && data.type === "link" ? "链接节点"
+      : data && data.type === "file" ? "文件节点"
+        : "文本节点";
     this.aiCanvasContext = {
       canvas: canvas || null,
       nodeId: node && node.id || null,
@@ -10181,13 +10361,15 @@ class JamDeckView extends ItemView {
     this.aiMessages = [];
     this.aiArchivedCount = 0;
     this.aiInputValue = "";
-    this.aiQuickDone = false;
-    this.addAiMessage("user", text ? `[选中文本]\n${text}` : "[选中的文本节点]");
-    this.addAiMessage("assistant", "已载入选中文本。点击下方语种直接翻译，翻译结果会以文本节点贴在原文旁边；也可以直接输入其他要求。");
+    this.aiQuickDone = !(data && data.type === "text");
+    this.aiActivePage = "assistant";
+    this.addAiMessage("user", text ? `[选中${nodeLabel}]\n${text}` : `[选中的${nodeLabel}]`);
+    this.addAiMessage("assistant", `已载入${nodeLabel}。${data && data.type === "text" ? "点击下方语种可直接翻译；" : ""}也可以直接输入分析、整理或改写要求。`);
     if (this.aiChat) {
       this.aiChat.hidden = false;
-      this.renderAiChat(this.aiChat);
-      const input = this.aiChat.querySelector("textarea");
+      this.refreshAiAssistantPage();
+      this.setAiActivePage("assistant", { focus: false });
+      const input = this.aiAssistantPage && this.aiAssistantPage.querySelector("textarea");
       if (input) input.focus();
     }
   }
@@ -10250,6 +10432,7 @@ class JamDeckView extends ItemView {
     this.aiArchivedCount = 0;
     this.aiInputValue = "";
     this.aiQuickDone = true;
+    this.aiActivePage = "assistant";
     this.aiMessages.push({
       role: "user",
       image: { src: displaySrc, alt: String(filePath.split("/").pop()) },
@@ -10261,8 +10444,9 @@ class JamDeckView extends ItemView {
     });
     if (this.aiChat) {
       this.aiChat.hidden = false;
-      this.renderAiChat(this.aiChat);
-      const input = this.aiChat.querySelector("textarea");
+      this.refreshAiAssistantPage();
+      this.setAiActivePage("assistant", { focus: false });
+      const input = this.aiAssistantPage && this.aiAssistantPage.querySelector("textarea");
       if (input) input.focus();
     }
   }
@@ -10368,10 +10552,30 @@ class JamDeckView extends ItemView {
 
   renderAiChat(chat) {
     chat.empty();
+    const assistantPageId = `jam-deck-ai-page-assistant-${this.launcherViewId}`;
+    const localWebPageId = `jam-deck-ai-page-local-web-${this.launcherViewId}`;
     const header = chat.createDiv({ cls: "jam-deck-ai-chat-header" });
-    this.renderAiChatHeader(header);
-    this.renderAiChatBody(chat);
-    this.renderAiChatInputRow(chat);
+    this.renderAiChatHeader(header, { assistantPageId, localWebPageId });
+    const pages = chat.createDiv({ cls: "jam-deck-ai-pages" });
+    this.aiAssistantPage = pages.createDiv({
+      cls: "jam-deck-ai-page is-assistant",
+      attr: { id: assistantPageId, role: "tabpanel" },
+    });
+    this.aiLocalWebPage = pages.createDiv({
+      cls: "jam-deck-ai-page is-local-web",
+      attr: { id: localWebPageId, role: "tabpanel" },
+    });
+    this.renderAiAssistantPage();
+    this.renderAiLocalWebPanel();
+    this.applyAiActivePage();
+    if (this.aiChatOpen && this.aiActivePage === "local-web") void this.ensureAiLocalWeb();
+  }
+
+  renderAiAssistantPage() {
+    if (!this.aiAssistantPage) return;
+    this.aiAssistantPage.empty();
+    this.renderAiChatBody(this.aiAssistantPage);
+    this.renderAiChatInputRow(this.aiAssistantPage);
     // 重建窗口后恢复已载入图片的 dock
     if (this.aiCanvasContext && this.aiCanvasContext.kind === "image" && this.aiCanvasContext.image) {
       this.updateAiImageDock(
@@ -10382,7 +10586,142 @@ class JamDeckView extends ItemView {
     this.scrollAiMessages();
   }
 
-  renderAiChatHeader(header) {
+  refreshAiAssistantPage() {
+    if (this.aiProviderBtn) {
+      const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+      this.aiProviderBtn.textContent = provider;
+      this.aiProviderBtn.title = provider === "千问"
+        ? "当前：千问（多模态）· 点击切换到 DeepSeek"
+        : "当前：DeepSeek · 点击切换到千问（可看图）";
+    }
+    this.renderAiAssistantPage();
+  }
+
+  renderAiLocalWebPanel() {
+    if (!this.aiLocalWebPage) return;
+    this.aiLocalWebPage.empty();
+    if (this.aiHeaderContext) {
+      this.aiHeaderContext.empty();
+      const path = this.aiHeaderContext.createSpan({ text: "Jamnote", cls: "jam-deck-ai-local-path" });
+      path.title = "工作区：D:\\jam16\\Jamnote。若网页未显示 Jamnote，请在网页侧栏手动选择。";
+      this.aiLocalWebStatusEl = this.aiHeaderContext.createDiv({ cls: "jam-deck-ai-local-status" });
+    }
+    this.aiLocalWebHost = this.aiLocalWebPage.createDiv({ cls: "jam-deck-ai-local-host" });
+    if (this.aiLocalWebFrame) this.aiLocalWebHost.appendChild(this.aiLocalWebFrame);
+    this.renderAiLocalWebStatus();
+  }
+
+  renderAiLocalWebStatus(error) {
+    if (!this.aiLocalWebStatusEl) return;
+    this.aiLocalWebStatusEl.empty();
+    this.aiLocalWebStatusEl.dataset.state = this.aiLocalWebState || "idle";
+    if (this.aiLocalWebState === "loading") {
+      this.aiLocalWebStatusEl.createSpan({ text: "连接中" });
+      return;
+    }
+    if (this.aiLocalWebState === "error") {
+      const message = this.aiLocalWebStatusEl.createSpan({ text: "未连接" });
+      message.title = error || "请确认 127.0.0.1:3080 已启动";
+      const retry = this.aiLocalWebStatusEl.createEl("button", { text: "重试", attr: { type: "button" } });
+      retry.addEventListener("click", () => void this.ensureAiLocalWeb(true));
+      return;
+    }
+    if (this.aiLocalWebState === "ready") {
+      this.aiLocalWebStatusEl.createSpan({ text: "已连接" });
+      return;
+    }
+    this.aiLocalWebStatusEl.createSpan({ text: "待连接" });
+  }
+
+  applyAiActivePage() {
+    const local = this.aiActivePage === "local-web";
+    if (this.aiAssistantTab) {
+      this.aiAssistantTab.setAttribute("aria-selected", local ? "false" : "true");
+      this.aiAssistantTab.tabIndex = local ? -1 : 0;
+      this.aiAssistantTab.toggleClass("is-active", !local);
+    }
+    if (this.aiLocalWebTab) {
+      this.aiLocalWebTab.setAttribute("aria-selected", local ? "true" : "false");
+      this.aiLocalWebTab.tabIndex = local ? 0 : -1;
+      this.aiLocalWebTab.toggleClass("is-active", local);
+    }
+    if (this.aiAssistantPage) this.aiAssistantPage.hidden = local;
+    if (this.aiLocalWebPage) this.aiLocalWebPage.hidden = !local;
+    if (this.aiChat) this.aiChat.toggleClass("is-local-web-page", local);
+  }
+
+  setAiActivePage(page, options = {}) {
+    if (page !== "assistant" && page !== "local-web") return;
+    this.aiActivePage = page;
+    this.applyAiActivePage();
+    const ownerWindow = this.contentEl && this.contentEl.ownerDocument && this.contentEl.ownerDocument.defaultView;
+    if (ownerWindow) ownerWindow.requestAnimationFrame(() => this.layoutAiFabChat());
+    if (page === "local-web") {
+      if (this.aiChatOpen) void this.ensureAiLocalWeb();
+      if (options.focus !== false && this.aiLocalWebTab) this.aiLocalWebTab.focus();
+      return;
+    }
+    if (options.focus !== false) {
+      const input = this.aiAssistantPage && this.aiAssistantPage.querySelector("textarea");
+      if (input) input.focus();
+    }
+    this.scrollAiMessages();
+  }
+
+  cancelAiLocalWebInitialization() {
+    this.aiLocalWebGeneration += 1;
+    this.aiLocalWebInitPromise = null;
+    if (this.aiLocalWebState === "loading") {
+      this.aiLocalWebState = "idle";
+      this.renderAiLocalWebStatus();
+    }
+  }
+
+  cleanupAiLocalWeb() {
+    this.cancelAiLocalWebInitialization();
+    if (this.aiLocalWebFrame) {
+      try { this.aiLocalWebFrame.src = "about:blank"; } catch (error) {}
+      this.aiLocalWebFrame.remove();
+    }
+    this.aiLocalWebFrame = null;
+    this.aiLocalWebHost = null;
+    this.aiLocalWebStatusEl = null;
+    this.aiLocalWebState = "idle";
+  }
+
+  async ensureAiLocalWeb(force = false) {
+    if (this.aiLocalWebState === "ready" && this.aiLocalWebFrame && !force) return;
+    if (this.aiLocalWebInitPromise && !force) return this.aiLocalWebInitPromise;
+    const generation = this.aiLocalWebGeneration + 1;
+    this.aiLocalWebGeneration = generation;
+    this.aiLocalWebState = "loading";
+    this.renderAiLocalWebStatus();
+    const init = jamDeckPrepareDshWorkspace().then(() => {
+      if (generation !== this.aiLocalWebGeneration || !this.aiLocalWebHost) return;
+      if (!this.aiLocalWebFrame) {
+        this.aiLocalWebFrame = this.aiLocalWebHost.createEl("iframe", {
+          cls: "jam-deck-ai-local-frame",
+          attr: {
+            src: AI_LOCAL_WEB_URL,
+            title: "DeepSeek Harness · Jamnote 本地工作区",
+            sandbox: "allow-scripts allow-same-origin allow-forms",
+          },
+        });
+      }
+      this.aiLocalWebState = "ready";
+      this.renderAiLocalWebStatus();
+    }).catch((error) => {
+      if (generation !== this.aiLocalWebGeneration) return;
+      this.aiLocalWebState = "error";
+      this.renderAiLocalWebStatus(error && error.message ? error.message : "未知错误");
+    }).finally(() => {
+      if (generation === this.aiLocalWebGeneration) this.aiLocalWebInitPromise = null;
+    });
+    this.aiLocalWebInitPromise = init;
+    return init;
+  }
+
+  renderAiChatHeader(header, { assistantPageId, localWebPageId }) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
     const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
@@ -10391,7 +10730,27 @@ class JamDeckView extends ItemView {
       cls: "jam-deck-ai-provider-btn",
       attr: { type: "button", title: provider === "千问" ? "当前：千问（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到千问（可看图）" },
     });
+    this.aiProviderBtn = providerBtn;
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
+    const tabs = header.createDiv({ cls: "jam-deck-ai-tabs", attr: { role: "tablist", "aria-label": "AI 助手页面" } });
+    const makeTab = (page, text, controls) => {
+      const tab = tabs.createEl("button", {
+        text,
+        cls: "jam-deck-ai-tab",
+        attr: { type: "button", role: "tab", "aria-controls": controls },
+      });
+      tab.dataset.aiPage = page;
+      tab.addEventListener("click", () => this.setAiActivePage(page));
+      return tab;
+    };
+    this.aiAssistantTab = makeTab("assistant", "AI 助手", assistantPageId);
+    this.aiLocalWebTab = makeTab("local-web", "本地工作区", localWebPageId);
+    tabs.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      this.setAiActivePage(this.aiActivePage === "assistant" ? "local-web" : "assistant");
+    });
+    this.aiHeaderContext = header.createDiv({ cls: "jam-deck-ai-header-context" });
     const headerActions = header.createDiv({ cls: "jam-deck-ai-chat-actions" });
     const archive = headerActions.createEl("button", {
       text: "归档",
@@ -10439,10 +10798,10 @@ class JamDeckView extends ItemView {
     const messages = chat.createDiv({ cls: "jam-deck-ai-messages" });
     this.aiMessagesEl = messages;
     if (!this.aiMessages || !this.aiMessages.length) {
-      messages.createDiv({
-        text: "用自然语言新增 / 完成 / 删除待办，可指定日期与分类。例：「周一加一条：参考图集归档，工作分类」",
-        cls: "jam-deck-ai-message is-assistant is-hint",
-      });
+      const empty = messages.createDiv({ cls: "jam-deck-ai-empty" });
+      empty.createDiv({ text: "今天想处理什么？", cls: "jam-deck-ai-empty-title" });
+      empty.createDiv({ text: "直接用自然语言新增、完成或删除待办，也可以指定日期和分类。", cls: "jam-deck-ai-empty-copy" });
+      empty.createDiv({ text: "例如：周一加一条「参考图集归档」，工作分类", cls: "jam-deck-ai-empty-example" });
     } else {
       for (const msg of this.aiMessages) this.renderAiMessage(messages, msg);
     }
@@ -16397,6 +16756,7 @@ JamDeckPlugin.widgetLayoutHelpers = {
   cols: GRID_COLS,
   rows: GRID_ROWS,
 };
+JamDeckPlugin.clampAiFabPosition = jamDeckClampAiFabPosition;
 
 class JamDeckSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
@@ -16552,4 +16912,11 @@ class JamDeckSettingTab extends PluginSettingTab {
 }
 
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
+JamDeckPlugin.canonicalWindowsPath = jamDeckCanonicalWindowsPath;
+JamDeckPlugin.dshValue = jamDeckDshValue;
+JamDeckPlugin.dshRpc = jamDeckDshRpc;
+JamDeckPlugin.prepareDshWorkspace = jamDeckPrepareDshWorkspace;
+JamDeckPlugin.AI_LOCAL_WEB_URL = AI_LOCAL_WEB_URL;
+JamDeckPlugin.AI_LOCAL_WORKSPACE_PATH = AI_LOCAL_WORKSPACE_PATH;
+JamDeckPlugin.selectedCanvasNodes = jamDeckSelectedCanvasNodes;
 module.exports = JamDeckPlugin;
