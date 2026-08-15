@@ -101,11 +101,11 @@ Canvas 适配器使用 Obsidian 桌面端内部视图能力。它不把临时 le
 
 单击展开会克隆清理过的图片、Canvas 文本或 Markdown 笔记渲染表面；载入失败使用无交互占位。缩小图片与文本都以保存的首次原 Canvas 尺寸作为逻辑预览尺寸，整个组合只在超出安全视口时统一做临时显示缩放。每张 FLIP 卡从对应源节点精确屏幕矩形出发，收起时返回最新源矩形；纯展开/收起不改变真实节点世界坐标和持久尺寸。
 
-展开卡片在捕获阶段记录单一主指针：鼠标/笔移动不足 6px、触控不足 10px 时判定为单击；文本调用 Obsidian 1.12.7 已验证的 `node.startEditing()` 进入真实节点编辑，图片显示在 90% 视口约束的独立预览层，Markdown 笔记在新标签页打开。越过阈值后改为 DOM-only 拖拽副本，并永久抑制本次单击动作；松手时仅用 `canvas.posFromEvt(start/end)` 的世界坐标差计算最终落点，fresh-read 节点数据后一次性提交位置、恢复尺寸与元数据删除。画布缩放、平移、尺寸变化、节点身份或几何变化会取消提交。
+展开卡片在捕获阶段记录单一主指针：鼠标/笔移动不足 6px、触控不足 10px 时判定为单击；图片、GIF、文本与 Markdown 笔记进入与 `F` 相同的放映层。文件夹展开且可放映成员多于一张时，放映层左右提供圆形箭头翻页。独立节点放映时方向键沿 Canvas `edges` 的 `fromSide`/`toSide` 跳到可放映邻居，缺 side 时用节点中心向量兜底，同方向多条连线取距离最近者；有邻居的方向同时显示圆形箭头，点击与方向键共用 hop，翻页后按当前节点重建箭头。隐藏的文件夹图片/GIF 从 Vault 资源路径解析，不依赖尚未水合的原生 `<img>`。越过阈值后改为 DOM-only 拖拽副本，并永久抑制本次单击动作；松手时仅用 `canvas.posFromEvt(start/end)` 的世界坐标差计算最终落点，fresh-read 节点数据后一次性提交位置、恢复尺寸与元数据删除。画布缩放、平移、尺寸变化、节点身份或几何变化会取消提交。
 
-文本预览不沿用克隆节点中的 Canvas 变焦字号。控制器以 16px 为最终屏幕目标，并按每张卡片的 `targetScale` 写入反向字号 `16 / targetScale`；卡片完成 FLIP 缩放后视觉字号恒为 16px。拖出 portal 移除卡片 transform 时将变量复位为 16px。
+文本预览不沿用克隆节点中的 Canvas 变焦字号。控制器以 12px 为最终屏幕目标；卡片完成 FLIP 缩放后视觉字号恒为 12px。拖出 portal 移除卡片 transform 时将变量复位为 12px。
 
-文本预览的内边距使用同样的反向缩放得到最终 16px 屏幕距离。克隆后的 `.markdown-embed-content`、`.markdown-preview-view`、`.markdown-preview-sizer` 与 `.markdown-preview-section` 会被限定为 100% 宽度并清除 auto margin、阅读宽度和重复 padding，避免窄列居中。展开卡片本身不设置圆角。
+文本预览的内边距使用同样的反向缩放得到最终 16px 屏幕距离。克隆后的 `.markdown-embed-content`、`.markdown-preview-view`、`.markdown-preview-sizer` 与 `.markdown-preview-section` 会被限定为 100% 宽度并清除 auto margin、阅读宽度和重复 padding，避免窄列居中。展开图片/GIF、文本与笔记卡片圆角复用 `--jd-canvas-image-radius`，与 F 放映一致。
 
 聚焦布局生成后，控制器枚举 `canvas.nodes` 中所有具有有效几何与 DOM 表面的节点，而不是复用仅识别图片扩展名的堆叠集合。选中堆叠成员按 ID 排除；其余图片、文本、文件笔记、嵌套 Canvas 和链接/浏览器节点，只要进入布局矩形及 64px 影响区便计算屏幕位移：相交节点移动到焦点区外并保留 20px 间距，邻近节点向外移动 24px。屏幕位移按节点 DOM/world 比例换算并以 CSS individual `translate` 作用于完整 `.canvas-node`，与 Obsidian 原生定位 transform 并存；收起时反向归零并清除 class 与变量，不调用 `moveTo`、`requestSave` 或历史接口。
 
@@ -113,7 +113,7 @@ Canvas 适配器使用 Obsidian 桌面端内部视图能力。它不把临时 le
 
 剪贴板图片 drop 在 owned Canvas host 的 capture 阶段处理：同步记录 Canvas 坐标，复制为持久附件，创建图片节点并立即保存。未提交失败只清理本操作创建且未被引用的附件；已经插入节点后不会盲删文件。
 
-同路径原生 Canvas 冲突由纯路径集合驱动：扫描明确排除带 ownership 标记的 detached leaf，高频 workspace 事件只保留一个 timer 并串行 reconcile。冲突时 `CanvasRuntimeAdapter` 先标记 entry closing，停止控制器并 abort/等待图片 drop 与 Eagle 搜索等在途任务，再 quiet 卸载 Jam Deck 自有 leaf；该路径不调用原生 Canvas 的 `saveImmediately`、`view.close`、workspace active-leaf 或 layout API。最后一个原生 leaf 关闭后才 fresh mount 一次。
+同路径原生 Canvas 冲突由纯路径集合驱动：扫描明确排除带 ownership 标记的 detached leaf，高频 workspace 事件只保留一个 timer 并串行 reconcile。冲突时 `CanvasRuntimeAdapter` 先标记 entry closing，停止控制器并 abort/等待图片 drop 等在途任务，再 quiet 卸载 Jam Deck 自有 leaf；该路径不调用原生 Canvas 的 `saveImmediately`、`view.close`、workspace active-leaf 或 layout API。最后一个原生 leaf 关闭后才 fresh mount 一次。节点选择工具栏由 `CanvasSelectionToolbarController` 独立管理，负责当前节点发送给 AI，并把原生聚焦按钮改成全屏预览（复用堆叠大图全屏层）。entry 销毁时同步释放按钮、observer、rAF 与监听器。
 
 标注层使用 Pointer Events，鼠标与数位笔都只记录 Canvas 世界坐标 `[x, y]`，并以用户选择的固定粗细渲染；不读取压力、倾角或合并采样。旧笔迹中的扩展点字段会在读取时忽略。画笔模式只拦截主按钮鼠标或笔输入，`Space` 临时让出平移，右键、滚轮和触控保持原生行为。
 

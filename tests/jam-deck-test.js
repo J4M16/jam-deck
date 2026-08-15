@@ -59,11 +59,48 @@ assert(styleSource.includes("lightweight Spatial calendar"), "calendar styling m
 assert(styleSource.includes("Embedded Canvas image nodes and geometric stacks"), "embedded Canvas stack styling must remain explicitly scoped");
 assert(styleSource.includes("Jam Deck Canvas Spatial toolbar and fixed-width annotation"), "Canvas annotation visual layer must remain explicit and reversible");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-card-menu.jam-deck-node-toolbar--spatial"), "native Canvas toolbar restyling must stay inside the embedded leaf");
-assert(pluginSource.includes("const EAGLE_SEARCH_RESULT_LIMIT = 10"), "Eagle reverse image search must cap requests at ten results");
-assert(pluginSource.includes("className = \"clickable-icon jam-deck-canvas-image-search-toolbar\""), "Eagle search must use the native Canvas selection-toolbar button surface");
-assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Eagle search must target the native selection popup, not the bottom card palette");
-assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Eagle search must not resolve the bottom card palette");
-assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas image search and AI must only appear for one authoritative selected node");
+assert(pluginSource.includes("class CanvasSelectionToolbarController"), "Canvas AI must keep a dedicated native selection-toolbar controller");
+assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Canvas AI must target the native selection popup, not the bottom card palette");
+assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Canvas AI must not resolve the bottom card palette");
+assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas AI must only appear for one authoritative selected node");
+assert(pluginSource.includes("hijackNativeFocusButton(menu)"), "native Canvas focus must be hijacked on the selection toolbar");
+assert(pluginSource.includes("onFocusHotkey(event)") && pluginSource.includes('code === "KeyF"'), "fullscreen preview must bind F as a selection-toolbar hotkey including video KeyF");
+assert(pluginSource.includes("isToolbarArmed()") && pluginSource.includes("openSelectedNodeFocus()"), "F must require the floating selection toolbar before opening fullscreen preview");
+assert(pluginSource.includes("openNodeFocus(node") && pluginSource.includes('aria-label", "关闭预览"'), "toolbar focus and folder image clicks must share the same closeable fullscreen overlay");
+assert(pluginSource.includes('setAttribute("aria-label", "放映")'), "the native focus button must be relabeled as present");
+assert(pluginSource.includes("invokeNativeZoomToSelection()"), "unpresentable selections such as groups must still call native zoomToSelection");
+assert(pluginSource.includes("if (stack && stack.imageFocus)") && pluginSource.includes("stack.closeImageFocus()"), "pressing F again during present must close like the close button");
+assert(pluginSource.includes("onPresentKeydown(event)") && pluginSource.includes("togglePresentVideo()"), "present mode must own F-close and spacebar video playback");
+assert(pluginSource.includes('code === "KeyF"') && pluginSource.includes("disposeKeys"), "present F must close even when a video has stolen key focus");
+assert(pluginSource.includes("lockPresentVideoFocus(") && pluginSource.includes('addEventListener("focusin"'), "clicking native video chrome must not keep focus on the timeline");
+assert(pluginSource.includes("ArrowLeft") && pluginSource.includes("ArrowRight") && pluginSource.includes("ArrowUp") && pluginSource.includes("ArrowDown"), "present mode must consume arrow keys instead of video timeline seeking");
+assert(pluginSource.includes("presentNeighbor(") && pluginSource.includes("jamDeckCanvasPresentEdgeHop(") && pluginSource.includes("fromSide"), "F present must follow Canvas edges with arrow keys");
+assert(pluginSource.includes("nofullscreen"), "present video must not treat F as native fullscreen");
+assert(pluginSource.includes(".canvas-node-content.media-embed > video"), "present mode must clone Canvas video nodes instead of treating them as paper");
+assert(pluginSource.includes("getPresentHost()") && pluginSource.includes("is-jam-deck-presenting"), "present overlay must mount on the workbench root so the mask covers the AI button");
+assert(pluginSource.includes("jam-deck-present-note-body"), "text present must render note body text instead of an empty cloned canvas surface");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media.is-node") && styleSource.includes("padding: 32px 26px 32px 36px"), "text present must keep notebook-paper inset with extra bottom space");
+assert(styleSource.includes("feTurbulence") && styleSource.includes("fractalNoise"), "text present must use a paper grain texture");
+assert(styleSource.includes("mask-image: linear-gradient(180deg, #000 0%, #000 calc(100% - 68px), transparent 100%)"), "overflowing present notes must fade out at the bottom instead of clipping hard");
+assert(styleSource.includes(".jam-deck-present-note-body") && styleSource.includes("padding-right: 10px"), "present note scrollbar must sit 10px farther from the text");
+assert(styleSource.includes("var(--jd-paper, var(--background-primary))"), "text present must reuse the Spatial paper token");
+assert(styleSource.includes(".jam-deck-root.is-jam-deck-presenting .jam-deck-ai-fab"), "presenting must hide the AI FAB under the mask");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media.is-video > video"), "video present must keep a contained media surface");
+assert(styleSource.includes("video::-webkit-media-controls-play-button"), "video present must suppress the native control focus frame");
+assert(styleSource.includes("video::-webkit-media-controls-timeline"), "video present must suppress the timeline focus ring after a seek click");
+assert(styleSource.includes("rgb(255 255 255 / 0.15) !important") && styleSource.includes("rgb(255 255 255 / 0.80) !important") && styleSource.includes("rgb(255 255 255 / 1) !important"), "present close and nav buttons must beat Obsidian button fills at 15/80/100 white");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media.is-step-in") && styleSource.includes("180ms cubic-bezier(.22, 1, .36, 1)"), "present paging must ease in along the motion axis");
+assert(styleSource.includes("translate3d(36px, 0, 0)") && styleSource.includes("translate3d(-36px, 0, 0)") && styleSource.includes("translate3d(0, 36px, 0)") && styleSource.includes("translate3d(0, -36px, 0)"), "present paging must slide from the travel direction");
+assert(!styleSource.includes("scale(0.92)"), "present paging must not scale");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media.is-step-up") && styleSource.includes(".jam-deck-canvas-stack-image-focus-media.is-step-down"), "edge present paging must animate up and down");
+assert(pluginSource.includes("syncPresentNav(") && pluginSource.includes("presentNavDirections(") && pluginSource.includes("findPresentNeighbor("), "edge present must show clickable arrows for available hop directions");
+assert(pluginSource.includes("jam-deck-canvas-stack-image-focus-title") && pluginSource.includes("aria-labelledby"), "present overlay must name itself with a hidden title instead of a full-screen aria-label tooltip");
+assert(!pluginSource.includes('setAttribute("aria-label", content.label)'), "present overlay must not attach Obsidian tooltips to the full-screen mask");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-title") && styleSource.includes("clip: rect(0, 0, 0, 0)"), "present title must stay visually hidden");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-nav") && styleSource.includes(".jam-deck-canvas-stack-image-focus-nav.is-next"), "folder present must show circular next/prev controls");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-nav.is-up") && styleSource.includes(".jam-deck-canvas-stack-image-focus-nav.is-down"), "edge present nav must include up and down arrows");
+assert(styleSource.includes(".jam-deck-canvas-stack-preview-card:has(> .jam-deck-canvas-stack-preview-surface.is-image)") && styleSource.includes(".jam-deck-canvas-stack-preview-card:has(> .jam-deck-canvas-stack-preview-surface.is-text)") && styleSource.includes("border-radius: var(--jd-canvas-image-radius)"), "expanded image and text cards must share the F-present radius");
+assert(!pluginSource.includes("zoomToSelection = (") && !pluginSource.includes("zoomToSelection=("), "replacing native focus must not patch zoomToSelection used by new-node placement");
 assert(pluginSource.includes("hasNativeCanvasDuplicate(file.path, existing && existing.leaf)"), "embedded Canvas must pause when the same file is open natively");
 assert(pluginSource.includes("getViewState()"), "embedded Canvas duplicate detection must resolve native file paths before the view object finishes loading");
 assert(pluginSource.includes("getCanvasExternalImageDrop"), "embedded Canvas must own external image drops instead of delegating them to the native handler");
@@ -76,8 +113,8 @@ assert(pluginSource.includes("if (this.hasNativeCanvasDuplicate(file.path, leaf)
 assert(pluginSource.includes("JAM_DECK_CANVAS_CONFLICT"), "embedded Canvas duplicate protection must expose a recoverable conflict state");
 assert(pluginSource.includes("scheduleCanvasNativeConflictReconcile"), "embedded Canvas duplicate protection must reconcile when workspace leaves change");
 assert(pluginSource.includes("reconcileCanvasNativeConflicts"), "embedded Canvas conflicts must reconcile in place");
-assert(!pluginSource.includes("className = \"jam-deck-canvas-image-search\""), "Eagle search must not keep a node-corner hover button");
-assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-image-search-toolbar"), "Eagle search toolbar button styling must stay inside the embedded leaf");
+assert(!pluginSource.includes("EAGLE_SEARCH_") && !pluginSource.includes("jamDeckEagle") && !pluginSource.includes("以图搜图"), "removed Eagle reverse-image search must leave no runtime path");
+assert(!styleSource.includes("jam-deck-canvas-image-search-toolbar"), "removed Eagle toolbar styling must leave no dead selector");
 assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-drawing-palette"), "drawing palette styles must stay inside the embedded leaf");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-node:has(.canvas-node-content.media-embed > img) > .canvas-node-label"), "embedded Canvas image filenames must be hidden without affecting normal Canvas views");
 assert(styleSource.includes("object-fit: cover"), "embedded Canvas images must fill their node without an inset frame");
@@ -98,7 +135,7 @@ assert(styleSource.includes(".jam-deck-canvas-stack-overlay"), "Canvas stacks mu
 assert(styleSource.includes(".jam-deck-canvas-stack-preview {") && styleSource.includes("pointer-events: auto;"), "an open stack preview must isolate the Canvas below it");
 assert(pluginSource.includes("this.previewWrapper.contains(event.target)") && pluginSource.includes("event.stopImmediatePropagation();"), "preview dismissal must consume covered pointer input");
 assert(pluginSource.includes('if (event.key === "Escape") this.collapsePreview();'), "preview isolation must retain an Escape exit");
-assert(pluginSource.includes("stackController && stackController.previewWrapper"), "the early Canvas keyboard bridge must yield to an open focus preview");
+assert(pluginSource.includes("stackController && stackController.imageFocus") && pluginSource.includes("stackController && stackController.previewWrapper"), "the early Canvas keyboard bridge must yield separately to present overlay and stack preview");
 assert(styleSource.includes(".jam-deck-canvas-stack-overlay {\n  position: absolute;\n  z-index: 70;"), "the focus overlay must sit above native Canvas controls");
 assert(!styleSource.includes("prefers-reduced-motion"), "Jam Deck animations must not follow the OS reduced-motion setting");
 assert(pluginSource.includes("getCanvasItems()") && pluginSource.includes("for (const item of this.getCanvasItems())"), "focus displacement must enumerate every Canvas node type");
@@ -173,16 +210,21 @@ assert(pluginSource.includes('const threshold = press.pointerType === "touch" ? 
 assert(pluginSource.includes("this.canvas.posFromEvt(event)"), "expanded stack drag-out must convert pointer endpoints through native Canvas world coordinates");
 assert(pluginSource.includes("this.commitPreviewDrag(press, next)"), "expanded stack cards must commit a real Canvas drag-out after the threshold");
 assert(pluginSource.includes("normalizationKind: press.kind"), "drag-out must restore image and text normalization through one typed path");
-assert(pluginSource.includes("node.startEditing()"), "expanded text cards must enter the verified native Canvas editor directly");
+assert(pluginSource.includes("handlePreviewCardClick(press)") && pluginSource.includes("this.openNodeFocus(press.member.node"), "expanded folder and stack cards must present through the same overlay as F");
+assert(pluginSource.includes("resolvePresentContent(") && pluginSource.includes("presentResourcePath("), "hidden folder images and gifs must resolve from vault paths instead of unhydrated img nodes");
+assert(pluginSource.includes("playPresentStep(") && pluginSource.includes("is-step-next"), "folder present paging must use a directional slide-in animation");
+assert(pluginSource.includes("if (this.imageFocus) return") && pluginSource.includes("if (this.previewClusterId) this.collapsePreview()"), "canvas resize must not collapse folder present");
+assert(!pluginSource.includes("node.startEditing()"), "expanded text cards must present instead of entering native edit");
 assert(!pluginSource.includes("node.nodeEl.dispatchEvent") && !pluginSource.includes("node.nodeEl.click()"), "Canvas text editing must not depend on synthetic pointer or click fallbacks");
 assert(styleSource.includes(".jam-deck-canvas-stack-image-focus-media > img"), "expanded image cards must provide a dedicated viewport preview");
-assert(styleSource.includes("width: 90%") && styleSource.includes("height: 90%") && styleSource.includes("max-height: 100%"), "image focus preview must remain bounded to the viewport");
+assert(styleSource.includes(".jam-deck-canvas-stack-image-focus {\n  position: absolute;\n  z-index: 90;") && styleSource.includes("padding: 48px"), "present overlay must cover the workbench and keep a viewport inset");
+assert(styleSource.includes("max-width: 100%") && styleSource.includes("max-height: 100%"), "image focus preview must remain bounded to the padded viewport");
 assert(styleSource.includes(".jam-deck-canvas-stack-drag-portal"), "expanded stack drag-out must use a DOM-only elevated portal");
-assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX = 16"), "expanded Canvas text must use one fixed screen-space font target");
+assert(pluginSource.includes("jamDeckCanvasStackPreviewLogicalSize(") && pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_HEIGHT_RATIO"), "expanded text cards must use a balanced paper size instead of the tiny Canvas node box");
 assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX") && pluginSource.includes('"--jd-stack-text-font-size"') && pluginSource.includes("`${JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX}px`"), "text preview font must be fixed at the screen target because the card rests at its real arranged layout");
 assert(pluginSource.includes("JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX") && pluginSource.includes("--jd-stack-text-padding"), "text preview padding must remain fixed in screen space");
 assert(styleSource.includes("font-size: var(--jd-stack-text-font-size, 16px) !important"), "cloned Canvas text descendants must not retain native zoom-driven font sizes");
-assert(styleSource.includes("--jd-stack-text-font-size: 16px"), "dragged-out text previews must return to the fixed screen font after the card transform is removed");
+assert(styleSource.includes("--jd-stack-text-font-size: 12px"), "dragged-out text previews must return to the fixed screen font after the card transform is removed");
 assert(styleSource.includes("border-radius: 0") && styleSource.includes(".jam-deck-canvas-stack-preview-card {"), "expanded stack cards must not impose a shared rounded container");
 assert(styleSource.includes(".markdown-preview-sizer") && styleSource.includes("max-width: none !important"), "expanded text must remove Obsidian's centered readable-line width");
 assert(styleSource.includes("padding: var(--jd-stack-text-padding, 16px) !important"), "expanded text must use one fixed screen-space inset");
@@ -291,6 +333,19 @@ assert.deepStrictEqual(
   { image: null, text: null },
   "Canvas AI must stay unavailable for a real multi-selection",
 );
+assert(JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: (name) => name === "aria-label" ? "聚焦" : "",
+  classList: { contains: () => false },
+}), "the native Canvas focus button must be recognized by its Chinese label");
+assert(JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: () => "",
+  classList: { contains: () => false },
+  querySelector: () => ({ getAttribute: (name) => name === "class" ? "svg lucide lucide-scan" : "" }),
+}), "the native Canvas focus button must be recognized by the scan icon");
+assert(!JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: (name) => name === "aria-label" ? "将选中节点发送给 AI" : "",
+  classList: { contains: (name) => name === "jam-deck-canvas-ai-toolbar" },
+}), "Jam Deck toolbar actions must not be treated as the native focus button");
 const selectedLinkNode = { getData: () => ({ type: "link", url: "https://miro.com/board" }) };
 assert.deepStrictEqual(
   JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedLinkNode]) }),
@@ -836,7 +891,7 @@ async function testCanvasNativeConflictLifecycle() {
     linkNavigationBridge: { destroy() { ownerCalls.push("link-listener"); } },
     folderController: { destroy() { ownerCalls.push("folder-listener"); } },
     imageStackController: { destroy() { ownerCalls.push("stack-listener"); } },
-    imageSearchController: { destroy() { ownerCalls.push("search-listener"); } },
+    selectionToolbarController: { destroy() { ownerCalls.push("selection-toolbar-listener"); } },
     inkOverlay: { async destroy() { ownerCalls.push("ink-listener"); } },
     returnEpoch: 0,
     returnParked: false,
@@ -845,7 +900,7 @@ async function testCanvasNativeConflictLifecycle() {
   await adapter.suspendForNativeConflict(entry.widgetId);
   await adapter.suspendForNativeConflict(entry.widgetId);
   assert.strictEqual(ownerCalls.filter((call) => call === "remove").length, 1, "one conflict burst must park the owned leaf once");
-  assert(ownerCalls.includes("drop-listener") && ownerCalls.includes("link-listener") && ownerCalls.includes("stack-listener"), "quiet conflict teardown must remove owned Canvas interaction listeners");
+  assert(ownerCalls.includes("drop-listener") && ownerCalls.includes("link-listener") && ownerCalls.includes("stack-listener") && ownerCalls.includes("selection-toolbar-listener"), "quiet conflict teardown must remove owned Canvas interaction listeners");
   assert(!adapter.entries.has(entry.widgetId), "suspended conflict entries must not retain a live Canvas view");
   assert(!ownerCalls.includes("save") && !ownerCalls.includes("close"), "conflict suspension must never save/close the owned Canvas view");
   assert.strictEqual(ownerCalls.filter((call) => call === "unload").length, 1, "quiet conflict teardown must unload only the owned leaf");
@@ -996,38 +1051,6 @@ async function testCanvasAsyncTeardown() {
   assert.strictEqual(requestSaveCalls, 0, "suspending a pending drop must prevent requestSave after abort");
   assert.strictEqual(saveImmediatelyCalls, 0, "suspending a pending drop must prevent saveImmediately after abort");
 
-  let releaseSearch;
-  const searchGate = new Promise((resolve) => { releaseSearch = resolve; });
-  let searchCreateCalls = 0;
-  const searchCanvas = {
-    createFileNode() { searchCreateCalls++; return { id: "search-node" }; },
-    requestSave() { requestSaveCalls++; },
-    nodes: { values: () => [] },
-  };
-  const sourceFile = { path: "source.png", name: "source.png", extension: "png" };
-  const app = {
-    vault: {
-      getAbstractFileByPath: () => sourceFile,
-      async readBinary() { await searchGate; return new Uint8Array([1, 2, 3]); },
-    },
-  };
-  const searchEntry = {
-    closing: false,
-    nativeConflictSuspended: false,
-    leaf: { view: { canvas: searchCanvas }, containerEl: null },
-    ownerDocument: {},
-  };
-  const searchRuntime = { deckView: { app } };
-  const search = new JamDeckPlugin.CanvasImageSearchController(searchRuntime, searchEntry);
-  const searchNode = { getData: () => ({ file: sourceFile.path, x: 0, y: 0, width: 100, height: 100 }) };
-  const searchPromise = search.performSearch(searchNode);
-  await Promise.resolve();
-  const searchDestroy = search.destroy();
-  releaseSearch();
-  await searchDestroy;
-  await searchPromise;
-  assert.strictEqual(searchCreateCalls, 0, "destroyed Eagle search must not insert a late Canvas node");
-  assert.strictEqual(search.destroyed, true, "image search destroy must stay terminal after async abort");
 }
 
 {
@@ -1423,10 +1446,10 @@ assert.strictEqual(folderGeometry.gridLayout([], folderBounds), null, "empty fol
 // Static controller contracts protect the Canvas lifecycle and interaction
 // path even when Obsidian's private Canvas DOM is unavailable in CI.
 const folderControllerSourceStart = pluginSource.indexOf("class CanvasFolderController");
-const folderControllerSourceEnd = pluginSource.indexOf("class CanvasImageSearchController", folderControllerSourceStart);
+const folderControllerSourceEnd = pluginSource.indexOf("class CanvasSelectionToolbarController", folderControllerSourceStart);
 const stackControllerSourceStart = pluginSource.indexOf("class CanvasImageStackController");
 const stackControllerSource = pluginSource.slice(stackControllerSourceStart, folderControllerSourceStart);
-const stackShowPreviewSource = stackControllerSource.slice(stackControllerSource.indexOf("showPreview(cluster)"), stackControllerSource.indexOf("buildPreviewVisuals(cluster"));
+const stackShowPreviewSource = stackControllerSource.slice(stackControllerSource.indexOf("showPreview(cluster) {"), stackControllerSource.indexOf("buildPreviewVisuals(cluster, rootRect) {"));
 assert(folderControllerSourceStart >= 0 && folderControllerSourceEnd > folderControllerSourceStart, "Canvas folder controller must remain a standalone runtime class");
 const folderControllerSource = pluginSource.slice(folderControllerSourceStart, folderControllerSourceEnd);
 for (const className of [
@@ -1997,7 +2020,7 @@ assert(folderControllerSource.includes("folderPreviewSourceRects(group)") && fol
 assert(styleSource.includes("max-height: calc(100% - 28px)") && styleSource.includes("min-height: 0"), "folder front must preserve a thumbnail reveal at compact heights");
 assert(folderControllerSource.includes("jam-deck-canvas-folder-backboard-svg") && folderControllerSource.includes('backboardSvg.setAttribute("viewBox", "0 0 240 181.79")') && folderControllerSource.includes('backboardPath.setAttribute("fill", "currentColor")'), "folder backboard must render as an inline Figma SVG instead of a fallible CSS resource URL");
 assert(!styleSource.includes("background-color: var(--jd-folder-backboard-color)"), "folder backboard must not paint a rectangular CSS fill behind the SVG alpha shape");
-assert(!styleSource.includes("mask-image") && !styleSource.includes("jam-deck-canvas-folder::before"), "folder backboard must not regress to a CSS mask pseudo-layer");
+assert(!styleSource.includes(".jam-deck-canvas-folder::before") && !styleSource.includes("jam-deck-canvas-folder-mask"), "folder backboard must not regress to a CSS mask pseudo-layer");
 assert(styleSource.includes("top: -5.193333%") && styleSource.includes("left: -10%") && styleSource.includes("width: 120%") && styleSource.includes("height: 121.193333%"), "folder backboard inline SVG must preserve the exported 240 x 181.79 overflow around the 200 x 150 shell");
 assert(!styleSource.includes("jam-deck-canvas-folder-mask") && !styleSource.includes("--jd-folder-front-mask"), "folder styling must not retain a standalone mask layer");
 for (const selector of [
@@ -2179,8 +2202,9 @@ assert(folderControllerSource.includes("JAM_DECK_NATIVE_GROUP_BASE_HEIGHT"), "na
 assert(folderControllerSource.includes('data.type === "group"') && !folderControllerSource.includes('nodeType === "group"'), "native group lookup must match by id + serialized type because 1.13 minifies nodeType");
 assert(folderControllerSource.includes("nativeExpandTargets") === false && folderControllerSource.includes("expandNativeFolder") === false && folderControllerSource.includes("collapseNativeFolder") === false, "native folders must not un-bury real members; the preview is the only expand path");
 assert(folderControllerSource.includes("hiddenEdges") && folderControllerSource.includes("edgeChanges"), "native folders must park member edges into the payload instead of leaving phantom connectors");
-assert(folderControllerSource.includes("nativeFolderShellBounds(group)") && folderControllerSource.includes("findDropTarget(source, groups)"), "native drop targeting must judge collapsed folders against the visible shell bounds");
-assert(folderControllerSource.includes("centerInside") && folderControllerSource.includes("rect.width / 2"), "collapsed folder drop must also hit when the dragged centre lands inside the shell (wide/short images cap at 0.5 area ratio)");
+assert(folderControllerSource.includes("nativeFolderShellBounds(group)") && folderControllerSource.includes("findDropTarget(source, groups, pointer)"), "native drop targeting must judge collapsed folders against the visible shell bounds");
+assert(folderControllerSource.includes("folderShellPointerHit") && folderControllerSource.includes("jamDeckCanvasFolderShellDropRatio"), "collapsed folder drop must hit from pointer-on-shell or folder-centre-under-image, not area ratio alone");
+assert(pluginSource.includes("shellCenterInside") && pluginSource.includes("rect.width / 2"), "collapsed folder drop must also hit when the folder centre lands under a larger image");
 assert(folderControllerSource.includes("(anchorStacked.width - width) / 2"), "joining a collapsed folder must fold the member onto the anchor slot while preserving its own width/height (no anchor-size crop)");
 assert(styleSource.includes("object-fit: contain !important") && !styleSource.includes("object-fit: cover !important"), "folder shell thumbnails must show the full frame (contain) instead of cropping to the slot aspect (cover)");
 assert(styleSource.includes(":has(.jam-deck-canvas-folder:is(:hover, :focus-within)) .canvas-node-connection-point"), "hovering a folder shell must suppress every canvas connection point (folded members keep oversized rects at the anchor)");
@@ -2322,17 +2346,6 @@ assert(fs.existsSync(path.join(projectRoot, "assets", "jam-deck-folder-shell.svg
 assert(deploySource.includes("assets/jam-deck-folder-shell.svg") && deploySource.includes("$assetFiles"), "deploy must stage the folder shell asset alongside the plugin files");
 assert(deploySource.includes("Protected data.json") && deploySource.includes("Get-DataState"), "asset deployment must retain data.json protection checks");
 
-const eagleSearch = JamDeckPlugin.eagleImageSearchHelpers;
-assert(eagleSearch && typeof eagleSearch.resultGridLayout === "function", "Eagle search must export its result grid layout");
-const eaglePayload = { results: Array.from({ length: 15 }, (_value, index) => ({ id: `eagle-${index}`, score: index })) };
-assert.strictEqual(eagleSearch.topResults(eaglePayload, 20).length, 10, "Eagle search results must remain capped at ten even when a larger limit is requested");
-const eagleGrid = eagleSearch.resultGridLayout({ x: 10, y: 20, width: 100, height: 80 }, Array.from({ length: 15 }, () => ({})), 40);
-assert.strictEqual(eagleGrid.length, 10, "Eagle search grid must create at most ten positions");
-assert.deepStrictEqual(eagleGrid[0], { x: 10, y: 140, width: 100, height: 80 }, "Eagle grid must begin directly below the source image");
-assert.deepStrictEqual(eagleGrid[4], { x: 570, y: 140, width: 100, height: 80 }, "Eagle grid must use five columns");
-assert.deepStrictEqual(eagleGrid[5], { x: 10, y: 260, width: 100, height: 80 }, "Eagle grid must wrap to a second row");
-assert.deepStrictEqual(eagleGrid[9], { x: 570, y: 260, width: 100, height: 80 }, "Eagle grid must end at the fifth column of the second row");
-assert(eagleGrid.every((item) => item.width === 100 && item.height === 80), "Eagle grid results must reuse the source size");
 const stackA = { id: "a", x: 0, y: 0, width: 100, height: 100 };
 const stackHalf = { id: "half", x: 50, y: 0, width: 100, height: 100 };
 const stackOver = { id: "over", x: 49, y: 0, width: 100, height: 100 };
@@ -2342,6 +2355,18 @@ assert.strictEqual(stackGeometry.overlapRatio(stackA, stackHalf), 0.5, "exactly 
 assert(stackGeometry.overlapRatio(stackA, stackOver) > 0.5, "overlap above fifty percent must create a stack edge");
 assert.strictEqual(stackGeometry.overlapRatio(stackA, stackContained), 1, "a contained small image must count as fully overlapped");
 assert.strictEqual(stackGeometry.overlapRatio(stackA, { id: "bad", x: 0, y: 0, width: 0, height: 10 }), 0, "invalid zero-area images must not stack");
+const folderShell = { x: 0, y: 0, width: 200, height: 180 };
+const largeCoveringImage = { x: 0, y: 0, width: 500, height: 400 };
+assert.strictEqual(stackGeometry.overlapRatio(largeCoveringImage, folderShell), 1, "a large image that fully covers the shell still has full area overlap");
+assert.strictEqual(folderGeometry.shellDropRatio(largeCoveringImage, folderShell), 1, "a large image covering the folder must join even when its own centre sits outside the shell");
+const largeGrazingImage = { x: 50, y: -160, width: 400, height: 280 };
+assert(stackGeometry.overlapRatio(largeGrazingImage, folderShell) <= 0.5, "a large image that only grazes the shell stays at or below the area threshold");
+assert.strictEqual(folderGeometry.shellDropRatio(largeGrazingImage, folderShell), 1, "grazing a folder still counts as a drop when the shell centre sits under the image");
+const missImage = { x: 400, y: 400, width: 400, height: 350 };
+assert.strictEqual(folderGeometry.shellDropRatio(missImage, folderShell), 0, "images that neither cover nor overlap the shell must not join");
+assert.strictEqual(folderGeometry.shellDropRatio({ x: 10, y: 10, width: 40, height: 40 }, folderShell), 1, "a small image whose centre lands inside the shell must still join");
+assert(folderGeometry.clientPointInRect(100, 90, { left: 0, top: 0, width: 200, height: 180 }), "pointer-on-shell must count as an icon drop");
+assert(!folderGeometry.clientPointInRect(260, 90, { left: 0, top: 0, width: 200, height: 180 }), "a pointer outside the shell must not count as an icon drop");
 assert.strictEqual(stackGeometry.kind({ type: "text", text: "**Markdown-like text**" }), "text", "Canvas text must remain a text stack member");
 assert.strictEqual(stackGeometry.kind({ type: "file", file: "Notes/Idea.md" }), "markdown-note", "Markdown file nodes must join mixed stacks");
 assert.strictEqual(stackGeometry.kind({ type: "file", file: "Assets/Hero.webp" }), "image", "WebP images must join mixed stacks");
@@ -2457,6 +2482,38 @@ for (const count of [1, 2, 3, 5, 8, 10, 16]) {
     : index % 3 === 1 ? { width: 140, height: 220 } : { width: 210, height: 210 });
   assertPreviewLayout(mixed, count % 2 ? { width: 1180, height: 760 } : { width: 560, height: 780 }, `mixed-${count}`);
 }
+const balancedPaper = stackGeometry.previewLogicalSize("text", 120, 64, [{ width: 800, height: 450 }, { width: 800, height: 450 }]);
+assert(Math.abs(balancedPaper.height - 405) < 0.01, "text paper height must track 90% of sibling image height");
+assert(balancedPaper.width > 120 && balancedPaper.width < 400, "text paper width must sit between a tiny note and a widescreen still");
+assert(balancedPaper.height > 64, "tiny Canvas text nodes must enlarge in the expanded preview");
+const imageKeepsNative = stackGeometry.previewLogicalSize("image", 800, 450, [{ width: 800, height: 450 }]);
+assert.deepStrictEqual(imageKeepsNative, { width: 800, height: 450 }, "image preview size must keep the Canvas aspect");
+const largeNoteShrinks = stackGeometry.previewLogicalSize("text", 500, 520, [{ width: 800, height: 450 }]);
+assert(Math.abs(largeNoteShrinks.height - 405) < 0.01 && largeNoteShrinks.width < 400, "oversized text nodes must shrink to the balanced paper");
+const textOnlyPaper = stackGeometry.previewLogicalSize("text", 140, 80, []);
+assert.deepStrictEqual(textOnlyPaper, { width: 220, height: 260 }, "text-only folders must use the readable paper floor");
+const textOnlyLargeShrinks = stackGeometry.previewLogicalSize("text", 500, 520, []);
+assert.deepStrictEqual(textOnlyLargeShrinks, { width: 220, height: 260 }, "text-only oversized notes must shrink to the same paper floor");
+const rightHop = stackGeometry.presentEdgeHop({ fromNode: "a", fromSide: "right", toNode: "b", toSide: "left" }, "a");
+assert.deepStrictEqual({ direction: rightHop.direction, neighborId: rightHop.neighborId }, { direction: "right", neighborId: "b" }, "A connected right to B must hop right from A");
+const backHop = stackGeometry.presentEdgeHop({ fromNode: "a", fromSide: "right", toNode: "b", toSide: "left" }, "b");
+assert.deepStrictEqual({ direction: backHop.direction, neighborId: backHop.neighborId }, { direction: "left", neighborId: "a" }, "arriving on B's left side must hop left back to A");
+const downHop = stackGeometry.presentEdgeHop({ fromNode: "a", fromSide: "bottom", toNode: "c", toSide: "top" }, "a");
+assert.strictEqual(downHop.direction, "bottom", "a downward edge must hop with the down arrow");
+const upBack = stackGeometry.presentEdgeHop({ fromNode: "a", fromSide: "bottom", toNode: "c", toSide: "top" }, "c");
+assert.strictEqual(upBack.direction, "top", "arriving on C's top side must hop up back to A");
+const spatialRects = {
+  a: { x: 0, y: 0, width: 100, height: 80 },
+  b: { x: 240, y: 10, width: 100, height: 80 },
+  near: { x: 140, y: 0, width: 100, height: 80 },
+  far: { x: 600, y: 0, width: 100, height: 80 },
+};
+const spatialHop = stackGeometry.presentEdgeHop({ fromNode: "a", toNode: "b" }, "a", (id) => spatialRects[id]);
+assert.strictEqual(spatialHop.direction, "right", "edges without sides must fall back to node-center direction");
+assert.strictEqual(stackGeometry.presentEdgeHop({ fromNode: "a", toNode: "b" }, "z"), null, "unrelated nodes must not hop");
+const nearHop = stackGeometry.presentEdgeHop({ fromNode: "a", fromSide: "right", toNode: "near" }, "a", (id) => spatialRects[id]);
+const farHop = stackGeometry.presentEdgeHop({ fromNode: "a", fromSide: "right", toNode: "far" }, "a", (id) => spatialRects[id]);
+assert(nearHop.distance < farHop.distance, "same-direction hops must prefer the nearer neighbor");
 const focusRect = { left: 300, top: 200, right: 700, bottom: 500 };
 const viewportRect = { width: 1000, height: 700 };
 const centerBystander = { left: 440, top: 300, right: 560, bottom: 400 };
