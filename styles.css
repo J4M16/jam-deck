@@ -958,6 +958,11 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 3px;
 }
+.jam-deck-canvas-stack-preview-card:has(> .jam-deck-canvas-stack-preview-surface.is-image),
+.jam-deck-canvas-stack-preview-card:has(> .jam-deck-canvas-stack-preview-surface.is-text),
+.jam-deck-canvas-stack-preview-card:has(> .jam-deck-canvas-stack-preview-surface.is-markdown-note) {
+  border-radius: var(--jd-canvas-image-radius);
+}
 .jam-deck-canvas-stack-drag-portal {
   position: absolute;
   z-index: 8;
@@ -967,57 +972,245 @@
 
 .jam-deck-canvas-stack-image-focus {
   position: absolute;
-  z-index: 20;
+  z-index: 90;
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 5%;
+  padding: 48px;
+  box-sizing: border-box;
   background: rgb(12 14 18 / 0.72);
   opacity: 0;
   pointer-events: auto;
   transition: opacity 180ms cubic-bezier(.22, 1, .36, 1);
 }
+.jam-deck-root > .jam-deck-canvas-stack-image-focus {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+}
+.jam-deck-root.is-jam-deck-presenting .jam-deck-ai-fab,
+.jam-deck-root.is-jam-deck-presenting .jam-deck-ai-chat {
+  visibility: hidden;
+  pointer-events: none;
+}
 .jam-deck-canvas-stack-image-focus.is-visible { opacity: 1; }
 .jam-deck-canvas-stack-image-focus-media {
   display: grid;
   place-items: center;
-  width: 90%;
-  height: 90%;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   pointer-events: auto;
 }
-.jam-deck-canvas-stack-image-focus-media > img {
+.jam-deck-canvas-stack-image-focus-media > img,
+.jam-deck-canvas-stack-image-focus-media.is-video > video {
   display: block;
   max-width: 100%;
   max-height: 100%;
   width: auto !important;
   height: auto !important;
   object-fit: contain;
+  border: 0;
+  outline: none !important;
   border-radius: var(--jd-canvas-image-radius);
   box-shadow: 0 28px 80px -24px rgb(0 0 0 / 0.68);
+}
+.jam-deck-canvas-stack-image-focus-media.is-video > video {
+  background: #111;
+}
+.jam-deck-canvas-stack-image-focus-media.is-video > video:focus,
+.jam-deck-canvas-stack-image-focus-media.is-video > video:focus-visible {
+  outline: none !important;
+  box-shadow: 0 28px 80px -24px rgb(0 0 0 / 0.68);
+}
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-panel,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-enclosure,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-timeline,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-timeline:focus,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-timeline:focus-visible,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-volume-slider,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-play-button,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-media-controls-mute-button,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-slider-thumb,
+.jam-deck-canvas-stack-image-focus-media.is-video > video::-webkit-slider-runnable-track {
+  outline: none !important;
+  box-shadow: none !important;
 }
 .jam-deck-canvas-stack-image-focus-media.is-node {
-  width: auto;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  max-width: min(42rem, 100%);
   height: auto;
-  max-width: 90%;
-  max-height: 90%;
-  overflow: auto;
-  background: var(--background-primary);
-  border-radius: var(--jd-canvas-image-radius);
-  box-shadow: 0 28px 80px -24px rgb(0 0 0 / 0.68);
+  max-height: 100%;
+  padding: 32px 26px 32px 36px;
+  overflow: hidden;
+  isolation: isolate;
+  box-sizing: border-box;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.22), transparent 38%),
+    var(--jd-paper, var(--background-primary));
+  color: var(--jd-ink, var(--text-normal));
+  border: 1px solid var(--jd-paper-edge, transparent);
+  border-radius: var(--jd-radius-md, 14px);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    var(--jd-shadow-lift, 0 28px 80px -24px rgb(0 0 0 / 0.68));
 }
-.jam-deck-canvas-stack-image-focus-close {
+.jam-deck-canvas-stack-image-focus-media.is-node::before {
+  content: "";
   position: absolute;
-  top: 18px;
-  right: 18px;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.28;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.42 0 0 0 0 0.4 0 0 0 0 0.36 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+}
+.theme-dark .jam-deck-canvas-stack-image-focus-media.is-node::before {
+  mix-blend-mode: overlay;
+  opacity: 0.22;
+}
+.jam-deck-present-note-body {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  max-width: 42rem;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding-right: 10px;
+  padding-bottom: 72px;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 calc(100% - 68px), transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 calc(100% - 68px), transparent 100%);
+}
+.jam-deck-present-note-body .canvas-node-content,
+.jam-deck-present-note-body .canvas-node-content * {
+  color: inherit !important;
+  background: transparent !important;
+  font-size: 16px !important;
+  line-height: 1.65 !important;
+}
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav {
+  position: absolute;
+  z-index: 3;
   width: 40px;
   height: 40px;
+  margin: 0;
+  padding: 0;
   display: grid;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 0.14);
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: 999px;
-  color: #fff;
-  background: rgb(20 22 26 / 0.72);
-  box-shadow: 0 10px 30px -14px rgb(0 0 0 / 0.58);
+  color: #fff !important;
+  background: rgb(255 255 255 / 0.15) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  opacity: 1;
+  outline: none;
+  transition: background-color 120ms cubic-bezier(.22, 1, .36, 1), color 120ms cubic-bezier(.22, 1, .36, 1);
+}
+.jam-deck-canvas-stack-image-focus-title {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  pointer-events: none;
+}
+.jam-deck-canvas-stack-image-focus-close {
+  top: 18px;
+  right: 18px;
+}
+.jam-deck-canvas-stack-image-focus-nav.is-prev,
+.jam-deck-canvas-stack-image-focus-nav.is-next {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.jam-deck-canvas-stack-image-focus-nav.is-prev { left: 18px; }
+.jam-deck-canvas-stack-image-focus-nav.is-next { right: 18px; }
+.jam-deck-canvas-stack-image-focus-nav.is-up,
+.jam-deck-canvas-stack-image-focus-nav.is-down {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.jam-deck-canvas-stack-image-focus-nav.is-up { top: 18px; }
+.jam-deck-canvas-stack-image-focus-nav.is-down {
+  top: auto;
+  bottom: 18px;
+}
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:hover,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:hover {
+  background: rgb(255 255 255 / 0.80) !important;
+  color: rgb(20 22 26) !important;
+}
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:active,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:active,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:hover:active,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:hover:active {
+  background: rgb(255 255 255 / 1) !important;
+  color: rgb(20 22 26) !important;
+}
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:focus,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:focus-visible,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:focus,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:focus-visible {
+  outline: none;
+  background: rgb(255 255 255 / 0.15) !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.28) !important;
+}
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:hover:focus,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-close:hover:focus-visible,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:hover:focus,
+.jam-deck-root button.jam-deck-canvas-stack-image-focus-nav:hover:focus-visible {
+  background: rgb(255 255 255 / 0.80) !important;
+  color: rgb(20 22 26) !important;
+}
+.jam-deck-canvas-stack-image-focus-media.is-step-next {
+  opacity: 0;
+  transform: translate3d(36px, 0, 0);
+}
+.jam-deck-canvas-stack-image-focus-media.is-step-prev {
+  opacity: 0;
+  transform: translate3d(-36px, 0, 0);
+}
+.jam-deck-canvas-stack-image-focus-media.is-step-down {
+  opacity: 0;
+  transform: translate3d(0, 36px, 0);
+}
+.jam-deck-canvas-stack-image-focus-media.is-step-up {
+  opacity: 0;
+  transform: translate3d(0, -36px, 0);
+}
+.jam-deck-canvas-stack-image-focus-media.is-step-in {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition: transform 180ms cubic-bezier(.22, 1, .36, 1), opacity 140ms cubic-bezier(.22, 1, .36, 1);
+}
+.jam-deck-root.jam-deck-no-motion .jam-deck-canvas-stack-image-focus-media.is-step-next,
+.jam-deck-root.jam-deck-no-motion .jam-deck-canvas-stack-image-focus-media.is-step-prev,
+.jam-deck-root.jam-deck-no-motion .jam-deck-canvas-stack-image-focus-media.is-step-up,
+.jam-deck-root.jam-deck-no-motion .jam-deck-canvas-stack-image-focus-media.is-step-down,
+.jam-deck-root.jam-deck-no-motion .jam-deck-canvas-stack-image-focus-media.is-step-in {
+  opacity: 1;
+  transform: none;
+  transition: none;
 }
 .theme-dark .jam-deck-canvas-stack-preview-card {
   box-shadow:
@@ -1106,7 +1299,7 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.46),
     0 8px 22px -10px rgb(15 23 42 / 0.24),
     0 28px 72px -22px rgb(15 23 42 / 0.38);
-  --jd-stack-text-font-size: 16px;
+  --jd-stack-text-font-size: 12px;
   --jd-stack-text-padding: 16px;
 }
 .jam-deck-canvas-stack-preview-card > .jam-deck-canvas-stack-preview-surface.is-placeholder {

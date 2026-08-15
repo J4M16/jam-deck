@@ -1,10 +1,45 @@
 ﻿# Jam Deck 开发日志
 
-## 2026-08-14 — 0.31.2 全屏预览替换原生 Canvas 聚焦
+## 2026-08-15 — 0.31.2 合入 master 并发 GitHub Release
 
-- Jam 反馈：原生聚焦只是缩放到选区，鸡肋；希望点该按钮时放大到 Canvas 全屏，遮罩和关闭按钮与文件夹点开后点大图一致；绑定 `F`，且只有选中元件出现悬浮工具栏时才有效。
-- 实现：识别原生聚焦按钮（`聚焦` / Focus / `lucide-scan`）并在捕获阶段拦截 click，改为 `openNodeFocus`；图片仍走既有 90% 视口预览，其他节点克隆内容。`F` 挂在 selection toolbar 的 window capture，条件是工具栏可见、已单选、非输入框、没有已打开的预览。不 patch `zoomToSelection`，避免破坏新节点放置后的视野跟随。预览层拦截滚轮/右键，避免穿透到画布缩放。
-- 验证：标准。新增按钮识别、F 热键与不 patch zoomToSelection 断言；`npm run verify`。
+- 当前工作区在 `develop`。将未提交的放映收尾提交后合入 `master`，打 tag `v0.31.2` 并发布 GitHub Release（含 0.31.0–0.31.2，上次发版为 v0.30.9）。
+- 验证：快速。`npm run verify` 全绿后再 merge / tag / release。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-15 — 0.31.2 放映翻页改为位移渐隐
+
+- Jam 反馈：放映衔接是缩放+渐隐，希望改成符合运动方向的位移+渐隐，不要缩放。
+- 实现：`is-step-*` 起始帧改为轴向 36px 平移、opacity 0，去掉 `scale(0.92)` 与左右的 6px 斜向偏移。时长仍 180ms / 140ms。
+- 验证：快速。`npm run verify`。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-15 — 0.31.2 放映底部箭头与 tooltip 重叠
+
+- Jam 反馈：向下箭头和「视频预览」黑底提示叠在一起。
+- 原因：全屏放映层 `aria-label` 会被 Obsidian 当成 hover/focus tooltip，贴在遮罩底部，正好盖住 `is-down` 箭头。
+- 修复：遮罩改用隐藏标题 + `aria-labelledby`；底部箭头自身 tooltip 改向上弹出。
+- 验证：快速。`npm run verify`。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-15 — 0.31.2 连线放映箭头
+
+- Jam 反馈：连线翻页已跑通，但连线模式预览也需要箭头按钮提示和操作。
+- 实现：`syncPresentNav` 按当前节点可用方向重建圆形箭头。文件夹 playlist 仍显示左右；连线 hop 只显示有邻居的方向（含上下）。点击走 `onPresentArrow`，与方向键同一路径。翻页后按新节点邻居更新箭头。无连线且非文件夹多成员时仍不出现箭头。
+- 验证：快速。源码合同覆盖 `syncPresentNav` / 上下 nav CSS；`npm run verify`。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-14 — 0.31.2 放映沿连线翻页
+
+- Jam 需求：两个独立节点连线后，F 放映也能用方向键翻页。A ➡️ B 时放映 A 按右键到 B；上下连线对应上下箭头。
+- 实现：`jamDeckCanvasPresentEdgeHop` 按 `fromSide`/`toSide` 决定 hop 方向，缺 side 时用节点中心向量。`presentNeighbor` 在同方向多条连线中取距离最近且可放映的邻居。`onPresentArrow`：文件夹 playlist 多于一张时左右仍走成员顺序，其余方向（含独立节点）走连线。上下翻页补 `is-step-up`/`is-step-down`。无邻居吞键不关放映；单张 F 仍不显示屏幕箭头。
+- 验证：快速。连线 hop 几何、回跳 side、空间兜底、最近邻距离与上下 step CSS；`npm run verify`。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-14 — 0.31.2 Canvas 放映
+
+- Jam 反馈：原生聚焦鸡肋，改为全屏放映；随后补充 F 再按关闭、文本边距、视频空格。实机又发现：预览贴 Canvas 底边、AI 按钮不被蒙版盖住、文本/笔记放大后空白、视频控件出现橘色焦点框。
+- 实现：放映层挂 `.jam-deck-root`。文本读 `data.text`，纸面加 SVG 颗粒，溢出用底部 mask 渐隐。视频 `F` 在 window/document/video 捕获阶段关闭并禁止原生全屏。纸面 padding 改为 `32px 26px 32px 36px`（底留白 + 滚动条右移 10px），正文 `padding-right: 10px`、`padding-bottom: 72px`，渐隐起点 `calc(100% - 68px)`。点击原生进度条后立刻把焦点拉回放映层，去掉 timeline 橙色细框，方向键不再 seek。文件夹/堆叠展开单击全部走 `openNodeFocus`；图片/GIF 用 Vault `getResourcePath`，避免隐藏成员没有原生 img。展开图卡片圆角复用 `--jd-canvas-image-radius`。多成员放映左右箭头 + `stepPresent`，翻页 `playPresentStep` 180ms 弹出。放映中 ResizeObserver 不再 `collapsePreview`，避免点 GIF/翻页被收回收到 Canvas。关闭与翻页按钮白底 15/80/100，并用更高优先级压过 Obsidian 原生 button 实心底。展开文本/笔记卡用 `jamDeckCanvasStackPreviewLogicalSize`：有图时约图片高 90%、宽 42%，偏大的同样收到该纸面；文本卡圆角与图相同，字号 12px。
+- 验证：标准。覆盖放映拉通、Vault 路径、箭头翻页、弹出动画、resize 误关与按钮透明度；`npm run verify`。
 - 处理模型签名：Cursor Grok 4.6（主代理）
 
 ## 2026-08-14 — 0.31.1 大图拖不进文件夹

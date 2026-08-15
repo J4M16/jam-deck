@@ -2135,8 +2135,13 @@ const JAM_DECK_STACK_DETACH_THRESHOLD = 0.4;
 const JAM_DECK_STACK_SHRINK_DEAD_BAND = 0.95;
 const JAM_DECK_STACK_AMBIGUITY_MARGIN = 0.05;
 const JAM_DECK_STACK_NORMALIZATION_VERSION = 1;
-const JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX = 16;
+const JAM_DECK_STACK_TEXT_PREVIEW_FONT_PX = 12;
 const JAM_DECK_STACK_TEXT_PREVIEW_PADDING_PX = 16;
+const JAM_DECK_STACK_TEXT_PREVIEW_MIN_WIDTH = 220;
+const JAM_DECK_STACK_TEXT_PREVIEW_MIN_HEIGHT = 260;
+const JAM_DECK_STACK_TEXT_PREVIEW_HEIGHT_RATIO = 0.9;
+const JAM_DECK_STACK_TEXT_PREVIEW_WIDTH_FROM_IMAGE = 0.42;
+const JAM_DECK_STACK_TEXT_PREVIEW_ASPECT = 0.78;
 
 function jamDeckCanvasStackRect(value) {
   const source = value && value.rect ? value.rect : value;
@@ -2424,6 +2429,82 @@ function jamDeckCanvasStackSlotOffsets(count = 24, screenStep = 7, zoom = 1) {
     });
   }
   return slots;
+}
+
+function jamDeckMedianNumber(values) {
+  const sorted = (Array.isArray(values) ? values : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => left - right);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function jamDeckCanvasStackPreviewLogicalSize(kind, nativeWidth, nativeHeight, imageSizes) {
+  const width = Math.max(1, Number(nativeWidth) || 1);
+  const height = Math.max(1, Number(nativeHeight) || 1);
+  if (kind !== "text" && kind !== "markdown-note") return { width, height };
+  const images = Array.isArray(imageSizes) ? imageSizes : [];
+  const imageHeight = jamDeckMedianNumber(images.map((size) => size && size.height));
+  const imageWidth = jamDeckMedianNumber(images.map((size) => size && size.width));
+  if (!imageHeight || !imageWidth) {
+    return {
+      width: JAM_DECK_STACK_TEXT_PREVIEW_MIN_WIDTH,
+      height: JAM_DECK_STACK_TEXT_PREVIEW_MIN_HEIGHT,
+    };
+  }
+  const paperHeight = imageHeight * JAM_DECK_STACK_TEXT_PREVIEW_HEIGHT_RATIO;
+  const paperWidth = Math.min(
+    imageWidth * JAM_DECK_STACK_TEXT_PREVIEW_WIDTH_FROM_IMAGE,
+    paperHeight * JAM_DECK_STACK_TEXT_PREVIEW_ASPECT,
+  );
+  return {
+    width: Math.max(1, paperWidth),
+    height: Math.max(1, paperHeight),
+  };
+}
+
+function jamDeckCanvasEdgeSide(side) {
+  const value = String(side || "").toLowerCase();
+  if (value === "left" || value === "right" || value === "top" || value === "bottom") return value;
+  return "";
+}
+
+function jamDeckCanvasPresentSpatialDirection(fromRect, toRect) {
+  if (!fromRect || !toRect) return "";
+  const dx = (Number(toRect.x) + Number(toRect.width) / 2) - (Number(fromRect.x) + Number(fromRect.width) / 2);
+  const dy = (Number(toRect.y) + Number(toRect.height) / 2) - (Number(fromRect.y) + Number(fromRect.height) / 2);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return "";
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+  return dy >= 0 ? "bottom" : "top";
+}
+
+function jamDeckCanvasPresentEdgeHop(edge, nodeId, rectForId) {
+  const id = String(nodeId || "");
+  const from = String(edge && edge.fromNode || "");
+  const to = String(edge && edge.toNode || "");
+  if (!id || !from || !to || from === to) return null;
+  let neighborId = "";
+  let direction = "";
+  if (from === id) {
+    neighborId = to;
+    direction = jamDeckCanvasEdgeSide(edge.fromSide);
+  } else if (to === id) {
+    neighborId = from;
+    direction = jamDeckCanvasEdgeSide(edge.toSide);
+  } else return null;
+  const selfRect = typeof rectForId === "function" ? rectForId(id) : null;
+  const otherRect = typeof rectForId === "function" ? rectForId(neighborId) : null;
+  if (!direction) direction = jamDeckCanvasPresentSpatialDirection(selfRect, otherRect);
+  if (!direction) return null;
+  const distance = selfRect && otherRect
+    ? Math.hypot(
+      (Number(otherRect.x) + Number(otherRect.width) / 2) - (Number(selfRect.x) + Number(selfRect.width) / 2),
+      (Number(otherRect.y) + Number(otherRect.height) / 2) - (Number(selfRect.y) + Number(selfRect.height) / 2),
+    )
+    : 0;
+  return { direction, neighborId, distance };
 }
 
 function jamDeckCanvasStackScreenScale(item) {
@@ -2972,9 +3053,7 @@ class CanvasImageStackController {
     };
     const keydown = (event) => {
       if (this.imageFocus) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (event.key === "Escape") this.closeImageFocus();
+        this.onPresentKeydown(event);
         return;
       }
       if (!this.previewWrapper) return;
@@ -3008,6 +3087,7 @@ class CanvasImageStackController {
     const ResizeObserverCtor = this.ownerWindow.ResizeObserver;
     if (typeof ResizeObserverCtor === "function") {
       this.resizeObserver = new ResizeObserverCtor(() => {
+        if (this.imageFocus) return;
         if (this.previewClusterId) this.collapsePreview();
       });
       this.resizeObserver.observe(this.root);
@@ -3082,7 +3162,7 @@ class CanvasImageStackController {
     if (this.imageFocus && this.imageFocus.wrapper && this.imageFocus.wrapper.contains(event.target)) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!event.target.closest(".jam-deck-canvas-stack-image-focus-media")) this.closeImageFocus();
+      if (!this.isPresentChrome(event.target)) this.closeImageFocus();
       return;
     }
     if (this.previewWrapper && this.previewWrapper.contains(event.target)) {
@@ -3411,44 +3491,7 @@ class CanvasImageStackController {
 
   handlePreviewCardClick(press) {
     if (!press || !press.member) return;
-    if (press.kind === "image") {
-      this.openImageFocus(press.visual);
-      return;
-    }
-    const member = press.member;
-    this.collapsePreview(true);
-    if (press.kind === "text") {
-      this.ownerWindow.requestAnimationFrame(() => this.activateCanvasTextNode(member.node));
-      return;
-    }
-    if (press.kind === "markdown-note") {
-      const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
-      const file = app && app.vault && app.vault.getAbstractFileByPath(member.data.file);
-      if (file && app.workspace && typeof app.workspace.getLeaf === "function") {
-        const leaf = app.workspace.getLeaf("tab");
-        if (leaf && typeof leaf.openFile === "function") leaf.openFile(file, { active: true });
-      }
-    }
-  }
-
-  activateCanvasTextNode(node) {
-    if (!node || !node.nodeEl) return false;
-    try {
-      if (this.canvas.selection && typeof this.canvas.deselectAll === "function") this.canvas.deselectAll();
-      if (typeof this.canvas.selectOnly === "function") this.canvas.selectOnly(node);
-      else if (typeof this.canvas.select === "function") this.canvas.select(node);
-      if (typeof node.startEditing !== "function") {
-        new Notice("当前 Obsidian 版本无法自动进入文本编辑，请双击节点编辑");
-        return false;
-      }
-      node.startEditing();
-      const editable = node.nodeEl.querySelector("[contenteditable='true'], textarea");
-      if (editable && typeof editable.focus === "function") editable.focus();
-      return !!editable || node.nodeEl.matches(".is-editing") || node.nodeEl.hasClass("is-editing");
-    } catch (error) {
-      console.error("jam-deck Canvas text edit failed", error);
-      return false;
-    }
+    this.openNodeFocus(press.member.node, press.visual && press.visual.card);
   }
 
   openImageFocus(visual) {
@@ -3456,36 +3499,305 @@ class CanvasImageStackController {
     return this.openNodeFocus(node, visual && visual.card);
   }
 
-  openNodeFocus(node, origin = null) {
-    if (!node || this.imageFocus || !this.overlay || !this.entry || !this.entry.ownerDocument) return false;
-    const nodeEl = node.nodeEl;
-    if (!nodeEl) return false;
+  isPresentChrome(target) {
+    const el = target && target.nodeType === 3 ? target.parentElement : target;
+    return !!(el && typeof el.closest === "function" && el.closest(
+      ".jam-deck-canvas-stack-image-focus-media, .jam-deck-canvas-stack-image-focus-close, .jam-deck-canvas-stack-image-focus-nav"
+    ));
+  }
+
+  presentResourcePath(filePath) {
+    const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
+    const adapter = app && app.vault && app.vault.adapter;
+    const path = String(filePath || "").trim();
+    if (!path || !adapter || typeof adapter.getResourcePath !== "function") return "";
+    try { return String(adapter.getResourcePath(path) || ""); } catch (error) { return ""; }
+  }
+
+  presentablePreviewNodes() {
+    const nodes = [];
+    for (const visual of this.previewCards || []) {
+      const node = visual && visual.member && visual.member.node;
+      if (node && this.resolvePresentContent(node)) nodes.push(node);
+    }
+    return nodes;
+  }
+
+  resolvePresentContent(node) {
+    if (!node) return null;
     let data = null;
     try { data = typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-    if (data && data.type === "group") return false;
-    const image = nodeEl.querySelector(".canvas-node-content.media-embed > img");
-    const content = nodeEl.querySelector(".canvas-node-content");
-    if (!image && !content) return false;
-    const wrapper = this.entry.ownerDocument.createElement("div");
-    wrapper.className = "jam-deck-canvas-stack-image-focus";
-    wrapper.setAttribute("role", "dialog");
-    wrapper.setAttribute("aria-modal", "true");
-    wrapper.setAttribute("aria-label", image ? "图片预览" : "节点预览");
-    const media = this.entry.ownerDocument.createElement("div");
-    media.className = "jam-deck-canvas-stack-image-focus-media";
-    if (image) {
-      const focusedImage = image.cloneNode(true);
-      focusedImage.removeAttribute("id");
+    if (data && data.type === "group") return null;
+    const kind = jamDeckCanvasStackKind(data);
+    const nodeEl = node.nodeEl;
+    const imageEl = nodeEl && nodeEl.querySelector(".canvas-node-content.media-embed > img");
+    const videoEl = nodeEl && nodeEl.querySelector(".canvas-node-content.media-embed > video, .canvas-node-content video");
+    const imageSrc = (imageEl && (imageEl.currentSrc || imageEl.src))
+      || (kind === "image" ? this.presentResourcePath((node.file && node.file.path) || (data && data.file)) : "");
+    if (imageSrc) return { type: "image", src: imageSrc, data, label: "图片预览" };
+    if (videoEl) return { type: "video", videoEl, data, label: "视频预览" };
+    const content = nodeEl && nodeEl.querySelector(".canvas-node-content");
+    const liveText = String(
+      (data && data.type === "text" && data.text)
+      || (content && (content.innerText || content.textContent))
+      || "",
+    ).replace(/\s+$/g, "");
+    if (liveText || content || (data && data.type === "text") || kind === "markdown-note") {
+      return { type: "note", liveText, content, data, label: "笔记预览" };
+    }
+    return null;
+  }
+
+  fillPresentMedia(media, content) {
+    const doc = this.entry && this.entry.ownerDocument;
+    if (!media || !content || !doc) return null;
+    media.replaceChildren();
+    media.classList.remove("is-video", "is-node", "is-image");
+    if (content.type === "image") {
+      media.classList.add("is-image");
+      const focusedImage = doc.createElement("img");
+      focusedImage.src = content.src;
+      focusedImage.alt = "";
       focusedImage.setAttribute("draggable", "false");
       media.appendChild(focusedImage);
-    } else {
-      media.classList.add("is-node");
-      const clone = content.cloneNode(true);
+      return null;
+    }
+    if (content.type === "video") {
+      media.classList.add("is-video");
+      const video = content.videoEl;
+      const focusedVideo = video.cloneNode(true);
+      focusedVideo.removeAttribute("id");
+      if (!focusedVideo.getAttribute("src") && video.currentSrc) focusedVideo.src = video.currentSrc;
+      focusedVideo.controls = true;
+      focusedVideo.setAttribute("playsinline", "");
+      focusedVideo.setAttribute("controlslist", "nodownload nofullscreen noremoteplayback");
+      focusedVideo.disablePictureInPicture = true;
+      focusedVideo.tabIndex = -1;
+      focusedVideo.setAttribute("tabindex", "-1");
+      try { focusedVideo.currentTime = video.currentTime || 0; } catch (error) {}
+      media.appendChild(focusedVideo);
+      return focusedVideo;
+    }
+    media.classList.add("is-node");
+    const note = doc.createElement("div");
+    note.className = "jam-deck-present-note-body";
+    if (content.liveText) note.textContent = content.liveText;
+    else if (content.content) {
+      const clone = content.content.cloneNode(true);
       clone.removeAttribute("id");
       clone.style.pointerEvents = "none";
-      media.appendChild(clone);
+      note.appendChild(clone);
     }
-    const close = this.entry.ownerDocument.createElement("button");
+    media.appendChild(note);
+    return null;
+  }
+
+  attachPresentVideo(focusedVideo, sourceVideo, wrapper) {
+    if (!focusedVideo) return () => {};
+    const time = Number(sourceVideo && sourceVideo.currentTime) || Number(focusedVideo.currentTime) || 0;
+    const restoreTime = () => { try { focusedVideo.currentTime = time; } catch (error) {} };
+    focusedVideo.addEventListener("loadedmetadata", restoreTime, { once: true });
+    if (typeof focusedVideo.load === "function") {
+      try { focusedVideo.load(); } catch (error) {}
+    }
+    return this.lockPresentVideoFocus(focusedVideo, wrapper);
+  }
+
+  createPresentNavButton(direction) {
+    const spec = direction === "left" ? { icon: "chevron-left", label: "向左", cls: "prev", key: "ArrowLeft" }
+      : direction === "right" ? { icon: "chevron-right", label: "向右", cls: "next", key: "ArrowRight" }
+        : direction === "top" ? { icon: "chevron-up", label: "向上", cls: "up", key: "ArrowUp" }
+          : direction === "bottom" ? { icon: "chevron-down", label: "向下", cls: "down", key: "ArrowDown" }
+            : null;
+    if (!spec) return null;
+    const button = this.entry.ownerDocument.createElement("button");
+    button.className = `jam-deck-canvas-stack-image-focus-nav is-${spec.cls}`;
+    button.type = "button";
+    button.setAttribute("aria-label", spec.label);
+    button.setAttribute("data-tooltip-position", direction === "bottom" ? "top" : direction === "top" ? "bottom" : "top");
+    setIcon(button, spec.icon);
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onPresentArrow(spec.key);
+    });
+    return button;
+  }
+
+  presentNavDirections() {
+    const shown = [];
+    const playlist = this.imageFocus && this.imageFocus.playlist;
+    if (Array.isArray(playlist) && playlist.length > 1) shown.push("left", "right");
+    for (const direction of ["left", "right", "top", "bottom"]) {
+      if (shown.includes(direction)) continue;
+      if (this.findPresentNeighbor(direction)) shown.push(direction);
+    }
+    return shown;
+  }
+
+  syncPresentNav() {
+    const wrapper = this.imageFocus && this.imageFocus.wrapper;
+    if (!wrapper) return;
+    for (const button of Array.from(wrapper.querySelectorAll(".jam-deck-canvas-stack-image-focus-nav"))) {
+      button.remove();
+    }
+    for (const direction of this.presentNavDirections()) {
+      const button = this.createPresentNavButton(direction);
+      if (button) wrapper.appendChild(button);
+    }
+  }
+
+  stepPresent(delta) {
+    const focus = this.imageFocus;
+    if (!focus || !Array.isArray(focus.playlist) || focus.playlist.length < 2) return false;
+    const nextIndex = (focus.index + Number(delta || 0) + focus.playlist.length) % focus.playlist.length;
+    return this.stepPresentToNode(focus.playlist[nextIndex], Number(delta) < 0 ? "left" : "right", nextIndex);
+  }
+
+  stepPresentToNode(node, motion, nextIndex = null) {
+    const focus = this.imageFocus;
+    const content = this.resolvePresentContent(node);
+    if (!focus || !content || !focus.media) return false;
+    if (focus.video && typeof focus.video.pause === "function") {
+      try { focus.video.pause(); } catch (error) {}
+    }
+    if (typeof focus.disposeVideo === "function") {
+      try { focus.disposeVideo(); } catch (error) {}
+    }
+    const focusedVideo = this.fillPresentMedia(focus.media, content);
+    this.playPresentStep(focus.media, motion);
+    if (focus.titleEl) focus.titleEl.textContent = content.label;
+    focus.wrapper.removeAttribute("aria-label");
+    if (focus.titleEl && focus.titleEl.id) focus.wrapper.setAttribute("aria-labelledby", focus.titleEl.id);
+    focus.video = focusedVideo;
+    focus.node = node;
+    if (Number.isInteger(nextIndex)) focus.index = nextIndex;
+    else if (Array.isArray(focus.playlist) && focus.playlist.length) {
+      const found = focus.playlist.findIndex((item) => item === node || String(item && item.id) === String(node && node.id));
+      if (found >= 0) focus.index = found;
+    }
+    focus.disposeVideo = focusedVideo ? this.attachPresentVideo(focusedVideo, content.videoEl, focus.wrapper) : () => {};
+    this.syncPresentNav();
+    try { focus.wrapper.focus({ preventScroll: true }); } catch (error) { focus.wrapper.focus(); }
+    return true;
+  }
+
+  canvasNodeId(node) {
+    if (!node) return "";
+    if (node.id != null && String(node.id)) return String(node.id);
+    try {
+      const data = typeof node.getData === "function" ? node.getData() : null;
+      return String((data && data.id) || "");
+    } catch (error) { return ""; }
+  }
+
+  findCanvasNodeById(id) {
+    const key = String(id || "");
+    if (!key || !this.canvas || !this.canvas.nodes) return null;
+    if (typeof this.canvas.nodes.get === "function") {
+      const direct = this.canvas.nodes.get(key);
+      if (direct) return direct;
+    }
+    if (typeof this.canvas.nodes.values !== "function") return null;
+    for (const node of this.canvas.nodes.values()) {
+      if (this.canvasNodeId(node) === key) return node;
+    }
+    return null;
+  }
+
+  canvasNodeRectById(id) {
+    const node = this.findCanvasNodeById(id);
+    if (!node || typeof node.getData !== "function") return null;
+    try { return jamDeckCanvasStackRect(node.getData()); } catch (error) { return null; }
+  }
+
+  getCanvasEdges() {
+    try {
+      const data = this.canvas && typeof this.canvas.getData === "function" ? this.canvas.getData() : null;
+      return Array.isArray(data && data.edges) ? data.edges : [];
+    } catch (error) { return []; }
+  }
+
+  findPresentNeighbor(direction) {
+    const focus = this.imageFocus;
+    const current = (focus && focus.node) || (focus && Array.isArray(focus.playlist) && focus.playlist[focus.index]);
+    const currentId = this.canvasNodeId(current);
+    if (!currentId || !direction) return null;
+    const hops = [];
+    for (const edge of this.getCanvasEdges()) {
+      const hop = jamDeckCanvasPresentEdgeHop(edge, currentId, (nodeId) => this.canvasNodeRectById(nodeId));
+      if (!hop || hop.direction !== direction) continue;
+      const node = this.findCanvasNodeById(hop.neighborId);
+      if (!node || !this.resolvePresentContent(node)) continue;
+      hops.push({ node, distance: Number(hop.distance) || 0 });
+    }
+    hops.sort((left, right) => left.distance - right.distance);
+    return hops[0] ? hops[0].node : null;
+  }
+
+  presentNeighbor(direction) {
+    const node = this.findPresentNeighbor(direction);
+    return node ? this.stepPresentToNode(node, direction) : false;
+  }
+
+  presentArrowDirection(key) {
+    if (key === "ArrowLeft" || key === "Left") return "left";
+    if (key === "ArrowRight" || key === "Right") return "right";
+    if (key === "ArrowUp" || key === "Up") return "top";
+    if (key === "ArrowDown" || key === "Down") return "bottom";
+    return "";
+  }
+
+  onPresentArrow(key) {
+    const direction = this.presentArrowDirection(key);
+    if (!direction) return false;
+    const playlist = this.imageFocus && this.imageFocus.playlist;
+    if (Array.isArray(playlist) && playlist.length > 1 && (direction === "left" || direction === "right")) {
+      return this.stepPresent(direction === "left" ? -1 : 1);
+    }
+    return this.presentNeighbor(direction);
+  }
+
+  playPresentStep(media, motion) {
+    if (!media) return;
+    const reduced = !!(this.root && this.root.closest && this.root.closest(".jam-deck-root.jam-deck-no-motion"));
+    media.classList.remove("is-step-next", "is-step-prev", "is-step-up", "is-step-down", "is-step-in");
+    if (reduced) return;
+    const axis = motion === "left" || motion === -1 ? "prev"
+      : motion === "top" ? "up"
+        : motion === "bottom" ? "down"
+          : "next";
+    media.classList.add(`is-step-${axis}`);
+    const run = () => { if (media.isConnected) media.classList.add("is-step-in"); };
+    if (this.ownerWindow && typeof this.ownerWindow.requestAnimationFrame === "function") {
+      this.ownerWindow.requestAnimationFrame(() => this.ownerWindow.requestAnimationFrame(run));
+      return;
+    }
+    run();
+  }
+
+  openNodeFocus(node, origin = null) {
+    if (!node || this.imageFocus || !this.overlay || !this.entry || !this.entry.ownerDocument) return false;
+    const content = this.resolvePresentContent(node);
+    if (!content) return false;
+    const doc = this.entry.ownerDocument;
+    const wrapper = doc.createElement("div");
+    wrapper.className = "jam-deck-canvas-stack-image-focus";
+    const title = doc.createElement("span");
+    title.className = "jam-deck-canvas-stack-image-focus-title";
+    title.id = "jam-deck-present-title";
+    title.textContent = content.label;
+    wrapper.setAttribute("role", "dialog");
+    wrapper.setAttribute("aria-modal", "true");
+    wrapper.setAttribute("aria-labelledby", title.id);
+    const media = doc.createElement("div");
+    media.className = "jam-deck-canvas-stack-image-focus-media";
+    const focusedVideo = this.fillPresentMedia(media, content);
+    const close = doc.createElement("button");
     close.className = "jam-deck-canvas-stack-image-focus-close";
     close.type = "button";
     close.setAttribute("aria-label", "关闭预览");
@@ -3495,14 +3807,125 @@ class CanvasImageStackController {
       event.stopPropagation();
       this.closeImageFocus();
     });
+    const playlist = this.presentablePreviewNodes();
+    const index = playlist.findIndex((item) => item === node || String(item.id) === String(node.id));
+    const usePlaylist = index >= 0 && playlist.length > 1;
+    wrapper.tabIndex = -1;
+    wrapper.appendChild(title);
     wrapper.appendChild(media);
     wrapper.appendChild(close);
-    this.overlay.appendChild(wrapper);
-    this.imageFocus = { wrapper, origin };
+    const host = this.getPresentHost();
+    host.appendChild(wrapper);
+    host.addClass("is-jam-deck-presenting");
+    const onBackdrop = (event) => {
+      if (!this.imageFocus || this.imageFocus.wrapper !== wrapper) return;
+      if (this.isPresentChrome(event.target)) return;
+      const onMedia = !!(event.target && event.target.closest && event.target.closest(".jam-deck-canvas-stack-image-focus-media"));
+      if (event.type === "wheel" && onMedia) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.type !== "wheel") this.closeImageFocus();
+    };
+    wrapper.addEventListener("pointerdown", onBackdrop, true);
+    wrapper.addEventListener("wheel", onBackdrop, true);
+    wrapper.addEventListener("contextmenu", onBackdrop, true);
+    const onPresentKey = (event) => this.onPresentKeydown(event);
+    const keyTargets = [this.ownerWindow, this.ownerWindow && this.ownerWindow.document, host, wrapper].filter(Boolean);
+    for (const target of keyTargets) target.addEventListener("keydown", onPresentKey, true);
+    this.imageFocus = {
+      wrapper,
+      media,
+      origin,
+      video: focusedVideo,
+      host,
+      playlist: usePlaylist ? playlist : [],
+      index: usePlaylist ? index : 0,
+      node,
+      titleEl: title,
+      disposeVideo: focusedVideo ? this.attachPresentVideo(focusedVideo, content.videoEl, wrapper) : () => {},
+      disposeKeys: () => {
+        for (const target of keyTargets) {
+          try { target.removeEventListener("keydown", onPresentKey, true); } catch (error) {}
+        }
+      },
+    };
+    this.syncPresentNav();
     this.ownerWindow.requestAnimationFrame(() => {
       wrapper.addClass("is-visible");
-      close.focus();
+      try { wrapper.focus({ preventScroll: true }); } catch (error) { wrapper.focus(); }
     });
+    return true;
+  }
+
+  getPresentHost() {
+    const deckRoot = this.root && this.root.closest && this.root.closest(".jam-deck-root");
+    return deckRoot || this.overlay;
+  }
+
+  lockPresentVideoFocus(video, wrapper) {
+    if (!video || !wrapper) return () => {};
+    const restore = () => {
+      if (!this.imageFocus || this.imageFocus.wrapper !== wrapper) return;
+      try { video.blur(); } catch (error) {}
+      try { wrapper.focus({ preventScroll: true }); } catch (error) {
+        try { wrapper.focus(); } catch (focusError) {}
+      }
+    };
+    video.addEventListener("focusin", restore, true);
+    video.addEventListener("pointerup", restore, true);
+    return () => {
+      try { video.removeEventListener("focusin", restore, true); } catch (error) {}
+      try { video.removeEventListener("pointerup", restore, true); } catch (error) {}
+    };
+  }
+
+  onPresentKeydown(event) {
+    if (!this.imageFocus || !event) return false;
+    const key = String(event.key || "");
+    const code = String(event.code || "");
+    const isF = key === "f" || key === "F" || code === "KeyF";
+    const isArrow = key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown"
+      || key === "Left" || key === "Right" || key === "Up" || key === "Down";
+    if (key === "Escape" || isF) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.closeImageFocus();
+      return true;
+    }
+    if (key === " " || key === "Spacebar") {
+      if (event.repeat) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return true;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.togglePresentVideo();
+      return true;
+    }
+    if (isArrow) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (key === "ArrowLeft" || key === "Left" || key === "ArrowRight" || key === "Right"
+        || key === "ArrowUp" || key === "Up" || key === "ArrowDown" || key === "Down") {
+        this.onPresentArrow(key);
+      }
+      return true;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return true;
+  }
+
+  togglePresentVideo() {
+    const video = this.imageFocus && (this.imageFocus.video || (this.imageFocus.wrapper && this.imageFocus.wrapper.querySelector("video")));
+    if (!video) return false;
+    if (video.paused) {
+      const play = video.play();
+      if (play && typeof play.catch === "function") play.catch(() => {});
+    } else {
+      video.pause();
+    }
     return true;
   }
 
@@ -3510,6 +3933,16 @@ class CanvasImageStackController {
     const focus = this.imageFocus;
     if (!focus) return;
     this.imageFocus = null;
+    if (typeof focus.disposeVideo === "function") {
+      try { focus.disposeVideo(); } catch (error) {}
+    }
+    if (typeof focus.disposeKeys === "function") {
+      try { focus.disposeKeys(); } catch (error) {}
+    }
+    if (focus.host) focus.host.removeClass("is-jam-deck-presenting");
+    if (focus.video && typeof focus.video.pause === "function") {
+      try { focus.video.pause(); } catch (error) {}
+    }
     if (focus.wrapper) focus.wrapper.remove();
     if (focus.origin && focus.origin.isConnected) focus.origin.focus();
   }
@@ -3988,7 +4421,7 @@ class CanvasImageStackController {
       const b = sourceRectFor(right);
       return (a && b ? a.top - b.top || a.left - b.left : 0) || String(left.id).localeCompare(String(right.id));
     });
-    const visuals = [];
+    const pending = [];
     for (const member of ordered) {
       const nodeEl = member.node && member.node.nodeEl;
       if (!nodeEl) continue;
@@ -3999,14 +4432,30 @@ class CanvasImageStackController {
         : null;
       const logicalCanvasSize = normalization ? normalization.originalCanvasSize : member.rect;
       const screenScale = jamDeckCanvasStackScreenScale(member);
-      visuals.push({
+      pending.push({
         member,
         rect,
-        logicalWidth: Math.max(1, Number(logicalCanvasSize.width) * screenScale),
-        logicalHeight: Math.max(1, Number(logicalCanvasSize.height) * screenScale),
+        nativeWidth: Math.max(1, Number(logicalCanvasSize.width) * screenScale),
+        nativeHeight: Math.max(1, Number(logicalCanvasSize.height) * screenScale),
       });
     }
-    return visuals;
+    const imageSizes = pending
+      .filter((item) => item.member.kind === "image")
+      .map((item) => ({ width: item.nativeWidth, height: item.nativeHeight }));
+    return pending.map((item) => {
+      const paper = jamDeckCanvasStackPreviewLogicalSize(
+        item.member.kind,
+        item.nativeWidth,
+        item.nativeHeight,
+        imageSizes,
+      );
+      return {
+        member: item.member,
+        rect: item.rect,
+        logicalWidth: paper.width,
+        logicalHeight: paper.height,
+      };
+    });
   }
 
   createPreviewCard(visual, position, rootRect, index) {
@@ -4023,8 +4472,8 @@ class CanvasImageStackController {
     card.setAttribute("aria-label", visual.member.kind === "image"
       ? "图片：单击放大，拖动移出堆叠"
       : visual.member.kind === "text"
-        ? "文本：单击编辑，拖动移出堆叠"
-        : "笔记：单击打开，拖动移出堆叠");
+        ? "文本：单击放大，拖动移出堆叠"
+        : "笔记：单击放大，拖动移出堆叠");
     card.style.left = `${position.x}px`;
     card.style.top = `${position.y}px`;
     card.style.width = `${position.width}px`;
@@ -7904,11 +8353,18 @@ class CanvasSelectionToolbarController {
   onFocusHotkey(event) {
     if (this.destroyed || !event || event.repeat) return;
     const key = String(event.key || "");
-    if (key !== "f" && key !== "F") return;
+    const isF = key === "f" || key === "F" || String(event.code || "") === "KeyF";
+    if (!isF) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.target && event.target.closest && event.target.closest("input, textarea, [contenteditable='true']")) return;
     const stack = this.entry && this.entry.imageStackController;
-    if (stack && (stack.imageFocus || stack.previewWrapper || stack.drag)) return;
+    if (stack && stack.imageFocus) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      stack.closeImageFocus();
+      return;
+    }
+    if (event.target && event.target.closest && event.target.closest("input, textarea, [contenteditable='true']")) return;
+    if (stack && (stack.previewWrapper || stack.drag)) return;
     if (!this.isToolbarArmed()) return;
     if (!this.openSelectedNodeFocus()) return;
     event.preventDefault();
@@ -8157,13 +8613,19 @@ class CanvasRuntimeAdapter {
     const keydown = (event) => {
       activate();
       const stackController = entry.imageStackController;
-      if (stackController && (stackController.previewWrapper || stackController.imageFocus)) {
+      if (stackController && stackController.imageFocus) {
+        if (typeof stackController.onPresentKeydown === "function") stackController.onPresentKeydown(event);
+        else {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (event.key === "Escape") stackController.closeImageFocus();
+        }
+        return;
+      }
+      if (stackController && stackController.previewWrapper) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (event.key === "Escape") {
-          if (stackController.imageFocus) stackController.closeImageFocus();
-          else stackController.collapsePreview();
-        }
+        if (event.key === "Escape") stackController.collapsePreview();
         return;
       }
       const key = String(event.key || "").toLowerCase();
@@ -16533,6 +16995,8 @@ JamDeckPlugin.canvasStackGeometry = {
   slots: jamDeckCanvasStackSlotOffsets,
   snap: jamDeckComputeCanvasStackSnap,
   layoutPreview: jamDeckLayoutCanvasStackPreview,
+  previewLogicalSize: jamDeckCanvasStackPreviewLogicalSize,
+  presentEdgeHop: jamDeckCanvasPresentEdgeHop,
   bystanderShift: jamDeckCanvasStackBystanderShift,
 };
 JamDeckPlugin.canvasFolderGeometry = {
