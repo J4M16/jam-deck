@@ -1,5 +1,21 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-15 — 0.31.3 本地工作区可配置并准备公开仓库
+
+- Jam 确认个人痕迹不敏感、不重写历史；公开前必须去掉运行时写死的 Vault 路径。
+- 删除 `AI_LOCAL_WORKSPACE_PATH = D:\\jam16\\Jamnote`。新增设置 `aiLocalWorkspacePath`：非空绝对路径优先，否则用当前 Vault `adapter.getBasePath()`。相对路径拒绝。错误文案改为「本地工作区」。页签显示目录名，tooltip 显示完整路径。
+- 本机留空即可继续指向 Jamnote（当前库就是它）。测试改用 `D:\\Vault\\Notes` fixture，并断言源码不再硬编码个人路径。
+- 验证：标准。`npm run verify`、部署、热重载。随后发 0.31.3 并将 GitHub 仓库改为 public。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-15 — 0.31.3 整理恢复默认布局
+
+- Jam 反馈：点「整理」后没有回到默认布局，快捷方式跑到时钟下面；随后锚点缩放、编辑拖动和 Shift 延伸全部失效。
+- 根因：`autoArrange` 按 y/x 排序后用 `findSpace(..., 1, 1)` 从原点菱形搜索。宽 30 的快捷方式到 (11,1) 的距离大于到 (1,7)，所以被放到时钟下方。找不到空位时仍保留旧坐标并继续放置，造成重叠；重叠后 sash 对不齐、拖拽预览无法 commit。随后第一轮修复只按默认种子 id（`clock-1`）对位，Jam 现网组件是后来添加的 `music-1785…` / `launcher-1785…`，被当成额外组件继续乱塞，快捷方式仍在时钟下、Canvas 缩成 5×5。
+- 修复：整理改为 `jamDeckRestoreDefaultWidgetLayout`，按组件类型对到 `DEFAULT_SETTINGS` 几何，config 保留。同类多余件再找空位或压缩最大件插入；最终必须 `collisionFree`，否则取消。
+- 验证：快速。默认几何/保留 shortcuts/额外组件不丢、源码不再走 greedy pack；`npm run verify`。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-15 — 0.31.2 合入 master 并发 GitHub Release
 
 - 当前工作区在 `develop`。将未提交的放映收尾提交后合入 `master`，打 tag `v0.31.2` 并发布 GitHub Release（含 0.31.0–0.31.2，上次发版为 v0.30.9）。
