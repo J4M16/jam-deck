@@ -136,4 +136,8 @@ Seek 只在 `IsPlaybackPositionEnabled` 为真时开放。Slider 拖动期间不
 
 ## 开发与部署
 
-项目根是唯一开发源。部署脚本显式白名单三个插件文件，并在目标同盘 staging、备份和校验。个人运行数据永远不参与部署。
+本仓库是唯一开发源。部署脚本显式白名单三个插件文件，并在目标同盘 staging、备份和校验。个人运行数据永远不参与部署。
+
+## 本地工作区
+
+AI 弹窗第二页通过 loopback RPC 把 DeepSeek Harness 指到一个绝对路径工作区。路径来自设置 `aiLocalWorkspacePath`；为空时使用当前 Vault 的 `adapter.getBasePath()`。相对路径拒绝。运行时不写死作者机器上的目录。

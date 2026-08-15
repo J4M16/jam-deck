@@ -42,15 +42,44 @@ const MEDIA_REQUEST_TIMEOUT_MS = 5000;
 const MEDIA_READY_TIMEOUT_MS = 6000;
 const AI_LOCAL_WEB_URL = "http://127.0.0.1:3080/";
 const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
-const AI_LOCAL_WORKSPACE_PATH = "D:\\jam16\\Jamnote";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
+
+function jamDeckPathImpl() {
+  return process.platform === "win32" ? nodePath.win32 : nodePath.posix;
+}
 
 function jamDeckCanonicalWindowsPath(value) {
   if (typeof value !== "string" || !value.trim()) return null;
   const raw = value.trim();
-  if (!nodePath.win32.isAbsolute(raw)) return null;
-  return nodePath.win32.normalize(raw).replace(/[\\/]+$/, "").toLocaleLowerCase("en-US");
+  const impl = jamDeckPathImpl();
+  if (!impl.isAbsolute(raw)) return null;
+  return impl.normalize(raw).replace(/[\\/]+$/, "").toLocaleLowerCase("en-US");
+}
+
+function jamDeckVaultBasePath(app) {
+  const adapter = app && app.vault && app.vault.adapter;
+  if (!adapter || typeof adapter.getBasePath !== "function") return "";
+  try {
+    return String(adapter.getBasePath() || "");
+  } catch (error) {
+    return "";
+  }
+}
+
+function jamDeckLocalWorkspacePath(configured, vaultBasePath) {
+  const fromSetting = typeof configured === "string" ? configured.trim() : "";
+  if (jamDeckCanonicalWindowsPath(fromSetting)) return fromSetting;
+  const fromVault = typeof vaultBasePath === "string" ? vaultBasePath.trim() : "";
+  if (jamDeckCanonicalWindowsPath(fromVault)) return fromVault;
+  return "";
+}
+
+function jamDeckWorkspaceFolderLabel(workspacePath) {
+  const path = typeof workspacePath === "string" ? workspacePath.trim() : "";
+  if (!path) return "未设置";
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
 }
 
 function jamDeckDshValue(response, rpcId, method) {
@@ -96,17 +125,18 @@ async function jamDeckDshRpc(method, payload, options = {}) {
   }
 }
 
-function jamDeckDshWorkspaceFromList(value) {
+function jamDeckDshWorkspaceFromList(value, workspacePath) {
   if (!value || !Array.isArray(value.items) || !Array.isArray(value.archivedSessionIds)) {
     throw new Error("workspace.list 返回缺少工作区数据");
   }
-  const target = jamDeckCanonicalWindowsPath(AI_LOCAL_WORKSPACE_PATH);
+  const target = jamDeckCanonicalWindowsPath(workspacePath);
+  if (!target) throw new Error("未配置本地工作区路径");
   const matches = value.items.filter((item) => item
     && typeof item.workspaceId === "string"
     && Array.isArray(item.sessionIds)
     && jamDeckCanonicalWindowsPath(item.path) === target);
   if (matches.length !== 1) {
-    throw new Error(matches.length ? "Jamnote 工作区注册重复" : "没有找到 Jamnote 工作区");
+    throw new Error(matches.length ? "本地工作区注册重复" : "没有找到本地工作区");
   }
   return { workspace: matches[0], archivedSessionIds: value.archivedSessionIds };
 }
@@ -116,12 +146,14 @@ function jamDeckDshSessions(value) {
   return value.items;
 }
 
-async function jamDeckPrepareDshWorkspace(rpc = jamDeckDshRpc) {
-  await rpc("workspace.create", { path: AI_LOCAL_WORKSPACE_PATH });
+async function jamDeckPrepareDshWorkspace(rpc = jamDeckDshRpc, workspacePath = "") {
+  const path = typeof workspacePath === "string" ? workspacePath.trim() : "";
+  if (!jamDeckCanonicalWindowsPath(path)) throw new Error("未配置本地工作区路径");
+  await rpc("workspace.create", { path });
   let workspaceList = await rpc("workspace.list", {});
-  let resolved = jamDeckDshWorkspaceFromList(workspaceList);
+  let resolved = jamDeckDshWorkspaceFromList(workspaceList, path);
   let sessions = jamDeckDshSessions(await rpc("session.list", {}));
-  const target = jamDeckCanonicalWindowsPath(AI_LOCAL_WORKSPACE_PATH);
+  const target = jamDeckCanonicalWindowsPath(path);
   const archived = new Set(resolved.archivedSessionIds.filter((id) => typeof id === "string"));
   const memberIds = new Set(resolved.workspace.sessionIds.filter((id) => typeof id === "string"));
   let session = sessions.find((item) => item
@@ -136,9 +168,9 @@ async function jamDeckPrepareDshWorkspace(rpc = jamDeckDshRpc) {
     if (!value || typeof value.sessionId !== "string") throw new Error("session.create 没有返回会话 ID");
     created = true;
     workspaceList = await rpc("workspace.list", {});
-    resolved = jamDeckDshWorkspaceFromList(workspaceList);
+    resolved = jamDeckDshWorkspaceFromList(workspaceList, path);
     sessions = jamDeckDshSessions(await rpc("session.list", {}));
-    if (!resolved.workspace.sessionIds.includes(value.sessionId)) throw new Error("新会话没有归入 Jamnote 工作区");
+    if (!resolved.workspace.sessionIds.includes(value.sessionId)) throw new Error("新会话没有归入本地工作区");
     session = sessions.find((item) => item && item.sessionId === value.sessionId);
     if (!session || jamDeckCanonicalWindowsPath(session.cwd) !== target) {
       throw new Error("新会话的工作区校验失败");
@@ -821,6 +853,7 @@ const DEFAULT_SETTINGS = {
   qwenApiKey: "",
   qwenModel: "qwen3.8-max",
   aiProvider: "deepseek",
+  aiLocalWorkspacePath: "",
   aiFabPos: null,
   // 归档路径可配置（P1-1 + 0.30）：mode 决定「文件 / 目录」两种形式，默认都是文件。
   // 文件模式 = 单个 markdown 按日期分节；目录模式 = 目录下按日期建 YYYY-MM-DD.md。
@@ -9465,6 +9498,29 @@ function jamDeckWidgetLayoutCollisionFree(widgets, cols = GRID_COLS, rows = GRID
   return true;
 }
 
+function jamDeckRestoreDefaultWidgetLayout(widgets, defaults = DEFAULT_SETTINGS.widgets) {
+  const current = Array.isArray(widgets) ? widgets.filter(Boolean) : [];
+  const presets = Array.isArray(defaults) ? defaults : [];
+  const used = new Set();
+  const layout = [];
+  for (const preset of presets) {
+    const widget = current.find((item) => item && item.type === preset.type && !used.has(item.id));
+    if (!widget) continue;
+    used.add(widget.id);
+    layout.push({
+      ...widget,
+      x: preset.x,
+      y: preset.y,
+      w: preset.w,
+      h: preset.h,
+    });
+  }
+  return {
+    layout,
+    extras: current.filter((item) => !used.has(item.id)),
+  };
+}
+
 function jamDeckScaleWidgetColumns(widgets, factor, cols = GRID_COLS) {
   const scale = Number(factor) || 1;
   return (Array.isArray(widgets) ? widgets : []).map((item) => {
@@ -10335,7 +10391,7 @@ class JamDeckView extends ItemView {
       },
       this.plugin.settings.editMode
     );
-    this.makeToolbarButton(actions, "整理", "自动整理所有组件", async () => {
+    this.makeToolbarButton(actions, "整理", "恢复默认布局", async () => {
       await this.plugin.autoArrange();
     });
 
@@ -10893,8 +10949,14 @@ class JamDeckView extends ItemView {
     this.aiLocalWebPage.empty();
     if (this.aiHeaderContext) {
       this.aiHeaderContext.empty();
-      const path = this.aiHeaderContext.createSpan({ text: "Jamnote", cls: "jam-deck-ai-local-path" });
-      path.title = "工作区：D:\\jam16\\Jamnote。若网页未显示 Jamnote，请在网页侧栏手动选择。";
+      const workspacePath = this.plugin.localWorkspacePath();
+      const path = this.aiHeaderContext.createSpan({
+        text: jamDeckWorkspaceFolderLabel(workspacePath),
+        cls: "jam-deck-ai-local-path",
+      });
+      path.title = workspacePath
+        ? `工作区：${workspacePath}。若网页未显示该工作区，请在网页侧栏手动选择。`
+        : "请在设置中填写本地工作区路径，或使用当前 Vault。";
       this.aiLocalWebStatusEl = this.aiHeaderContext.createDiv({ cls: "jam-deck-ai-local-status" });
     }
     this.aiLocalWebHost = this.aiLocalWebPage.createDiv({ cls: "jam-deck-ai-local-host" });
@@ -10983,18 +11045,24 @@ class JamDeckView extends ItemView {
   async ensureAiLocalWeb(force = false) {
     if (this.aiLocalWebState === "ready" && this.aiLocalWebFrame && !force) return;
     if (this.aiLocalWebInitPromise && !force) return this.aiLocalWebInitPromise;
+    const workspacePath = this.plugin.localWorkspacePath();
     const generation = this.aiLocalWebGeneration + 1;
     this.aiLocalWebGeneration = generation;
+    if (!workspacePath) {
+      this.aiLocalWebState = "error";
+      this.renderAiLocalWebStatus("当前库没有可用的绝对路径。请在设置中填写本地工作区路径。");
+      return;
+    }
     this.aiLocalWebState = "loading";
     this.renderAiLocalWebStatus();
-    const init = jamDeckPrepareDshWorkspace().then(() => {
+    const init = jamDeckPrepareDshWorkspace(jamDeckDshRpc, workspacePath).then(() => {
       if (generation !== this.aiLocalWebGeneration || !this.aiLocalWebHost) return;
       if (!this.aiLocalWebFrame) {
         this.aiLocalWebFrame = this.aiLocalWebHost.createEl("iframe", {
           cls: "jam-deck-ai-local-frame",
           attr: {
             src: AI_LOCAL_WEB_URL,
-            title: "DeepSeek Harness · Jamnote 本地工作区",
+            title: "DeepSeek Harness · 本地工作区",
             sandbox: "allow-scripts allow-same-origin allow-forms",
           },
         });
@@ -12942,7 +13010,7 @@ class JamDeckPlugin extends Plugin {
       await this.saveSettings();
       this.renderAllViews();
     }});
-    this.addCommand({ id: "auto-arrange", name: "Auto arrange widgets", callback: () => this.autoArrange() });
+    this.addCommand({ id: "auto-arrange", name: "恢复默认布局", callback: () => this.autoArrange() });
     this.addCommand({ id: "clear-clipboard", name: "Clear clipboard history", callback: () => this.clearClipboard() });
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
@@ -13000,6 +13068,9 @@ class JamDeckPlugin extends Plugin {
       schemaVersion: 1,
       lastConnectedProvider: ["qqmusic", "netease", "qishui"].includes(lastConnectedProvider) ? lastConnectedProvider : null,
     };
+    this.settings.aiLocalWorkspacePath = typeof this.settings.aiLocalWorkspacePath === "string"
+      ? this.settings.aiLocalWorkspacePath.trim()
+      : "";
     const savedVersion = saved ? Number(saved.dataVersion) || 0 : DEFAULT_SETTINGS.dataVersion;
     if (savedVersion < 4) {
       const previousWidgets = this.settings.widgets;
@@ -13023,6 +13094,13 @@ class JamDeckPlugin extends Plugin {
     const operation = this.settingsSaveQueue.then(() => this.saveData(this.settings));
     this.settingsSaveQueue = operation.catch(() => {});
     return operation;
+  }
+
+  localWorkspacePath() {
+    return jamDeckLocalWorkspacePath(
+      this.settings.aiLocalWorkspacePath,
+      jamDeckVaultBasePath(this.app),
+    );
   }
 
   applyAnimationSetting() {
@@ -16447,14 +16525,41 @@ class JamDeckPlugin extends Plugin {
   }
 
   async autoArrange() {
-    const sorted = [...this.settings.widgets].sort((a, b) => a.y - b.y || a.x - b.x);
-    const placed = [];
-    for (const widget of sorted) {
-      const spot = this.findSpace(placed, widget.w, widget.h, 1, 1);
-      if (spot) Object.assign(widget, spot);
-      placed.push(widget);
+    const restored = jamDeckRestoreDefaultWidgetLayout(this.settings.widgets);
+    let layout = restored.layout.map((item) => ({ ...item }));
+    for (const extra of restored.extras) {
+      const def = WIDGET_DEFS[extra.type];
+      const minimum = jamDeckWidgetDisplayMinimum(extra.type) || { w: JAM_DECK_WIDGET_MIN_W, h: JAM_DECK_WIDGET_MIN_H };
+      const width = Number(extra.w) >= minimum.w ? extra.w : (def && def.w) || minimum.w;
+      const height = Number(extra.h) >= minimum.h ? extra.h : (def && def.h) || minimum.h;
+      const fullSpace = this.findSpace(layout, width, height, 1, 1);
+      const minimumSpace = fullSpace ? null : this.findSpace(layout, minimum.w, minimum.h, 1, 1);
+      if (fullSpace) {
+        layout.push({ ...extra, ...fullSpace });
+        continue;
+      }
+      if (minimumSpace) {
+        layout.push({ ...extra, ...minimumSpace });
+        continue;
+      }
+      const inserted = jamDeckInsertWidgetByCompressingLargest(layout, {
+        ...extra,
+        x: 1,
+        y: 1,
+        w: minimum.w,
+        h: minimum.h,
+      });
+      if (!inserted || !jamDeckWidgetLayoutCollisionFree(inserted.layout)) {
+        new Notice("Jam Deck：额外组件无法放入默认布局，整理已取消");
+        return;
+      }
+      layout = inserted.layout;
     }
-    this.settings.widgets = sorted;
+    if (!jamDeckWidgetLayoutCollisionFree(layout)) {
+      new Notice("Jam Deck：整理后布局无效，已取消");
+      return;
+    }
+    this.settings.widgets = layout;
     await this.saveSettings();
     this.renderAllViews();
   }
@@ -17026,6 +17131,7 @@ JamDeckPlugin.widgetLayoutHelpers = {
   overlap: jamDeckWidgetRectsOverlap,
   boundsOk: jamDeckWidgetLayoutBoundsOk,
   collisionFree: jamDeckWidgetLayoutCollisionFree,
+  restoreDefault: jamDeckRestoreDefaultWidgetLayout,
   pointInRect: jamDeckPointInRect,
   collectSlots: jamDeckCollectFillSlots,
   pickSlot: jamDeckPickFillSlot,
@@ -17138,6 +17244,33 @@ class JamDeckSettingTab extends PluginSettingTab {
         });
       });
 
+    containerEl.createEl("h3", { text: "本地工作区", cls: "jam-deck-setting-h3" });
+
+    new Setting(containerEl)
+      .setName("工作区路径")
+      .setDesc("AI 弹窗「本地工作区」页交给 DeepSeek Harness 读写的目录。留空则使用当前 Vault。须为绝对路径。只存本地 data.json。")
+      .addText((text) => {
+        text.setPlaceholder("留空则使用当前 Vault")
+          .setValue(this.plugin.settings.aiLocalWorkspacePath || "")
+          .onChange(async (value) => {
+            this.plugin.settings.aiLocalWorkspacePath = value.trim();
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.setAttr("spellcheck", "false");
+      })
+      .addButton((button) => {
+        button.setButtonText("使用当前库").onClick(async () => {
+          const path = jamDeckVaultBasePath(this.plugin.app);
+          if (!jamDeckCanonicalWindowsPath(path)) {
+            new Notice("Jam Deck：当前库没有可用的绝对路径");
+            return;
+          }
+          this.plugin.settings.aiLocalWorkspacePath = path;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
     containerEl.createEl("h3", { text: "归档路径", cls: "jam-deck-setting-h3" });
 
     const buildArchiveModeRow = (label, modeKey, fileKey, dirKey, defaultFile, defaultDir, filePlaceholder, dirPlaceholder) => {
@@ -17201,10 +17334,10 @@ class JamDeckSettingTab extends PluginSettingTab {
 
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
 JamDeckPlugin.canonicalWindowsPath = jamDeckCanonicalWindowsPath;
+JamDeckPlugin.localWorkspacePath = jamDeckLocalWorkspacePath;
 JamDeckPlugin.dshValue = jamDeckDshValue;
 JamDeckPlugin.dshRpc = jamDeckDshRpc;
 JamDeckPlugin.prepareDshWorkspace = jamDeckPrepareDshWorkspace;
 JamDeckPlugin.AI_LOCAL_WEB_URL = AI_LOCAL_WEB_URL;
-JamDeckPlugin.AI_LOCAL_WORKSPACE_PATH = AI_LOCAL_WORKSPACE_PATH;
 JamDeckPlugin.selectedCanvasNodes = jamDeckSelectedCanvasNodes;
 module.exports = JamDeckPlugin;

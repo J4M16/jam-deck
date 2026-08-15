@@ -388,6 +388,63 @@ for (const [type, [w, h]] of Object.entries(displayMinimums)) {
   assert.strictEqual(widgetLayout.isCompact({ type, w, h: h - 1 }), true, `${type} must compact when shorter than the threshold`);
 }
 assert.strictEqual(widgetLayout.isCompact({ type: "unknown", w: 1, h: 1 }), false, "unknown widget types must not be compacted destructively");
+assert(pluginSource.includes("jamDeckRestoreDefaultWidgetLayout(") && pluginSource.includes("恢复默认布局"), "tidy must restore the default widget layout instead of packing toward the origin");
+assert(!pluginSource.includes("const sorted = [...this.settings.widgets].sort((a, b) => a.y - b.y || a.x - b.x);"), "tidy must not greedily pack widgets from the top-left origin");
+
+const defaultPresets = [
+  { id: "clock-1", type: "clock", x: 1, y: 1, w: 5, h: 6, config: {} },
+  { id: "music-1", type: "music", x: 6, y: 1, w: 5, h: 6, config: { mediaSourceId: "", musicSchemaVersion: 1 } },
+  { id: "launcher-1", type: "launcher", x: 11, y: 1, w: 30, h: 6, config: { shortcuts: [] } },
+  { id: "tasks-1", type: "tasks", x: 1, y: 7, w: 5, h: 10, config: {} },
+  { id: "canvas-embed-1", type: "canvas-embed", x: 6, y: 7, w: 35, h: 30, config: { schemaVersion: 1 } },
+  { id: "calendar-1", type: "calendar", x: 1, y: 17, w: 5, h: 9, config: {} },
+  { id: "clipboard-1", type: "clipboard", x: 1, y: 26, w: 5, h: 11, config: {} },
+];
+const scrambledLayout = [
+  { id: "launcher-1", type: "launcher", x: 1, y: 7, w: 30, h: 6, config: { shortcuts: [{ id: "keep-me" }] } },
+  { id: "clock-1", type: "clock", x: 1, y: 1, w: 8, h: 8, config: { kept: true } },
+  { id: "music-1", type: "music", x: 6, y: 1, w: 5, h: 6, config: { mediaSourceId: "qq" } },
+  { id: "browser-extra", type: "browser", x: 20, y: 20, w: 8, h: 8, config: { url: "https://example.com" } },
+];
+const restoredDefault = widgetLayout.restoreDefault(scrambledLayout, defaultPresets);
+assert.deepStrictEqual(
+  restoredDefault.layout.map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h })),
+  [
+    { id: "clock-1", x: 1, y: 1, w: 5, h: 6 },
+    { id: "music-1", x: 6, y: 1, w: 5, h: 6 },
+    { id: "launcher-1", x: 11, y: 1, w: 30, h: 6 },
+  ],
+  "tidy must put default widgets back on the default geometry including launcher beside the clock",
+);
+assert.deepStrictEqual(restoredDefault.layout[0].config, { kept: true }, "tidy must keep widget config while restoring geometry");
+assert.deepStrictEqual(restoredDefault.layout[2].config.shortcuts, [{ id: "keep-me" }], "tidy must keep launcher shortcuts");
+assert.strictEqual(restoredDefault.extras.length, 1, "widgets outside the default set must remain extras");
+assert.strictEqual(restoredDefault.extras[0].id, "browser-extra", "extra widgets must not be dropped during default restore");
+assert.strictEqual(widgetLayout.collisionFree(restoredDefault.layout), true, "restored default widgets must not overlap");
+const typedIds = widgetLayout.restoreDefault([
+  { id: "launcher-1785555303402", type: "launcher", x: 1, y: 7, w: 30, h: 6, config: { shortcuts: [{ id: "keep-me" }] } },
+  { id: "clock-1", type: "clock", x: 1, y: 1, w: 5, h: 6, config: {} },
+  { id: "music-1785555175192", type: "music", x: 6, y: 1, w: 5, h: 6, config: {} },
+  { id: "canvas-embed-1785555344068", type: "canvas-embed", x: 11, y: 1, w: 5, h: 5, config: { filePath: "Work/board.canvas" } },
+  { id: "tasks-1785555385741", type: "tasks", x: 1, y: 13, w: 5, h: 10, config: {} },
+  { id: "calendar-1785555262426", type: "calendar", x: 6, y: 13, w: 5, h: 9, config: {} },
+  { id: "clipboard-1785555270947", type: "clipboard", x: 11, y: 13, w: 5, h: 11, config: {} },
+], defaultPresets);
+assert.deepStrictEqual(
+  typedIds.layout.map((item) => ({ type: item.type, x: item.x, y: item.y, w: item.w, h: item.h })),
+  [
+    { type: "clock", x: 1, y: 1, w: 5, h: 6 },
+    { type: "music", x: 6, y: 1, w: 5, h: 6 },
+    { type: "launcher", x: 11, y: 1, w: 30, h: 6 },
+    { type: "tasks", x: 1, y: 7, w: 5, h: 10 },
+    { type: "canvas-embed", x: 6, y: 7, w: 35, h: 30 },
+    { type: "calendar", x: 1, y: 17, w: 5, h: 9 },
+    { type: "clipboard", x: 1, y: 26, w: 5, h: 11 },
+  ],
+  "tidy must restore default geometry by widget type when ids are not the seed ids",
+);
+assert.strictEqual(typedIds.layout.find((item) => item.type === "canvas-embed").config.filePath, "Work/board.canvas", "tidy must keep the canvas file when restoring by type");
+assert.strictEqual(typedIds.extras.length, 0, "one widget per default type must not be treated as an extra");
 
 const pushFixture = [
   { id: "target", type: "clock", x: 1, y: 1, w: 2, h: 2 },
@@ -2693,14 +2750,21 @@ assert(removed.includes("- 原工作"), "unrelated journal content must survive 
 assert.throws(() => plugin.upgradeLegacyTaskInJournal(legacy.replace("- 【设计】Jam Deck 详情", "- 用户改过的标题"), task), /无法安全同步/);
 
 async function testAiLocalWebBootstrap() {
+  const workspacePath = "D:\\Vault\\Notes";
   assert.strictEqual(JamDeckPlugin.AI_LOCAL_WEB_URL, "http://127.0.0.1:3080/");
-  assert.strictEqual(JamDeckPlugin.AI_LOCAL_WORKSPACE_PATH, "D:\\jam16\\Jamnote");
+  assert.strictEqual(JamDeckPlugin.localWorkspacePath("", workspacePath), workspacePath);
+  assert.strictEqual(JamDeckPlugin.localWorkspacePath("  D:\\Work\\Notes  ", workspacePath), "D:\\Work\\Notes");
+  assert.strictEqual(JamDeckPlugin.localWorkspacePath("relative/notes", workspacePath), workspacePath);
+  assert.strictEqual(JamDeckPlugin.localWorkspacePath("", "relative/notes"), "");
   assert.strictEqual(
-    JamDeckPlugin.canonicalWindowsPath("D:/jam16/Jamnote/../Jamnote/"),
-    "d:\\jam16\\jamnote",
+    JamDeckPlugin.canonicalWindowsPath("D:/Vault/Notes/../Notes/"),
+    "d:\\vault\\notes",
     "local workspace matching must canonicalize Windows paths",
   );
-  assert.strictEqual(JamDeckPlugin.canonicalWindowsPath("relative/Jamnote"), null, "local workspace matching must reject relative paths");
+  assert.strictEqual(JamDeckPlugin.canonicalWindowsPath("relative/notes"), null, "local workspace matching must reject relative paths");
+  assert(!pluginSource.includes("D:\\\\jam16\\\\Jamnote") && !pluginSource.includes("D:\\jam16\\Jamnote"), "runtime must not hardcode a personal vault path");
+  assert(pluginSource.includes("aiLocalWorkspacePath"), "local workspace path must be a settings field");
+  assert(pluginSource.includes("留空则使用当前 Vault"), "settings must explain empty path uses the current vault");
 
   let sent = null;
   const rpcValue = await JamDeckPlugin.dshRpc("workspace.list", {}, {
@@ -2723,17 +2787,29 @@ async function testAiLocalWebBootstrap() {
     "local RPC must reject a response for another request",
   );
 
-  const workspace = { workspaceId: "ws-jamnote", path: "D:\\jam16\\Jamnote", title: "Jamnote", sessionIds: ["session-blank"] };
+  await assert.rejects(
+    JamDeckPlugin.prepareDshWorkspace(async () => ({}), ""),
+    /未配置/,
+    "local bootstrap must refuse an empty workspace path",
+  );
+  await assert.rejects(
+    JamDeckPlugin.prepareDshWorkspace(async () => ({}), "relative/notes"),
+    /未配置/,
+    "local bootstrap must refuse a relative workspace path",
+  );
+
+  const workspace = { workspaceId: "ws-notes", path: workspacePath, title: "Notes", sessionIds: ["session-blank"] };
   const reuseCalls = [];
   const reused = await JamDeckPlugin.prepareDshWorkspace(async (method, payload) => {
     reuseCalls.push({ method, payload });
     if (method === "workspace.create") return { workspace, created: false };
     if (method === "workspace.list") return { items: [workspace], archivedSessionIds: [] };
-    if (method === "session.list") return { items: [{ sessionId: "session-blank", cwd: "d:/jam16/jamnote", blank: true }] };
+    if (method === "session.list") return { items: [{ sessionId: "session-blank", cwd: "d:/vault/notes", blank: true }] };
     throw new Error(`unexpected ${method}`);
-  });
-  assert.deepStrictEqual(reused, { workspaceId: "ws-jamnote", sessionId: "session-blank", created: false });
+  }, workspacePath);
+  assert.deepStrictEqual(reused, { workspaceId: "ws-notes", sessionId: "session-blank", created: false });
   assert.deepStrictEqual(reuseCalls.map((call) => call.method), ["workspace.create", "workspace.list", "session.list"]);
+  assert.deepStrictEqual(reuseCalls[0].payload, { path: workspacePath });
 
   const beforeCreateWorkspace = { ...workspace, sessionIds: ["session-archived"] };
   const afterCreateWorkspace = { ...workspace, sessionIds: ["session-archived", "session-new"] };
@@ -2748,24 +2824,24 @@ async function testAiLocalWebBootstrap() {
     }
     if (method === "session.list") {
       return workspaceListCount === 1
-        ? { items: [{ sessionId: "session-archived", cwd: "D:\\jam16\\Jamnote", blank: true }] }
-        : { items: [{ sessionId: "session-new", cwd: "D:\\jam16\\Jamnote", blank: true }] };
+        ? { items: [{ sessionId: "session-archived", cwd: workspacePath, blank: true }] }
+        : { items: [{ sessionId: "session-new", cwd: workspacePath, blank: true }] };
     }
     if (method === "session.create") return { sessionId: "session-new" };
     throw new Error(`unexpected ${method}`);
-  });
-  assert.deepStrictEqual(created, { workspaceId: "ws-jamnote", sessionId: "session-new", created: true });
+  }, workspacePath);
+  assert.deepStrictEqual(created, { workspaceId: "ws-notes", sessionId: "session-new", created: true });
   assert.deepStrictEqual(
     createCalls.map((call) => call.method),
     ["workspace.create", "workspace.list", "session.list", "session.create", "workspace.list", "session.list"],
     "local bootstrap must confirm a newly created session against fresh workspace and session baselines",
   );
-  assert.deepStrictEqual(createCalls[3].payload, { workspaceId: "ws-jamnote" });
+  assert.deepStrictEqual(createCalls[3].payload, { workspaceId: "ws-notes" });
 
   await assert.rejects(
     JamDeckPlugin.prepareDshWorkspace(async (method) => method === "workspace.create"
       ? { created: false }
-      : { items: [workspace, { ...workspace, workspaceId: "duplicate" }], archivedSessionIds: [] }),
+      : { items: [workspace, { ...workspace, workspaceId: "duplicate" }], archivedSessionIds: [] }, workspacePath),
     /注册重复/,
     "ambiguous canonical workspace registrations must fail closed",
   );
