@@ -389,6 +389,9 @@ for (const [type, [w, h]] of Object.entries(displayMinimums)) {
 }
 assert.strictEqual(widgetLayout.isCompact({ type: "unknown", w: 1, h: 1 }), false, "unknown widget types must not be compacted destructively");
 assert(pluginSource.includes("jamDeckRestoreDefaultWidgetLayout(") && pluginSource.includes("恢复默认布局"), "tidy must restore the default widget layout instead of packing toward the origin");
+assert(pluginSource.includes('this.makeToolbarButton(actions, "保存", "保存当前布局为默认"'), "edit mode must replace tidy with a save-default-layout button");
+assert(pluginSource.includes("await this.plugin.saveDefaultLayout()"), "the save button must persist the current layout as the default");
+assert(pluginSource.includes("jamDeckLayoutPresets(this.settings.savedLayout)"), "tidy must prefer the last saved layout over the built-in defaults");
 assert(!pluginSource.includes("const sorted = [...this.settings.widgets].sort((a, b) => a.y - b.y || a.x - b.x);"), "tidy must not greedily pack widgets from the top-left origin");
 
 const defaultPresets = [
@@ -445,6 +448,37 @@ assert.deepStrictEqual(
 );
 assert.strictEqual(typedIds.layout.find((item) => item.type === "canvas-embed").config.filePath, "Work/board.canvas", "tidy must keep the canvas file when restoring by type");
 assert.strictEqual(typedIds.extras.length, 0, "one widget per default type must not be treated as an extra");
+
+assert.deepStrictEqual(
+  widgetLayout.snapshot([
+    { id: "clock-1", type: "clock", x: 2, y: 3, w: 4, h: 5, config: { keep: false } },
+    { id: "skip-me" },
+  ]),
+  [{ id: "clock-1", type: "clock", x: 2, y: 3, w: 4, h: 5 }],
+  "layout snapshots must keep geometry and drop widget config",
+);
+assert.strictEqual(widgetLayout.layoutPresets(null), widgetLayout.layoutPresets([]), "an empty saved layout must fall back to the built-in defaults");
+assert.deepStrictEqual(
+  widgetLayout.layoutPresets([{ id: "clock-1", type: "clock", x: 8, y: 8, w: 5, h: 6 }]).map((item) => item.x),
+  [8],
+  "a saved layout must become the tidy preset",
+);
+const savedTwoClocks = [
+  { id: "clock-b", type: "clock", x: 1, y: 1, w: 5, h: 6 },
+  { id: "clock-a", type: "clock", x: 6, y: 1, w: 5, h: 6 },
+];
+const restoredSaved = widgetLayout.restoreDefault([
+  { id: "clock-a", type: "clock", x: 10, y: 10, w: 8, h: 8, config: { a: true } },
+  { id: "clock-b", type: "clock", x: 20, y: 20, w: 8, h: 8, config: { b: true } },
+], savedTwoClocks);
+assert.deepStrictEqual(
+  restoredSaved.layout.map((item) => ({ id: item.id, x: item.x, y: item.y, config: item.config })),
+  [
+    { id: "clock-b", x: 1, y: 1, config: { b: true } },
+    { id: "clock-a", x: 6, y: 1, config: { a: true } },
+  ],
+  "saved layouts must restore geometry by widget id when multiple widgets share a type",
+);
 
 const pushFixture = [
   { id: "target", type: "clock", x: 1, y: 1, w: 2, h: 2 },
@@ -1638,6 +1672,15 @@ screenRuntime.lastScreenRectFrame = -1;
 folderScreenGroup.members[0].node.nodeEl = {};
 const worldFolderBounds = folderScreenController.groupScreenBounds(folderScreenGroup);
 assert.deepStrictEqual(worldFolderBounds, { left: 375, top: 225, width: 300, height: 225 }, "collapsed folder fallback must use the anchor world-space centre with the same fixed shell baseline");
+const highZoomController = new JamDeckPlugin.CanvasFolderController({}, {});
+highZoomController.canvas = { scale: 1 };
+assert.strictEqual(highZoomController.folderShellIsHighZoom({
+  getBoundingClientRect: () => ({ width: 200, height: 150 }),
+}), false, "a 200px folder at 1x must keep the frosted front");
+highZoomController.canvas = { scale: 2 };
+assert.strictEqual(highZoomController.folderShellIsHighZoom({
+  getBoundingClientRect: () => ({ width: 400, height: 300 }),
+}), true, "Obsidian's max 2x Canvas zoom must flatten compositor filters before the shell drops");
 // Regression: a native Canvas pointerdown must enter the stack drag path
 // without evaluating the folder-only shell transform variables.
 const stackNodeEl = {
@@ -2092,6 +2135,11 @@ assert(styleSource.includes("pointer-events: none") && folderControllerSource.in
 assert(styleSource.includes(".jam-deck-canvas-folder:is(.is-expanded, [aria-expanded=\"true\"]):not(.is-opening):not(.is-closing)") && styleSource.includes(".jam-deck-canvas-folder-backboard") && styleSource.includes(".jam-deck-canvas-folder-front") && styleSource.includes("visibility: hidden"), "expanded folders must release the authored paper layers back to native Canvas members");
 assert(styleSource.includes("height: 66.666667%") && styleSource.includes("border-radius: 10px") && styleSource.includes("0 -4px 8px rgb(0 0 0 / 0.05)"), "folder front must preserve the Figma 2:3 geometry and soft top shadow");
 assert(styleSource.includes("backdrop-filter: blur(16px) saturate(180%)") && styleSource.includes("color-mix(in srgb, var(--jd-folder-front-start) 50%, transparent)") && styleSource.includes("var(--jd-folder-front-end)"), "folder front must use the NZS4 single tint gradient over the frosted blur");
+assert(!styleSource.includes(".jam-deck-canvas-folder-front::before"), "folder frost must stay on the front element so hover rotateX does not drop the blur");
+assert(!/\.jam-deck-canvas-folder\.is-layer-unsafe[^{]*\{[^}]*display:\s*none/.test(styleSource), "toolbar overlap must not hide the collapsed folder paper");
+assert(styleSource.includes(".jam-deck-canvas-folder.is-high-zoom") && styleSource.includes("isolation: auto !important") && styleSource.includes("contain: none !important"), "high Canvas zoom must flatten the folder compositor instead of dropping the paper layer");
+assert(folderControllerSource.includes("folderShellIsHighZoom") && folderControllerSource.includes("getBoundingClientRect") && folderControllerSource.includes("scale >= 1.6 || cssMax >= 320"), "high-zoom detection must flatten before Obsidian's max 2x Canvas scale");
+assert(folderControllerSource.includes('attributeFilter: ["style"]') && folderControllerSource.includes("this.canvas.canvasEl"), "folder reconcile must observe Canvas transform style so zoom buttons still flatten the shell");
 const stackBackdropStyle = styleSource.slice(styleSource.indexOf(".jam-deck-canvas-stack-backdrop {"), styleSource.indexOf(".jam-deck-canvas-stack-preview.is-visible"));
 assert(!stackBackdropStyle.includes("backdrop-filter:"), "full-board stack focus must use a translucent wash without repainting the Canvas through backdrop-filter");
 assert(styleSource.includes(".jam-deck-canvas-stack-preview-surface.is-image > img") && styleSource.includes("object-fit: contain"), "canonical preview images must fill their cards without intrinsic-size pop-in");

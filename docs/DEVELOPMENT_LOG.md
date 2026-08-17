@@ -1,5 +1,66 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-17 — 0.31.6 文件夹最大缩放消失：两次尝试均未修好（交给 Codex）
+
+Jam 确认：放到最大，文件夹外观仍会消失。本版本只保存现场和已排除路径，不再继续改。
+
+### 现象
+
+- 折叠文件夹在常态可见（磨砂前片 + SVG 底板 + 代表图 +「N 个节点 / 文件夹」）。
+- Canvas 放大到上限后，文件夹外观消失。DOM 里壳体往往还在（`visibility/display/opacity` 仍可见），更像合成层没画出来。
+- 0.31.5 还引入回归：悬停时磨砂不见。0.31.6 已把磨砂改回前片；最大缩放消失仍在。
+
+### 实机约束（eval 证实，后续不要再猜错）
+
+- 文件夹壳体是 `.canvas` 的子节点，跟节点一起吃 `transform: translate(...) scale(s) ...`。
+- Obsidian Canvas：`scale = 2 ** tZoom`，`requestFrame` 里 `tZoom = Math.clamp(tZoom, -4, 1)`，**最大缩放是 2 倍**，不是 8 倍。
+- 当前会话 `devicePixelRatio = 1.5`。2 倍时壳体约 400×300 CSS / 600×450 设备像素，够不到 4096/8192 纹理上限。
+- 点右下角 `+ / -` 只改 `.canvas` 的 `style`，不发 wheel；旧 MutationObserver 只听 `childList`，缩放按钮不会触发 folder reconcile。
+
+### 尝试 1（0.31.5）——错误
+
+- **假设：** 壳体放大后与 `.canvas-controls` 重叠，`validateFolderToolbarLayer` 标 `is-layer-unsafe`，CSS `display:none` 藏掉整壳。次因是 `backdrop-filter` 在 scale 里被 GPU 丢掉。
+- **改动：** 去掉 unsafe 的 `display:none`；把 blur 挪到 `.jam-deck-canvas-folder-front::before`；`scale * dpr >= 4` 时加 `is-high-zoom` 关滤镜。
+- **结果：** 悬停 `rotateX` 把 `::before` 的 backdrop 裁掉，磨砂消失。最大缩放仍消失——2 倍时 `scale * 1.5 = 3`，到不了阈值 4，`is-high-zoom` 根本不加。
+
+### 尝试 2（0.31.6）——仍未修好
+
+- **假设：** 真凶是 `isolation: isolate` + `transform-style: preserve-3d` + `backdrop-filter` / SVG `drop-shadow` 挂在 Canvas `scale()` 上，2 倍时整层合成被丢；且缩放按钮没跑 reconcile。
+- **改动：** 磨砂回到 `.jam-deck-canvas-folder-front`；常态 `transform-style: flat`；观察 `canvasEl` 的 `style`；`folderShellIsHighZoom` 为 `scale >= 1.6` 或壳体 ≥320px；`.is-high-zoom` 关掉 isolation/contain/blur/drop-shadow 和悬停 `rotateX`。
+- **结果：** Jam 确认放到最大还是会消失。flatten 要么没在消失那一帧加上，要么 isolation/滤镜不是原因。
+
+### 后续不要再走的路
+
+- 不要再把 blur 放到 `::before` / 子层（悬停 3D 会裁掉）。
+- 不要假设 Canvas 能放到 4x/8x；上限就是 `tZoom = 1` → `scale = 2`。
+- 不要再用 `scale * dpr >= 4` 这种在最大缩放下永远为假的阈值。
+- 不要只用 `getComputedStyle` 的 visibility/display 判断「消失」——合成失败时这些仍是 visible。
+- `main.js.bak` 不要入库。
+
+### 还没查清的方向（给 Codex）
+
+- 2 倍时到底是整壳不画，还是只前片/底板/文案缺一块。截图对比 + `dev:screenshot`。
+- 原生 `.canvas-node` 在 `zoomBreakpoint`（-1.7）之后的渲染路径，是否把同父级的非 node（folder shell）一起裁了。
+- `contain: layout style` 在祖先 `scale(2)` 下是否裁掉 SVG 溢出（底板 120% 负边距）。
+- 代表图代理 / 隐藏真节点在最大缩放时是否被 Obsidian 视口剔除，看起来像「文件夹没了」。
+- 把壳体挪出 `.canvas` 的 scale，改挂未缩放 overlay、用屏幕矩形定位（会动 z-order，需单独设计）。
+
+- 验证：快速。`npm run verify` 全绿并已部署；Jam 实机否决最大缩放修复。悬停磨砂这一项保留。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-17 — 0.31.5 尝试修复放大后面夹外观消失
+
+- Jam 反馈：Canvas 放大到一定程度，文件夹外观会消失。
+- 当时假设与结果见上条 0.31.6。此版引入悬停磨砂回归，已在 0.31.6 撤回 `::before` 方案。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-15 — 0.31.4 保存自定义默认布局
+
+- Jam 需求：点编辑布局时，整理按钮变成保存；保存当前布局为默认。普通状态点整理回到上次保存的布局；从未保存过则回到指定的首次默认布局。
+- 实现：`settings.savedLayout` 只存几何（id/type/x/y/w/h）。编辑态工具栏用「保存」调用 `saveDefaultLayout`；整理走 `jamDeckLayoutPresets`，有保存则用保存，否则用 `DEFAULT_SETTINGS.widgets`。恢复优先按 id 对位，同类型多件不会对错。重叠布局拒绝保存。
+- 验证：快速。差异审查、`npm run verify`、部署后点一次编辑/保存/整理。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-15 — 0.31.3 本地工作区可配置并准备公开仓库
 
 - Jam 确认个人痕迹不敏感、不重写历史；公开前必须去掉运行时写死的 Vault 路径。
