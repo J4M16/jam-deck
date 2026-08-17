@@ -845,6 +845,7 @@ const WIDGET_DEFS = {
 const DEFAULT_SETTINGS = {
   dataVersion: 4,
   editMode: false,
+  savedLayout: null,
   animationsEnabled: true,
   clipboardPollMs: 700,
   clipboardMaxItems: 60,
@@ -5273,6 +5274,9 @@ class CanvasFolderController {
         this.scheduleToolbarSync();
       });
       this.observer.observe(this.root, { subtree: true, childList: true });
+      if (this.canvas && this.canvas.canvasEl) {
+        this.observer.observe(this.canvas.canvasEl, { attributes: true, attributeFilter: ["style"] });
+      }
     }
     const ResizeObserverCtor = this.ownerWindow.ResizeObserver;
     if (typeof ResizeObserverCtor === "function") {
@@ -7474,13 +7478,12 @@ class CanvasFolderController {
   folderSceneForGroup(group) {
     const members = group && Array.isArray(group.members) ? group.members : [];
     if (!members.length) return null;
-    const parents = new Set();
-    for (const member of members) {
-      const nodeEl = member && member.node && member.node.nodeEl;
-      if (!nodeEl || nodeEl.isConnected === false || !nodeEl.parentElement) return null;
-      parents.add(nodeEl.parentElement);
-    }
-    return parents.size === 1 ? [...parents][0] : null;
+    // Canvas virtualizes nodes outside the viewport. At max zoom a collapsed
+    // member can therefore lose its DOM parent even though its canonical node
+    // data (and the folder) still exists. The transformed scene itself is the
+    // stable mount point; never invalidate a persisted folder from temporary
+    // node hydration state.
+    return this.canvas && this.canvas.canvasEl || null;
   }
 
   folderWorldShellRect(group) {
@@ -7493,6 +7496,18 @@ class CanvasFolderController {
       width: 200,
       height: 150,
     };
+  }
+
+  folderShellIsHighZoom(shell) {
+    const scale = Math.max(0.04, Number(this.canvas && this.canvas.scale) || 1);
+    let cssMax = JAM_DECK_CANVAS_FOLDER_BASE_WIDTH * scale;
+    try {
+      const box = shell && typeof shell.getBoundingClientRect === "function" ? shell.getBoundingClientRect() : null;
+      if (box && box.width > 1 && box.height > 1) cssMax = Math.max(Number(box.width) || 0, Number(box.height) || 0);
+    } catch (error) {}
+    // Obsidian Canvas clamps tZoom to 1, so max scale is 2. Flatten before
+    // that so isolation + backdrop-filter cannot drop the 400px shell.
+    return scale >= 1.6 || cssMax >= 320;
   }
 
   createFolderProxySurface(member) {
@@ -7869,6 +7884,7 @@ class CanvasFolderController {
     // 折叠壳体必须始终可见（成员隐藏后它是唯一打开入口）；safe 仅作告警。
     view.shell.hidden = state === "expanded";
     view.shell.classList.toggle("is-layer-unsafe", !view.safe);
+    view.shell.classList.toggle("is-high-zoom", this.folderShellIsHighZoom(view.shell));
     const count = view.meta && view.meta.querySelector(".jam-deck-canvas-folder-count");
     if (count) count.textContent = `${group.members.length} 个节点`;
     if (view.label) {
@@ -9498,13 +9514,34 @@ function jamDeckWidgetLayoutCollisionFree(widgets, cols = GRID_COLS, rows = GRID
   return true;
 }
 
+function jamDeckSnapshotWidgetLayout(widgets) {
+  return (Array.isArray(widgets) ? widgets : [])
+    .filter((item) => item && item.id && item.type)
+    .map((item) => ({
+      id: item.id,
+      type: item.type,
+      x: Number(item.x) || 1,
+      y: Number(item.y) || 1,
+      w: Number(item.w) || 1,
+      h: Number(item.h) || 1,
+    }));
+}
+
+function jamDeckLayoutPresets(savedLayout, defaults = DEFAULT_SETTINGS.widgets) {
+  const saved = jamDeckSnapshotWidgetLayout(savedLayout);
+  return saved.length ? saved : defaults;
+}
+
 function jamDeckRestoreDefaultWidgetLayout(widgets, defaults = DEFAULT_SETTINGS.widgets) {
   const current = Array.isArray(widgets) ? widgets.filter(Boolean) : [];
   const presets = Array.isArray(defaults) ? defaults : [];
   const used = new Set();
   const layout = [];
   for (const preset of presets) {
-    const widget = current.find((item) => item && item.type === preset.type && !used.has(item.id));
+    const byId = preset && preset.id
+      ? current.find((item) => item && item.id === preset.id && item.type === preset.type && !used.has(item.id))
+      : null;
+    const widget = byId || current.find((item) => item && item.type === preset.type && !used.has(item.id));
     if (!widget) continue;
     used.add(widget.id);
     layout.push({
@@ -10391,9 +10428,15 @@ class JamDeckView extends ItemView {
       },
       this.plugin.settings.editMode
     );
-    this.makeToolbarButton(actions, "整理", "恢复默认布局", async () => {
-      await this.plugin.autoArrange();
-    });
+    if (this.plugin.settings.editMode) {
+      this.makeToolbarButton(actions, "保存", "保存当前布局为默认", async () => {
+        await this.plugin.saveDefaultLayout();
+      });
+    } else {
+      this.makeToolbarButton(actions, "整理", "恢复默认布局", async () => {
+        await this.plugin.autoArrange();
+      });
+    }
 
     const aiFab = root.createDiv({
       cls: "jam-deck-ai-fab",
@@ -13056,6 +13099,9 @@ class JamDeckPlugin extends Plugin {
     const saved = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved || {});
     this.settings.widgets = Array.isArray(this.settings.widgets) ? this.settings.widgets : DEFAULT_SETTINGS.widgets;
+    this.settings.savedLayout = Array.isArray(this.settings.savedLayout) && this.settings.savedLayout.length
+      ? jamDeckSnapshotWidgetLayout(this.settings.savedLayout)
+      : null;
     this.settings.clipboardItems = Array.isArray(this.settings.clipboardItems) ? this.settings.clipboardItems : [];
     this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
       ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
@@ -16524,8 +16570,21 @@ class JamDeckPlugin extends Plugin {
     }
   }
 
+  async saveDefaultLayout() {
+    if (!jamDeckWidgetLayoutCollisionFree(this.settings.widgets)) {
+      new Notice("Jam Deck：当前布局有重叠，保存已取消");
+      return;
+    }
+    this.settings.savedLayout = jamDeckSnapshotWidgetLayout(this.settings.widgets);
+    await this.saveSettings();
+    new Notice("Jam Deck：已保存为默认布局");
+  }
+
   async autoArrange() {
-    const restored = jamDeckRestoreDefaultWidgetLayout(this.settings.widgets);
+    const restored = jamDeckRestoreDefaultWidgetLayout(
+      this.settings.widgets,
+      jamDeckLayoutPresets(this.settings.savedLayout),
+    );
     let layout = restored.layout.map((item) => ({ ...item }));
     for (const extra of restored.extras) {
       const def = WIDGET_DEFS[extra.type];
@@ -17132,6 +17191,8 @@ JamDeckPlugin.widgetLayoutHelpers = {
   boundsOk: jamDeckWidgetLayoutBoundsOk,
   collisionFree: jamDeckWidgetLayoutCollisionFree,
   restoreDefault: jamDeckRestoreDefaultWidgetLayout,
+  snapshot: jamDeckSnapshotWidgetLayout,
+  layoutPresets: jamDeckLayoutPresets,
   pointInRect: jamDeckPointInRect,
   collectSlots: jamDeckCollectFillSlots,
   pickSlot: jamDeckPickFillSlot,
