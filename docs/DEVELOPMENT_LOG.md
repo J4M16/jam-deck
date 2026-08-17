@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-17 — 0.31.7 合入 master 并发 GitHub Release
+
+- `develop` 上 0.31.7 已由 Codex 修好最大缩放文件夹消失；`npm run verify` 全绿后合入 `master`，打 tag `v0.31.7` 并发布 GitHub Release（上次发版为 v0.31.3）。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-17 — 0.31.7 修复文件夹最大缩放消失
 
 - 实机复现时把 Canvas 设为上限 `tZoom=1 / scale=2`：文件夹 DOM 数量从 1 变成 0，并非 `display/visibility/opacity` 正常但未绘制。运行时数据仍保留 6 个成员，其中一个折叠成员位于当前 viewport 外，被 Obsidian virtualize 后 `nodeEl.isConnected=false`。
