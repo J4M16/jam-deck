@@ -1,5 +1,14 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-17 — 0.31.7 修复文件夹最大缩放消失
+
+- 实机复现时把 Canvas 设为上限 `tZoom=1 / scale=2`：文件夹 DOM 数量从 1 变成 0，并非 `display/visibility/opacity` 正常但未绘制。运行时数据仍保留 6 个成员，其中一个折叠成员位于当前 viewport 外，被 Obsidian virtualize 后 `nodeEl.isConnected=false`。
+- 根因：`folderSceneForGroup` 要求所有成员 DOM 同时连接且同父级。视口外成员被临时卸载后，`validateFolderGroup` 将持久文件夹误判为“成员不在同一个 Canvas 场景”，`reconcile` 随即清掉 group、runtime 与 shell。
+- 修复：文件夹以 `canvas.canvasEl` 这个稳定的 transformed scene 为挂载依据；成员 DOM 是否暂时水合不再参与持久文件夹有效性判断。世界坐标、缩放、拖动换算与原层级关系保持不变，没有引入 screen-space overlay 重构。
+- 回归：新增“一个成员 DOM 临时断开时，scene 与 shell 仍保留”的测试；`npm run verify` 全绿。运行时同一 Canvas、同一 2× 缩放下，热补丁后壳体恢复为 400×300，可见且仍位于 `.canvas` 场景。
+- 验证：标准。差异审查、强制测试与最大缩放运行时复现已通过；部署热重载后进行正式视觉检查。
+- 处理模型签名：GPT-5（主代理/诊断、实现与验证）、具体模型标识不可见（只读代码侦察）
+
 ## 2026-08-17 — 0.31.6 文件夹最大缩放消失：两次尝试均未修好（交给 Codex）
 
 Jam 确认：放到最大，文件夹外观仍会消失。本版本只保存现场和已排除路径，不再继续改。

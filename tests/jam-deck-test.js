@@ -2346,6 +2346,7 @@ const proxyGroup = {
 };
 const proxyController = new JamDeckPlugin.CanvasFolderController({}, { ownerDocument: folderDomDocument });
 proxyController.stack = { createPreviewSurface: () => new FolderDomFixtureElement("div") };
+proxyController.canvas = { canvasEl: proxyScene };
 const proxyView = proxyController.createFolderView(proxyGroup);
 proxyController.folderViews.set(proxyGroup.id, proxyView);
 proxyController.renderFolderRepresentatives(proxyView, proxyGroup);
@@ -2364,6 +2365,16 @@ assert.strictEqual(proxySourceRects.size, 3, "folder preview source geometry mus
 assert.deepStrictEqual(proxySourceRects.get("proxy-a"), { left: 220, top: 130, width: 90, height: 70 }, "representative previews must launch from their visible proxy rect");
 assert(proxySourceRects.get("proxy-c").width > 0, "non-representative members must receive a deterministic in-folder launch slot");
 proxyView.dispose();
+
+// Obsidian virtualizes offscreen Canvas nodes more aggressively at max zoom.
+// A temporarily detached member must not invalidate the persisted folder or
+// remove its only visible shell.
+proxyScene.children = proxyScene.children.filter((child) => child !== proxyHiddenMemberEl);
+proxyHiddenMemberEl.parentNode = null;
+assert.strictEqual(proxyController.folderSceneForGroup(proxyGroup), proxyScene, "folder scene must remain the stable Canvas mount when a member DOM is virtualized");
+const virtualizedView = proxyController.createFolderView(proxyGroup);
+assert.strictEqual(virtualizedView.shell.parentNode, proxyScene, "folder shell must stay mounted while an offscreen member is temporarily detached");
+virtualizedView.dispose();
 
 // Preview bridge behavior: with the plugin animation toggle off (no-motion
 // class on the deck root), opening/closing must settle to a stable final

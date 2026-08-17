@@ -7478,13 +7478,12 @@ class CanvasFolderController {
   folderSceneForGroup(group) {
     const members = group && Array.isArray(group.members) ? group.members : [];
     if (!members.length) return null;
-    const parents = new Set();
-    for (const member of members) {
-      const nodeEl = member && member.node && member.node.nodeEl;
-      if (!nodeEl || nodeEl.isConnected === false || !nodeEl.parentElement) return null;
-      parents.add(nodeEl.parentElement);
-    }
-    return parents.size === 1 ? [...parents][0] : null;
+    // Canvas virtualizes nodes outside the viewport. At max zoom a collapsed
+    // member can therefore lose its DOM parent even though its canonical node
+    // data (and the folder) still exists. The transformed scene itself is the
+    // stable mount point; never invalidate a persisted folder from temporary
+    // node hydration state.
+    return this.canvas && this.canvas.canvasEl || null;
   }
 
   folderWorldShellRect(group) {
