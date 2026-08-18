@@ -16,6 +16,7 @@ const CLIPBOARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CLIPBOARD_DIR = "attachments/jam-deck-clipboard";
 const CANVAS_ASSET_DIR = "attachments/jam-deck-canvas-assets";
 const ICON_DIR = "attachments/jam-deck-icons";
+const SHORTCUT_LINK_DIR = "attachments/jam-deck-shortcuts";
 const TASK_ASSET_DIR = "attachments/jam-deck-task-assets";
 const WORK_JOURNAL_DIR = "Work/工作日记";
 const LIFE_DAILY_PATH = "Life/Daily.md";
@@ -855,6 +856,7 @@ const DEFAULT_SETTINGS = {
   qwenModel: "qwen3.8-max",
   aiProvider: "deepseek",
   aiLocalWorkspacePath: "",
+  canvasExportDir: "",
   aiFabPos: null,
   // 归档路径可配置（P1-1 + 0.30）：mode 决定「文件 / 目录」两种形式，默认都是文件。
   // 文件模式 = 单个 markdown 按日期分节；目录模式 = 目录下按日期建 YYYY-MM-DD.md。
@@ -1371,7 +1373,7 @@ class ShortcutEditorModal extends Modal {
     const pathInput = form.createEl("input", { type: "text", attr: { placeholder: "完整路径，或 https:// 网页链接" } });
     pathInput.value = (this.existing && (this.existing.url || this.existing.path)) || "";
 
-    const hint = form.createDiv({ text: "支持应用、文件夹和 http / https 网页链接", cls: "jam-deck-shortcut-hint" });
+    const hint = form.createDiv({ text: "支持应用、文件夹和 http / https 网页链接。本地项目会在库内保存一份 .lnk 记录，原快捷方式被挪走后仍可打开。", cls: "jam-deck-shortcut-hint" });
 
     const actions = form.createDiv({ cls: "jam-deck-modal-actions" });
     const save = actions.createEl("button", { text: "保存", cls: "mod-cta" });
@@ -2164,6 +2166,7 @@ class CanvasInkOverlay {
 }
 
 const JAM_DECK_CANVAS_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "avif"]);
+const JAM_DECK_CANVAS_VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "m4v", "mkv", "ogv"]);
 const JAM_DECK_STACK_OVERLAP_THRESHOLD = 0.5;
 const JAM_DECK_STACK_DETACH_THRESHOLD = 0.4;
 const JAM_DECK_STACK_SHRINK_DEAD_BAND = 0.95;
@@ -2194,9 +2197,52 @@ function jamDeckCanvasStackKind(data) {
   if (!data || typeof data !== "object") return null;
   if (data.type === "text") return "text";
   if (data.type !== "file" || typeof data.file !== "string" || !data.file.trim()) return null;
-  const extension = data.file.toLowerCase().split(/[?#]/)[0].split(".").pop();
+  const extension = jamDeckCanvasFileExtension(data);
   if (extension === "md") return "markdown-note";
   return JAM_DECK_CANVAS_IMAGE_EXTENSIONS.has(extension) ? "image" : null;
+}
+
+function jamDeckCanvasFileExtension(data) {
+  if (!data || data.type !== "file" || typeof data.file !== "string" || !data.file.trim()) return "";
+  return data.file.toLowerCase().split(/[?#]/)[0].split(".").pop() || "";
+}
+
+function jamDeckIsCanvasExportableMedia(data) {
+  const extension = jamDeckCanvasFileExtension(data);
+  return JAM_DECK_CANVAS_IMAGE_EXTENSIONS.has(extension) || JAM_DECK_CANVAS_VIDEO_EXTENSIONS.has(extension);
+}
+
+function jamDeckSelectedExportableCanvasFiles(canvas, vault) {
+  if (!canvas || !canvas.selection || typeof canvas.selection.values !== "function") return [];
+  const files = [];
+  const seen = new Set();
+  for (const node of canvas.selection.values()) {
+    let data = null;
+    try { data = node && typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
+    if (!jamDeckIsCanvasExportableMedia(data)) continue;
+    const file = vault && typeof vault.getAbstractFileByPath === "function" ? vault.getAbstractFileByPath(data.file) : null;
+    if (!file || !file.path || Array.isArray(file.children)) continue;
+    if (seen.has(file.path)) continue;
+    seen.add(file.path);
+    files.push(file);
+  }
+  return files;
+}
+
+function jamDeckUniqueOsCopyPath(dir, filename, existsSync) {
+  const pathApi = require("path");
+  const name = String(filename || "").replace(/[\\/]/g, "");
+  if (!dir || !name) return "";
+  const parsed = pathApi.parse(name);
+  let dest = pathApi.join(dir, name);
+  let n = 1;
+  const exists = typeof existsSync === "function" ? existsSync : () => false;
+  while (exists(dest)) {
+    dest = pathApi.join(dir, `${parsed.name} (${n})${parsed.ext}`);
+    n += 1;
+    if (n > 9999) break;
+  }
+  return dest;
 }
 
 function jamDeckNextCanvasFileName(fileExists) {
@@ -8228,7 +8274,11 @@ function jamDeckSelectedCanvasNodes(canvas) {
 
 function jamDeckIsNativeCanvasFocusButton(button) {
   if (!button || !button.getAttribute) return false;
-  if (button.classList && (button.classList.contains("jam-deck-canvas-ai-toolbar") || button.classList.contains("jam-deck-canvas-folder-toolbar"))) return false;
+  if (button.classList && (
+    button.classList.contains("jam-deck-canvas-ai-toolbar")
+    || button.classList.contains("jam-deck-canvas-export-toolbar")
+    || button.classList.contains("jam-deck-canvas-folder-toolbar")
+  )) return false;
   const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""}`;
   if (/聚焦|缩放到所选|zoom to selection|\bfocus\b/i.test(label)) return true;
   const svg = typeof button.querySelector === "function" ? button.querySelector("svg") : null;
@@ -8245,7 +8295,9 @@ class CanvasSelectionToolbarController {
     this.ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
     this.disposers = [];
     this.aiToolbarButton = null;
+    this.exportToolbarButton = null;
     this.aiPressedNode = null;
+    this.exportPressedFiles = null;
     this.selectedAiNode = null;
     this.toolbarFrame = 0;
     this.toolbarObserver = null;
@@ -8357,6 +8409,47 @@ class CanvasSelectionToolbarController {
     return button;
   }
 
+  collectExportableFiles() {
+    const plugin = this.runtime && this.runtime.deckView && this.runtime.deckView.plugin;
+    const vault = plugin && plugin.app && plugin.app.vault;
+    return jamDeckSelectedExportableCanvasFiles(this.canvas, vault);
+  }
+
+  ensureExportToolbarButton(menu) {
+    if (!menu) return null;
+    if (this.exportToolbarButton && this.exportToolbarButton.isConnected && this.exportToolbarButton.parentElement === menu) return this.exportToolbarButton;
+    if (this.exportToolbarButton) this.exportToolbarButton.remove();
+    const existing = menu.querySelector(".jam-deck-canvas-export-toolbar");
+    if (existing) existing.remove();
+    const button = this.entry.ownerDocument.createElement("button");
+    button.type = "button";
+    button.className = "clickable-icon jam-deck-canvas-export-toolbar";
+    button.setAttribute("aria-label", "导出选中附件");
+    setIcon(button, "download");
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.exportPressedFiles = this.collectExportableFiles();
+    }, true);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const files = (this.exportPressedFiles && this.exportPressedFiles.length)
+        ? this.exportPressedFiles
+        : this.collectExportableFiles();
+      this.exportPressedFiles = null;
+      const plugin = this.runtime && this.runtime.deckView && this.runtime.deckView.plugin;
+      if (!files.length || !plugin || typeof plugin.exportCanvasMediaFiles !== "function") {
+        new Notice("Jam Deck：没有可导出的图片或视频");
+        return;
+      }
+      void plugin.exportCanvasMediaFiles(files);
+    }, true);
+    menu.appendChild(button);
+    this.exportToolbarButton = button;
+    return button;
+  }
+
   getSingleSelectedNode() {
     if (!this.canvas || !this.canvas.selection || typeof this.canvas.selection.values !== "function") return null;
     const selected = Array.from(this.canvas.selection.values()).filter(Boolean);
@@ -8438,17 +8531,23 @@ class CanvasSelectionToolbarController {
     const menu = this.getToolbarMenu();
     if (!menu) {
       if (this.aiToolbarButton) this.aiToolbarButton.style.display = "none";
+      if (this.exportToolbarButton) this.exportToolbarButton.style.display = "none";
       this.selectedAiNode = null;
       return;
     }
     this.hijackNativeFocusButton(menu);
     const aiButton = this.ensureAiToolbarButton(menu);
+    const exportButton = this.ensureExportToolbarButton(menu);
     const stack = this.entry.imageStackController;
     const blocked = !!(stack && (stack.previewWrapper || stack.imageFocus || stack.drag));
     const selected = this.findSelectedNodes();
     this.selectedAiNode = blocked ? null : (selected.text || selected.image);
     if (aiButton) {
       aiButton.style.display = this.selectedAiNode ? "" : "none";
+    }
+    const exportable = blocked ? [] : this.collectExportableFiles();
+    if (exportButton) {
+      exportButton.style.display = exportable.length ? "" : "none";
     }
   }
 
@@ -8471,8 +8570,363 @@ class CanvasSelectionToolbarController {
       try { this.aiToolbarButton.remove(); } catch (error) {}
       this.aiToolbarButton = null;
     }
+    if (this.exportToolbarButton) {
+      try { this.exportToolbarButton.remove(); } catch (error) {}
+      this.exportToolbarButton = null;
+    }
     this.aiPressedNode = null;
+    this.exportPressedFiles = null;
     this.selectedAiNode = null;
+    this.canvas = null;
+    this.root = null;
+  }
+}
+
+class CanvasStageController {
+  constructor(runtime, entry) {
+    this.runtime = runtime;
+    this.entry = entry;
+    this.app = runtime.app;
+    this.canvas = entry.leaf && entry.leaf.view && entry.leaf.view.canvas;
+    this.root = entry.leaf && entry.leaf.containerEl;
+    this.ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
+    this.button = null;
+    this.groupEl = null;
+    this.active = false;
+    this.splitSnapshot = null;
+    this.widgetEl = null;
+    this.deckRoot = null;
+    this.body = null;
+    this.resizeTimer = 0;
+    this.ensureFrame = 0;
+    this.controlsObserver = null;
+    this.placeholder = null;
+    this.frameSnapshot = null;
+    this.disposers = [];
+    this.destroyed = false;
+  }
+
+  install() {
+    if (!this.root || !this.ownerWindow || this.destroyed) return false;
+    const keydown = (event) => this.onKeydown(event);
+    this.ownerWindow.addEventListener("keydown", keydown, false);
+    this.disposers.push(() => this.ownerWindow.removeEventListener("keydown", keydown, false));
+    const MutationObserverCtor = this.ownerWindow.MutationObserver;
+    if (typeof MutationObserverCtor === "function") {
+      this.controlsObserver = new MutationObserverCtor(() => this.scheduleEnsureButton());
+      this.controlsObserver.observe(this.root, { childList: true, subtree: true });
+    }
+    this.ensureButton();
+    return true;
+  }
+
+  scheduleEnsureButton() {
+    if (this.destroyed || !this.ownerWindow || this.ensureFrame) return;
+    this.ensureFrame = this.ownerWindow.requestAnimationFrame(() => {
+      this.ensureFrame = 0;
+      this.ensureButton();
+    });
+  }
+
+  getControlsEl() {
+    if (!this.root) return null;
+    const controls = this.root.querySelector(".canvas-controls");
+    if (!controls || !controls.isConnected || !this.root.contains(controls)) return null;
+    return controls;
+  }
+
+  getDeckRoot() {
+    const view = this.runtime && this.runtime.deckView;
+    if (view && view.contentEl) return view.contentEl;
+    const host = this.entry.hostEl;
+    return host && host.closest ? host.closest(".jam-deck-root") : null;
+  }
+
+  getWidgetEl() {
+    const host = this.entry.hostEl;
+    if (host && host.closest) {
+      const widget = host.closest(".jam-deck-widget");
+      if (widget) return widget;
+    }
+    const deckRoot = this.getDeckRoot();
+    const widgetId = this.entry.widgetId;
+    if (!deckRoot || !widgetId) return null;
+    return deckRoot.querySelector(`.jam-deck-widget[data-widget-id="${widgetId}"]`);
+  }
+
+  ensureButton() {
+    if (this.destroyed) return null;
+    const controls = this.getControlsEl();
+    if (!controls) return null;
+    // Native Canvas mutates this leaf constantly. setIcon() also rewrites the
+    // button SVG, which would retrigger the observer and freeze the workbench.
+    if (this.button && this.button.isConnected && this.groupEl && this.groupEl.parentElement === controls) {
+      return this.button;
+    }
+    if (this.groupEl) {
+      try { this.groupEl.remove(); } catch (error) {}
+      this.groupEl = null;
+      this.button = null;
+    }
+    const existing = controls.querySelector(".jam-deck-canvas-stage-group");
+    if (existing) existing.remove();
+    const document = this.entry.ownerDocument;
+    const group = document.createElement("div");
+    group.className = "canvas-control-group jam-deck-canvas-stage-group";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "clickable-icon canvas-control-item jam-deck-canvas-stage-toggle";
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.toggle();
+    });
+    group.appendChild(button);
+    controls.insertBefore(group, controls.firstChild);
+    this.groupEl = group;
+    this.button = button;
+    this.syncButton();
+    return button;
+  }
+
+  syncButton() {
+    if (!this.button) return;
+    this.button.setAttribute("aria-pressed", String(this.active));
+    this.button.setAttribute("aria-label", this.active ? "退出全屏" : "全屏");
+    setIcon(this.button, this.active ? "minimize-2" : "maximize-2");
+  }
+
+  toggle() {
+    if (this.active) this.exit();
+    else this.enter();
+  }
+
+  snapshotSplits() {
+    const workspace = this.app && this.app.workspace;
+    return {
+      left: !!(workspace && workspace.leftSplit && workspace.leftSplit.collapsed),
+      right: !!(workspace && workspace.rightSplit && workspace.rightSplit.collapsed),
+    };
+  }
+
+  setSplitCollapsed(split, collapsed) {
+    if (!split) return;
+    try {
+      if (collapsed) {
+        if (typeof split.collapse === "function" && !split.collapsed) split.collapse();
+      } else if (typeof split.expand === "function" && split.collapsed) {
+        split.expand();
+      }
+    } catch (error) {}
+  }
+
+  getBrowserWindow() {
+    try {
+      const electron = require("electron");
+      if (electron.remote && typeof electron.remote.getCurrentWindow === "function") return electron.remote.getCurrentWindow();
+      if (typeof electron.getCurrentWindow === "function") return electron.getCurrentWindow();
+      if (electron.BrowserWindow && typeof electron.BrowserWindow.getFocusedWindow === "function") {
+        return electron.BrowserWindow.getFocusedWindow();
+      }
+    } catch (error) {}
+    try {
+      const remote = require("@electron/remote");
+      if (remote && typeof remote.getCurrentWindow === "function") return remote.getCurrentWindow();
+    } catch (error) {}
+    return null;
+  }
+
+  isAppFullScreen() {
+    try {
+      if (this.app && typeof this.app.isFullScreen === "function") return !!this.app.isFullScreen();
+    } catch (error) {}
+    const body = (this.body || (this.entry.ownerDocument && this.entry.ownerDocument.body));
+    return !!(body && body.classList.contains("is-fullscreen"));
+  }
+
+  toggleAppFullScreen() {
+    try {
+      if (this.app && this.app.commands && typeof this.app.commands.executeCommandById === "function") {
+        this.app.commands.executeCommandById("app:toggle-fullscreen");
+      }
+    } catch (error) {}
+  }
+
+  setNativeChromeHidden(hidden) {
+    const win = this.getBrowserWindow();
+    if (hidden) {
+      const snapshot = { menu: true, fullScreen: false, usedCommand: false };
+      try {
+        if (win && typeof win.isMenuBarVisible === "function") snapshot.menu = win.isMenuBarVisible();
+        if (win && typeof win.isFullScreen === "function") snapshot.fullScreen = win.isFullScreen();
+        else snapshot.fullScreen = this.isAppFullScreen();
+        if (win && typeof win.setMenuBarVisibility === "function") win.setMenuBarVisibility(false);
+        if (win && typeof win.setFullScreen === "function") {
+          if (!snapshot.fullScreen) win.setFullScreen(true);
+        } else if (!snapshot.fullScreen) {
+          snapshot.usedCommand = true;
+          this.toggleAppFullScreen();
+        }
+      } catch (error) {}
+      this.frameSnapshot = snapshot;
+      return;
+    }
+    const snapshot = this.frameSnapshot || {};
+    try {
+      if (win && typeof win.setFullScreen === "function") {
+        if (snapshot.fullScreen !== true) win.setFullScreen(false);
+      } else if (snapshot.usedCommand && this.isAppFullScreen()) {
+        this.toggleAppFullScreen();
+      }
+      if (win && typeof win.setMenuBarVisibility === "function") win.setMenuBarVisibility(snapshot.menu !== false);
+    } catch (error) {}
+    this.frameSnapshot = null;
+  }
+
+  relocateRoot(toBody) {
+    const root = this.deckRoot || this.getDeckRoot();
+    const body = this.body || (this.entry.ownerDocument && this.entry.ownerDocument.body);
+    if (!root || !body) return;
+    if (toBody) {
+      if (root.parentElement === body) return;
+      if (!this.placeholder) this.placeholder = root.ownerDocument.createComment("jam-deck-canvas-stage-anchor");
+      if (root.parentNode) root.parentNode.insertBefore(this.placeholder, root);
+      body.appendChild(root);
+      return;
+    }
+    if (this.placeholder && this.placeholder.parentNode) {
+      this.placeholder.parentNode.insertBefore(root, this.placeholder);
+      this.placeholder.remove();
+    }
+    this.placeholder = null;
+  }
+
+  enter() {
+    if (this.active || this.destroyed) return false;
+    const widgetEl = this.getWidgetEl();
+    const deckRoot = this.getDeckRoot();
+    const body = this.entry.ownerDocument && this.entry.ownerDocument.body;
+    if (!widgetEl || !deckRoot || !body) return false;
+    const current = this.runtime && this.runtime.activeStage;
+    if (current && current !== this) current.exit();
+    this.splitSnapshot = this.snapshotSplits();
+    const workspace = this.app && this.app.workspace;
+    if (workspace) {
+      this.setSplitCollapsed(workspace.leftSplit, true);
+      this.setSplitCollapsed(workspace.rightSplit, true);
+    }
+    this.widgetEl = widgetEl;
+    this.deckRoot = deckRoot;
+    this.body = body;
+    this.relocateRoot(true);
+    this.setNativeChromeHidden(true);
+    body.addClass("is-jam-deck-canvas-stage");
+    deckRoot.addClass("is-jam-deck-canvas-stage");
+    widgetEl.addClass("is-jam-deck-canvas-stage");
+    this.active = true;
+    if (this.runtime) this.runtime.activeStage = this;
+    this.syncButton();
+    this.scheduleResize();
+    return true;
+  }
+
+  exit() {
+    if (!this.active) return false;
+    this.active = false;
+    this.relocateRoot(false);
+    this.setNativeChromeHidden(false);
+    if (this.body) {
+      try { this.body.removeClass("is-jam-deck-canvas-stage"); } catch (error) {
+        try { this.body.classList.remove("is-jam-deck-canvas-stage"); } catch (removeError) {}
+      }
+    }
+    if (this.deckRoot) {
+      try { this.deckRoot.removeClass("is-jam-deck-canvas-stage"); } catch (error) {
+        try { this.deckRoot.classList.remove("is-jam-deck-canvas-stage"); } catch (removeError) {}
+      }
+    }
+    if (this.widgetEl) {
+      try { this.widgetEl.removeClass("is-jam-deck-canvas-stage"); } catch (error) {
+        try { this.widgetEl.classList.remove("is-jam-deck-canvas-stage"); } catch (removeError) {}
+      }
+    }
+    const workspace = this.app && this.app.workspace;
+    const snapshot = this.splitSnapshot || {};
+    if (workspace) {
+      this.setSplitCollapsed(workspace.leftSplit, snapshot.left === true);
+      this.setSplitCollapsed(workspace.rightSplit, snapshot.right === true);
+    }
+    if (this.runtime && this.runtime.activeStage === this) this.runtime.activeStage = null;
+    this.splitSnapshot = null;
+    this.widgetEl = null;
+    this.deckRoot = null;
+    this.body = null;
+    this.syncButton();
+    this.scheduleResize();
+    return true;
+  }
+
+  scheduleResize() {
+    const leaf = this.entry && this.entry.leaf;
+    const run = () => {
+      try { if (leaf && typeof leaf.onResize === "function") leaf.onResize(); } catch (error) {}
+    };
+    run();
+    if (!this.ownerWindow) return;
+    try { this.ownerWindow.requestAnimationFrame(() => {
+      run();
+      this.ownerWindow.requestAnimationFrame(run);
+    }); } catch (error) {}
+    try {
+      if (this.resizeTimer) this.ownerWindow.clearTimeout(this.resizeTimer);
+      this.resizeTimer = this.ownerWindow.setTimeout(() => {
+        this.resizeTimer = 0;
+        run();
+      }, 220);
+    } catch (error) {}
+  }
+
+  onKeydown(event) {
+    if (this.destroyed || !this.active || !event || event.key !== "Escape") return;
+    if (event.defaultPrevented) return;
+    const deckRoot = this.deckRoot || this.getDeckRoot();
+    if (deckRoot && deckRoot.classList.contains("is-jam-deck-presenting")) return;
+    const stack = this.entry.imageStackController;
+    if (stack && (stack.imageFocus || stack.previewWrapper || stack.drag)) return;
+    const folder = this.entry.folderController;
+    if (folder && folder.activePopover) return;
+    const target = event.target;
+    if (target && target.closest && target.closest("input, textarea, [contenteditable='true']")) return;
+    event.preventDefault();
+    this.exit();
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.exit();
+    if (this.ensureFrame && this.ownerWindow) {
+      try { this.ownerWindow.cancelAnimationFrame(this.ensureFrame); } catch (error) {}
+      this.ensureFrame = 0;
+    }
+    if (this.resizeTimer && this.ownerWindow) {
+      try { this.ownerWindow.clearTimeout(this.resizeTimer); } catch (error) {}
+      this.resizeTimer = 0;
+    }
+    if (this.controlsObserver) {
+      try { this.controlsObserver.disconnect(); } catch (error) {}
+      this.controlsObserver = null;
+    }
+    for (const dispose of this.disposers) {
+      try { dispose(); } catch (error) {}
+    }
+    this.disposers = [];
+    if (this.groupEl) {
+      try { this.groupEl.remove(); } catch (error) {}
+    }
+    this.groupEl = null;
+    this.button = null;
     this.canvas = null;
     this.root = null;
   }
@@ -8487,6 +8941,7 @@ class CanvasRuntimeAdapter {
     this.nativeConflictSuspendedIds = new Set();
     this.returnCoordinators = new Map();
     this.generation = 0;
+    this.activeStage = null;
   }
 
   normalizeCanvasPath(path) {
@@ -8567,7 +9022,17 @@ class CanvasRuntimeAdapter {
     if (this.deckView.leaf !== context.hostLeaf || context.hostLeaf.parent !== context.parent) throw new Error("Jam Deck host leaf changed while mounting Canvas");
   }
 
+  exitAllStages() {
+    for (const entry of this.entries.values()) {
+      if (entry.stageController && typeof entry.stageController.exit === "function") {
+        try { entry.stageController.exit(); } catch (error) {}
+      }
+    }
+    this.activeStage = null;
+  }
+
   parkAll() {
+    this.exitAllStages();
     for (const entry of this.entries.values()) {
       if (entry.returnCoordinator) entry.returnCoordinator.invalidateEntry(entry, true);
       else {
@@ -9079,6 +9544,8 @@ class CanvasRuntimeAdapter {
         imageStackController: null,
         folderController: null,
         linkNavigationBridge: null,
+        selectionToolbarController: null,
+        stageController: null,
         nativeConflictSuspended: false,
         closing: false,
       };
@@ -9120,6 +9587,8 @@ class CanvasRuntimeAdapter {
       entry.folderController.install();
       entry.selectionToolbarController = new CanvasSelectionToolbarController(this, entry);
       entry.selectionToolbarController.install();
+      entry.stageController = new CanvasStageController(this, entry);
+      entry.stageController.install();
       entry.inkOverlay = await CanvasInkOverlay.create(this, entry);
       try { leaf.onResize(); } catch (error) {}
       return entry;
@@ -9173,6 +9642,10 @@ class CanvasRuntimeAdapter {
     }
     if (dropOperations.length) {
       await Promise.allSettled(dropOperations.map((operation) => operation.promise || Promise.resolve()));
+    }
+    if (entry.stageController) {
+      try { entry.stageController.destroy(); } catch (error) { console.error("jam-deck canvas stage cleanup failed", error); }
+      entry.stageController = null;
     }
     if (entry.linkNavigationBridge) {
       try { entry.linkNavigationBridge.destroy(); } catch (error) { console.error("jam-deck canvas link bridge cleanup failed", error); }
@@ -12159,12 +12632,12 @@ class JamDeckView extends ItemView {
           event.stopPropagation();
           new ShortcutEditorModal(this.app, this.plugin, widget.id, shortcut).open();
         });
+        const del = item.createEl("button", { text: "×", cls: "jam-deck-launcher-edit is-danger", attr: { type: "button",  "aria-label": `删除快捷方式：${shortcut.name}` } });
+        del.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          if (window.confirm(`删除快捷方式“${shortcut.name}”？\n\n只会从 Jam Deck 移除本地记录，不会删除原文件或文件夹。`)) await this.plugin.deleteShortcut(widget.id, shortcut.id);
+        });
       }
-      const del = item.createEl("button", { text: "×", cls: "jam-deck-launcher-edit is-danger", attr: { type: "button",  "aria-label": `删除快捷方式：${shortcut.name}` } });
-      del.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        if (window.confirm(`删除快捷方式“${shortcut.name}”？\n\n只会从 Jam Deck 移除，不会删除原文件或文件夹。`)) await this.plugin.deleteShortcut(widget.id, shortcut.id);
-      });
     }
     this.enableLauncherGridEndDrop(grid, live, widget);
   }
@@ -13081,6 +13554,9 @@ class JamDeckPlugin extends Plugin {
     setTimeout(() => {
       this.resumePendingJournalOperations().catch((error) => console.error("jam-deck pending journal recovery failed", error));
     }, 5500);
+    setTimeout(() => {
+      this.ensureLocalShortcutRecords().catch((error) => console.error("jam-deck shortcut local records failed", error));
+    }, 6000);
   }
 
   onunload() {
@@ -13116,6 +13592,9 @@ class JamDeckPlugin extends Plugin {
     };
     this.settings.aiLocalWorkspacePath = typeof this.settings.aiLocalWorkspacePath === "string"
       ? this.settings.aiLocalWorkspacePath.trim()
+      : "";
+    this.settings.canvasExportDir = typeof this.settings.canvasExportDir === "string"
+      ? this.settings.canvasExportDir.trim()
       : "";
     const savedVersion = saved ? Number(saved.dataVersion) || 0 : DEFAULT_SETTINGS.dataVersion;
     if (savedVersion < 4) {
@@ -13899,6 +14378,142 @@ class JamDeckPlugin extends Plugin {
     this.lastImageSignature = this.imageSignature(image);
     new Notice("Jam Deck：Canvas 图片已复制");
     return true;
+  }
+
+  async showElectronDirectoryPicker(defaultPath) {
+    let dialog = null;
+    let win = null;
+    try {
+      const electron = require("electron");
+      if (electron.remote && electron.remote.dialog) {
+        dialog = electron.remote.dialog;
+        win = typeof electron.remote.getCurrentWindow === "function" ? electron.remote.getCurrentWindow() : null;
+      } else if (electron.dialog && typeof electron.dialog.showOpenDialog === "function") {
+        dialog = electron.dialog;
+        win = electron.BrowserWindow && typeof electron.BrowserWindow.getFocusedWindow === "function"
+          ? electron.BrowserWindow.getFocusedWindow()
+          : null;
+      }
+    } catch (error) {}
+    if (!dialog) {
+      try {
+        const remote = require("@electron/remote");
+        if (remote && remote.dialog) {
+          dialog = remote.dialog;
+          win = typeof remote.getCurrentWindow === "function" ? remote.getCurrentWindow() : null;
+        }
+      } catch (error) {}
+    }
+    if (!dialog || typeof dialog.showOpenDialog !== "function") return undefined;
+    const options = {
+      title: "选择导出位置",
+      properties: ["openDirectory", "createDirectory"],
+    };
+    if (defaultPath) options.defaultPath = defaultPath;
+    try {
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options);
+      if (!result || result.canceled || !result.filePaths || !result.filePaths[0]) return null;
+      return String(result.filePaths[0]);
+    } catch (error) {
+      console.error("jam-deck export directory dialog failed", error);
+      return undefined;
+    }
+  }
+
+  showPowerShellDirectoryPicker(defaultPath) {
+    const { exec } = require("child_process");
+    const safe = String(defaultPath || "").replace(/'/g, "''");
+    const ps = `
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = '选择导出位置'
+$d.ShowNewFolderButton = $true
+if ('${safe}') { try { $d.SelectedPath = '${safe}' } catch {} }
+$r = $d.ShowDialog()
+if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+  Write-Output $d.SelectedPath
+}
+`;
+    const encoded = Buffer.from(ps, "utf16le").toString("base64");
+    return new Promise((resolve) => {
+      exec(`powershell -NoProfile -STA -EncodedCommand ${encoded}`, { timeout: 120000, windowsHide: true }, (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        const line = String(stdout || "").trim().split(/\r?\n/).filter(Boolean).pop() || "";
+        resolve(line || null);
+      });
+    });
+  }
+
+  async pickCanvasExportDirectory() {
+    const defaultPath = this.settings && this.settings.canvasExportDir || "";
+    const electronPick = await this.showElectronDirectoryPicker(defaultPath);
+    let picked = electronPick;
+    if (picked === undefined) {
+      picked = process.platform === "win32" ? await this.showPowerShellDirectoryPicker(defaultPath) : null;
+      if (picked == null && process.platform !== "win32") {
+        new Notice("Jam Deck：当前环境无法选择导出目录");
+      }
+    }
+    if (!picked) return null;
+    this.settings.canvasExportDir = picked;
+    try { await this.saveSettings(); } catch (error) {}
+    return picked;
+  }
+
+  async copyVaultFileToOsDir(file, dir) {
+    const fs = require("fs");
+    const pathApi = require("path");
+    if (!file || !file.path || !dir) throw new Error("缺少导出文件或目录");
+    const dest = jamDeckUniqueOsCopyPath(dir, pathApi.basename(file.path), (candidate) => fs.existsSync(candidate));
+    if (!dest) throw new Error("无法生成导出路径");
+    try {
+      const src = this.absoluteFromVaultRel(file.path);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+        return dest;
+      }
+    } catch (error) {}
+    const data = await this.app.vault.readBinary(file);
+    fs.writeFileSync(dest, Buffer.from(data));
+    return dest;
+  }
+
+  async exportCanvasMediaFiles(files) {
+    const list = Array.isArray(files) ? files.filter((file) => file && file.path && !Array.isArray(file.children)) : [];
+    if (!list.length) {
+      new Notice("Jam Deck：没有可导出的图片或视频");
+      return false;
+    }
+    const dir = await this.pickCanvasExportDirectory();
+    if (!dir) return false;
+    let copied = 0;
+    let skipped = 0;
+    for (const file of list) {
+      try {
+        await this.copyVaultFileToOsDir(file, dir);
+        copied += 1;
+      } catch (error) {
+        console.error("jam-deck canvas export failed", file && file.path, error);
+        skipped += 1;
+      }
+    }
+    if (copied && !skipped) {
+      new Notice(copied === 1 ? "Jam Deck：已导出 1 个附件" : `Jam Deck：已导出 ${copied} 个附件`);
+      return true;
+    }
+    if (copied && skipped) {
+      new Notice(`Jam Deck：已导出 ${copied} 个附件，跳过 ${skipped} 个`);
+      return true;
+    }
+    new Notice("Jam Deck：导出失败");
+    return false;
   }
 
   async hydrateClipboardImageDrag(card, item, vaultPath, resourceUrl) {
@@ -16874,6 +17489,112 @@ class JamDeckPlugin extends Plugin {
     return file && typeof file.path === "string" ? file.path : "";
   }
 
+  localShortcutLinkRel(shortcutId) {
+    if (!/^sc-[A-Za-z0-9_-]+$/.test(String(shortcutId || ""))) return null;
+    return `${SHORTCUT_LINK_DIR}/${shortcutId}.lnk`;
+  }
+
+  absoluteFromVaultRel(rel) {
+    const pathApi = require("path");
+    const adapter = this.app && this.app.vault && this.app.vault.adapter;
+    if (!adapter || typeof adapter.getBasePath !== "function") throw new Error("vault base path unavailable");
+    return pathApi.resolve(adapter.getBasePath(), rel);
+  }
+
+  async ensureShortcutLinkDir() {
+    const { vault } = this.app;
+    if (!vault.getAbstractFileByPath(SHORTCUT_LINK_DIR)) {
+      try { await vault.createFolder(SHORTCUT_LINK_DIR); } catch (error) {}
+    }
+  }
+
+  createWindowsShortcutFile(destAbs, targetAbs) {
+    const { exec } = require("child_process");
+    const pathApi = require("path");
+    const safeDest = String(destAbs).replace(/'/g, "''");
+    const safeTarget = String(targetAbs).replace(/'/g, "''");
+    let workDir = "";
+    try { workDir = pathApi.dirname(targetAbs).replace(/'/g, "''"); } catch (error) {}
+    const ps = `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${safeDest}'); $s.TargetPath='${safeTarget}'; if('${workDir}'){ $s.WorkingDirectory='${workDir}' }; $s.Save()`;
+    const encoded = Buffer.from(ps, "utf16le").toString("base64");
+    return new Promise((resolve) => {
+      exec(`powershell -NoProfile -EncodedCommand ${encoded}`, { timeout: 15000 }, () => resolve());
+    });
+  }
+
+  async persistLocalShortcutLink(absolutePath, shortcutId) {
+    const rel = this.localShortcutLinkRel(shortcutId);
+    if (!rel || !absolutePath) return null;
+    const adapter = this.app && this.app.vault && this.app.vault.adapter;
+    if (!adapter || typeof adapter.getBasePath !== "function") return null;
+    let fs;
+    let pathApi;
+    try {
+      fs = require("fs");
+      pathApi = require("path");
+    } catch (error) {
+      return null;
+    }
+    try {
+      await this.ensureShortcutLinkDir();
+      const destAbs = this.absoluteFromVaultRel(rel);
+      const destDir = pathApi.dirname(destAbs);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const source = pathApi.resolve(absolutePath);
+      if (pathApi.extname(source).toLowerCase() === ".lnk") {
+        if (source.replace(/[\\/]+/g, "\\").toLowerCase() !== destAbs.replace(/[\\/]+/g, "\\").toLowerCase()) fs.copyFileSync(source, destAbs);
+      } else {
+        await this.createWindowsShortcutFile(destAbs, source);
+      }
+      return fs.existsSync(destAbs) ? rel : null;
+    } catch (error) {
+      console.error("jam-deck local shortcut record failed", error);
+      return null;
+    }
+  }
+
+  resolveOpenableShortcutPath(shortcut) {
+    if (this.isUrlShortcut(shortcut)) return this.getShortcutTarget(shortcut);
+    let fs;
+    try { fs = require("fs"); } catch (error) { return String(shortcut && shortcut.path || ""); }
+    const original = String(shortcut && shortcut.path || "");
+    const rel = this.normalizeShortcutIconPath(shortcut && shortcut.localPath);
+    let localAbs = "";
+    if (rel) {
+      try { localAbs = this.absoluteFromVaultRel(rel); } catch (error) {}
+    }
+    const exists = (value) => {
+      try { return !!(value && fs.existsSync(value)); } catch (error) { return false; }
+    };
+    if (exists(original)) return original;
+    if (exists(localAbs)) return localAbs;
+    return localAbs || original;
+  }
+
+  async ensureLocalShortcutRecords() {
+    return this.enqueueShortcutMutation(async () => {
+      let fs;
+      try { fs = require("fs"); } catch (error) { return false; }
+      let changed = false;
+      for (const shortcut of this.getAllShortcuts()) {
+        if (!shortcut || this.isUrlShortcut(shortcut) || shortcut.localPath || !shortcut.path) continue;
+        try { if (!fs.existsSync(shortcut.path)) continue; } catch (error) { continue; }
+        const localPath = await this.persistLocalShortcutLink(shortcut.path, shortcut.id);
+        if (!localPath) continue;
+        shortcut.localPath = localPath;
+        changed = true;
+      }
+      if (!changed) return false;
+      try {
+        await this.saveSettings();
+      } catch (error) {
+        console.error("jam-deck shortcut local records save failed", error);
+        return false;
+      }
+      return true;
+    });
+  }
+
   async addDroppedShortcuts(widgetId, files) {
     const widget = this.settings.widgets.find((item) => item.id === widgetId);
     if (!widget) return;
@@ -16895,6 +17616,7 @@ class JamDeckPlugin extends Plugin {
     const added = [];
     const failed = [];
     const iconPaths = [];
+    const localPaths = [];
     for (const file of files) {
       const droppedPath = this.getDroppedFilePath(file);
       if (!droppedPath) {
@@ -16915,7 +17637,9 @@ class JamDeckPlugin extends Plugin {
           iconPath = await this.extractExeIcon(absolutePath, id);
           if (iconPath) iconPaths.push(iconPath);
         }
-        added.push({ id, name, path: absolutePath, isFolder, iconPath });
+        const localPath = await this.persistLocalShortcutLink(absolutePath, id);
+        if (localPath) localPaths.push(localPath);
+        added.push({ id, name, path: absolutePath, isFolder, iconPath, localPath: localPath || null });
         seen.add(key);
       } catch (error) {
         failed.push(file.name || droppedPath);
@@ -16931,7 +17655,7 @@ class JamDeckPlugin extends Plugin {
     } catch (error) {
       const addedIds = new Set(added.map((shortcut) => shortcut.id));
       widget.config.shortcuts = widget.config.shortcuts.filter((shortcut) => !addedIds.has(shortcut.id));
-      await this.removeVaultFiles(iconPaths);
+      await this.removeVaultFiles([...iconPaths, ...localPaths]);
       new Notice("Jam Deck：快捷方式保存失败");
       return;
     }
@@ -16993,13 +17717,16 @@ class JamDeckPlugin extends Plugin {
         Object.assign(next, { name, kind: "url", url: normalizedUrl.url, isFolder: false });
         delete next.path;
         delete next.iconPath;
+        delete next.localPath;
         if (!existing) widget.config.shortcuts.push(next);
       } else {
         const isFolder = !/\.(exe|lnk|bat|cmd|app)$/i.test(path);
         let iconPath = existing ? this.resolveShortcutIconPath(existing) || existing.iconPath || null : null;
         if (!isFolder && (!existing || existing.path !== path || !iconPath)) iconPath = await this.extractExeIcon(path, id);
+        let localPath = existing && existing.path === path ? existing.localPath || null : null;
+        if (!localPath) localPath = await this.persistLocalShortcutLink(path, id);
         const next = existing || { id };
-        Object.assign(next, { name, path, isFolder, iconPath });
+        Object.assign(next, { name, path, isFolder, iconPath, localPath: localPath || null });
         delete next.kind;
         delete next.url;
         if (!existing) widget.config.shortcuts.push(next);
@@ -17036,6 +17763,7 @@ class JamDeckPlugin extends Plugin {
         return false;
       }
       await this.cleanupManagedShortcutIcon(shortcut);
+      await this.cleanupManagedShortcutLink(shortcut);
       this.renderAllViews();
       return true;
     });
@@ -17091,6 +17819,51 @@ class JamDeckPlugin extends Plugin {
     }
   }
 
+  async cleanupManagedShortcutLink(shortcut) {
+    const rel = this.normalizeShortcutIconPath(shortcut && shortcut.localPath) || this.localShortcutLinkRel(shortcut && shortcut.id);
+    if (!rel || !shortcut || !/^sc-[A-Za-z0-9_-]+$/.test(String(shortcut.id || ""))) return false;
+    const prefix = `${SHORTCUT_LINK_DIR}/`;
+    if (!rel.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+    const relative = rel.slice(prefix.length);
+    if (relative.includes("/") || relative.toLowerCase() !== `${String(shortcut.id).toLowerCase()}.lnk`) return false;
+    const targetKey = rel.normalize("NFC").toLowerCase();
+    const shared = this.getAllShortcuts().some((item) => {
+      const exact = this.normalizeShortcutIconPath(item && item.localPath);
+      return exact && exact.normalize("NFC").toLowerCase() === targetKey;
+    });
+    if (shared) return false;
+    let fs;
+    let pathApi;
+    try {
+      fs = require("fs");
+      pathApi = require("path");
+      const base = this.app.vault.adapter.getBasePath();
+      const dirReal = fs.realpathSync(pathApi.resolve(base, SHORTCUT_LINK_DIR));
+      const fileReal = fs.realpathSync(pathApi.resolve(base, rel));
+      const realRelative = pathApi.relative(dirReal, fileReal);
+      if (!realRelative || realRelative.startsWith("..") || pathApi.isAbsolute(realRelative) || realRelative.includes(pathApi.sep)) return false;
+    } catch (error) {
+      return false;
+    }
+    const file = this.app.vault.getAbstractFileByPath(rel);
+    if (file) {
+      try {
+        if (this.app.fileManager && typeof this.app.fileManager.trashFile === "function") await this.app.fileManager.trashFile(file);
+        else await this.app.vault.delete(file);
+        return true;
+      } catch (error) {
+        console.error("jam-deck managed shortcut record cleanup failed", error);
+        return false;
+      }
+    }
+    try {
+      fs.unlinkSync(pathApi.resolve(this.app.vault.adapter.getBasePath(), rel));
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   async openShortcut(shortcut) {
     try {
       const { shell } = require("electron");
@@ -17103,7 +17876,12 @@ class JamDeckPlugin extends Plugin {
         await shell.openExternal(normalized.url);
         return true;
       }
-      const error = await shell.openPath(shortcut.path);
+      const target = this.resolveOpenableShortcutPath(shortcut);
+      if (!target) {
+        new Notice("Jam Deck：无法打开，请检查路径");
+        return false;
+      }
+      const error = await shell.openPath(target);
       if (error) {
         new Notice(`Jam Deck：打开失败 — ${error}`);
         return false;
@@ -17401,4 +18179,11 @@ JamDeckPlugin.dshRpc = jamDeckDshRpc;
 JamDeckPlugin.prepareDshWorkspace = jamDeckPrepareDshWorkspace;
 JamDeckPlugin.AI_LOCAL_WEB_URL = AI_LOCAL_WEB_URL;
 JamDeckPlugin.selectedCanvasNodes = jamDeckSelectedCanvasNodes;
+JamDeckPlugin.canvasExportHelpers = {
+  isMedia: jamDeckIsCanvasExportableMedia,
+  files: jamDeckSelectedExportableCanvasFiles,
+  uniquePath: jamDeckUniqueOsCopyPath,
+  imageExtensions: JAM_DECK_CANVAS_IMAGE_EXTENSIONS,
+  videoExtensions: JAM_DECK_CANVAS_VIDEO_EXTENSIONS,
+};
 module.exports = JamDeckPlugin;

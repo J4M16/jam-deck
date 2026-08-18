@@ -815,7 +815,8 @@
   opacity: 0;
   transition: none;
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar {
+.jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar,
+.jam-deck-canvas-leaf .jam-deck-canvas-export-toolbar {
   position: relative;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar.is-loading {
@@ -3648,6 +3649,80 @@
 .jam-deck-canvas-leaf .canvas-menu,
 .jam-deck-canvas-leaf .jam-deck-drawing-palette {
   z-index: 100 !important;
+}
+
+/* Canvas stage: one embed fills the Obsidian window and hides native chrome */
+body.is-jam-deck-canvas-stage {
+  --header-height: 0px;
+  --ribbon-width: 0px;
+}
+body.is-jam-deck-canvas-stage .titlebar,
+body.is-jam-deck-canvas-stage .titlebar-inner,
+body.is-jam-deck-canvas-stage .titlebar-button-container,
+body.is-jam-deck-canvas-stage .status-bar,
+body.is-jam-deck-canvas-stage .workspace-ribbon,
+body.is-jam-deck-canvas-stage .workspace-split.mod-left-split,
+body.is-jam-deck-canvas-stage .workspace-split.mod-right-split,
+body.is-jam-deck-canvas-stage .workspace-tab-header-container,
+body.is-jam-deck-canvas-stage .workspace-tab-header-container-inner,
+body.is-jam-deck-canvas-stage .mod-top-left-space,
+body.is-jam-deck-canvas-stage .mod-top-right-space,
+body.is-jam-deck-canvas-stage .workspace-sidedock-vault-profile,
+body.is-jam-deck-canvas-stage .view-header {
+  display: none !important;
+}
+body.is-jam-deck-canvas-stage .workspace-tabs .workspace-leaf:not(:has([data-type="jam-deck-view"])) {
+  display: none !important;
+}
+body.is-jam-deck-canvas-stage > .jam-deck-root.is-jam-deck-canvas-stage {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10000;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+}
+body.is-jam-deck-canvas-stage .jam-deck-root.is-jam-deck-canvas-stage > .jam-deck-toolbar,
+body.is-jam-deck-canvas-stage .jam-deck-root.is-jam-deck-canvas-stage > .jam-deck-ai-fab,
+body.is-jam-deck-canvas-stage .jam-deck-root.is-jam-deck-canvas-stage > .jam-deck-ai-chat,
+body.is-jam-deck-canvas-stage .jam-deck-root.is-jam-deck-canvas-stage .jam-deck-sash-handle,
+body.is-jam-deck-canvas-stage .jam-deck-root.is-jam-deck-canvas-stage .jam-deck-sash-dot {
+  display: none !important;
+}
+body.is-jam-deck-canvas-stage .jam-deck-root.is-jam-deck-canvas-stage .jam-deck-grid {
+  padding: 0;
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+body.is-jam-deck-canvas-stage .jam-deck-widget:not(.is-jam-deck-canvas-stage) {
+  display: none !important;
+}
+body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage {
+  position: relative;
+  z-index: 2;
+  grid-column: 1 / -1 !important;
+  grid-row: 1 / -1 !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-deck-widget-header,
+body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-deck-widget-compact-restore {
+  display: none !important;
+}
+body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-deck-widget-body {
+  padding: 0;
+  overflow: hidden;
+}
+.jam-deck-canvas-leaf .jam-deck-canvas-stage-toggle[aria-pressed="true"] {
+  color: var(--jd-accent, var(--interactive-accent));
 }
 
 @media (hover: none), (pointer: coarse) {

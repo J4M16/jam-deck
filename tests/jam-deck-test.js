@@ -60,9 +60,47 @@ assert(styleSource.includes("Embedded Canvas image nodes and geometric stacks"),
 assert(styleSource.includes("Jam Deck Canvas Spatial toolbar and fixed-width annotation"), "Canvas annotation visual layer must remain explicit and reversible");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-card-menu.jam-deck-node-toolbar--spatial"), "native Canvas toolbar restyling must stay inside the embedded leaf");
 assert(pluginSource.includes("class CanvasSelectionToolbarController"), "Canvas AI must keep a dedicated native selection-toolbar controller");
+assert(pluginSource.includes("class CanvasStageController"), "embedded Canvas must own a dedicated stage/fullscreen controller");
+assert(pluginSource.includes('querySelector(".canvas-controls")'), "Canvas stage must mount on the native zoom cluster, not the selection popup");
+assert(pluginSource.includes('className = "clickable-icon canvas-control-item jam-deck-canvas-stage-toggle"'), "Canvas stage must reuse native control chrome instead of a new Spatial bar");
+assert(pluginSource.includes('setIcon(this.button, this.active ? "minimize-2" : "maximize-2")'), "Canvas stage must toggle maximize/minimize icons");
+assert(pluginSource.includes('setAttribute("aria-label", this.active ? "退出全屏" : "全屏")'), "Canvas stage must expose a fullscreen control label");
+assert(pluginSource.includes("body.addClass(\"is-jam-deck-canvas-stage\")"), "Canvas stage must mark the document so Obsidian chrome can hide");
+assert(pluginSource.includes("this.setSplitCollapsed(workspace.leftSplit, true)") && pluginSource.includes("this.setSplitCollapsed(workspace.rightSplit, true)"), "Canvas stage must collapse both Obsidian sidebars");
+assert(pluginSource.includes("snapshot.left === true") && pluginSource.includes("snapshot.right === true"), "leaving Canvas stage must restore the previous sidebar collapsed state");
+assert(pluginSource.includes("event.key !== \"Escape\"") && pluginSource.includes("this.exit()"), "Escape must leave Canvas stage");
+assert(pluginSource.includes("deckRoot.classList.contains(\"is-jam-deck-presenting\")"), "present overlay Escape must win over Canvas stage");
+assert(pluginSource.includes("entry.stageController = new CanvasStageController(this, entry)"), "Canvas runtime mount must create a stage controller");
+assert(pluginSource.includes("entry.stageController.install()"), "Canvas runtime mount must install the stage controller after Canvas open");
+assert(pluginSource.includes("this.controlsObserver = new MutationObserverCtor(() => this.scheduleEnsureButton())"), "Canvas stage must coalesce control rebuilds instead of rewriting the button on every Canvas mutation");
+assert(pluginSource.includes("if (this.button && this.button.isConnected && this.groupEl && this.groupEl.parentElement === controls) {\n      return this.button;"), "Canvas stage must not call setIcon when the fullscreen button is already mounted");
+assert(pluginSource.includes("button SVG, which would retrigger the observer and freeze the workbench"), "Canvas stage must keep the MutationObserver hang comment next to the early return");
+assert(pluginSource.includes("exitAllStages()") && pluginSource.includes("this.exitAllStages()"), "re-rendering the workbench must leave Canvas stage before parking leaves");
+assert(!pluginSource.includes("requestFullscreen"), "Canvas stage must use the window fullscreen API, not element.requestFullscreen");
+assert(pluginSource.includes("win.setFullScreen(true)") && pluginSource.includes("app:toggle-fullscreen"), "Canvas stage must enter OS fullscreen so the Windows taskbar hides");
+assert(pluginSource.includes("win.setMenuBarVisibility(false)"), "Canvas stage must hide the native Electron menu bar when the API exists");
+assert(styleSource.includes("body.is-jam-deck-canvas-stage .titlebar") && styleSource.includes("body.is-jam-deck-canvas-stage .titlebar-button-container") && styleSource.includes("body.is-jam-deck-canvas-stage .workspace-ribbon") && styleSource.includes("body.is-jam-deck-canvas-stage .workspace-split.mod-left-split") && styleSource.includes("body.is-jam-deck-canvas-stage .workspace-tab-header-container") && styleSource.includes("body.is-jam-deck-canvas-stage .status-bar"), "Canvas stage CSS must hide Obsidian title, ribbon, sidebars, tabs, and status");
+assert(styleSource.includes("body.is-jam-deck-canvas-stage .workspace-tabs .workspace-leaf:not(:has([data-type=\"jam-deck-view\"]))"), "Canvas stage must hide sibling workspace tabs without hiding the detached Canvas leaf");
+assert(styleSource.includes("body.is-jam-deck-canvas-stage > .jam-deck-root.is-jam-deck-canvas-stage") && styleSource.includes("position: fixed !important;"), "Canvas stage must pin the workbench root to the viewport so Canvas keeps a real size and covers the menu bar");
+assert(styleSource.includes("body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage") && styleSource.includes("grid-column: 1 / -1 !important"), "the staged canvas widget must span the workbench grid instead of leaving the flow");
+assert(!styleSource.includes("body.is-jam-deck-canvas-stage .workspace-leaf,\nbody.is-jam-deck-canvas-stage .workspace-leaf-content"), "Canvas stage must not force every workspace leaf to 100% height");
+assert(pluginSource.includes('createComment("jam-deck-canvas-stage-anchor")'), "Canvas stage must leave an anchor comment so the workbench root can return to the leaf");
+assert(pluginSource.includes("this.relocateRoot(true)") && pluginSource.includes("this.relocateRoot(false)"), "Canvas stage must move the workbench root onto document.body and restore it on exit");
+assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-stage-toggle"), "stage toggle styling must stay inside the embedded Canvas leaf");
 assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Canvas AI must target the native selection popup, not the bottom card palette");
 assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Canvas AI must not resolve the bottom card palette");
 assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas AI must only appear for one authoritative selected node");
+assert(pluginSource.includes("ensureExportToolbarButton(menu)"), "Canvas export must mount on the native selection popup");
+assert(pluginSource.includes('className = "clickable-icon jam-deck-canvas-export-toolbar"'), "Canvas export must reuse native clickable-icon chrome");
+assert(pluginSource.includes('setIcon(button, "download")'), "Canvas export must use the download icon");
+assert(pluginSource.includes('setAttribute("aria-label", "导出选中附件")'), "Canvas export must expose an export label");
+assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl") && pluginSource.includes("jam-deck-canvas-export-toolbar"), "Canvas export must live on .canvas-menu, not a new Spatial bar");
+assert(pluginSource.includes("jamDeckSelectedExportableCanvasFiles") && pluginSource.includes("JAM_DECK_CANVAS_VIDEO_EXTENSIONS"), "Canvas export must collect images, GIFs, and videos from the current selection");
+assert(pluginSource.includes("exportCanvasMediaFiles(files)") && pluginSource.includes("copyFileSync"), "Canvas export must copy vault attachments to a chosen OS folder");
+assert(pluginSource.includes("showOpenDialog") && pluginSource.includes("FolderBrowserDialog"), "Canvas export must pick a destination directory with a system folder dialog");
+assert(pluginSource.includes("if (this.exportToolbarButton && this.exportToolbarButton.isConnected && this.exportToolbarButton.parentElement === menu) return this.exportToolbarButton;"), "Canvas export must not rewrite its icon after the button is mounted");
+assert(pluginSource.includes("this.exportToolbarButton.remove()"), "Canvas export must remove its toolbar button on destroy");
+assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-export-toolbar"), "Canvas export styling must stay inside the embedded Canvas leaf");
 assert(pluginSource.includes("hijackNativeFocusButton(menu)"), "native Canvas focus must be hijacked on the selection toolbar");
 assert(pluginSource.includes("onFocusHotkey(event)") && pluginSource.includes('code === "KeyF"'), "fullscreen preview must bind F as a selection-toolbar hotkey including video KeyF");
 assert(pluginSource.includes("isToolbarArmed()") && pluginSource.includes("openSelectedNodeFocus()"), "F must require the floating selection toolbar before opening fullscreen preview");
@@ -255,6 +293,17 @@ assert(pluginSource.indexOf('cls: `jam-deck-task-category') < pluginSource.index
 assert(pluginSource.includes('const SHORTCUT_DRAG_MIME = "application/x-jam-deck-shortcut+json"'), "launcher reorder must use a private drag MIME");
 assert(pluginSource.includes('kind: "url"'), "launcher must persist URL shortcuts as an explicit kind");
 assert(pluginSource.includes("resolveShortcutIconPath(shortcut)"), "launcher icon rendering must resolve converted WebP files");
+assert(pluginSource.includes('const SHORTCUT_LINK_DIR = "attachments/jam-deck-shortcuts"'), "local shortcuts must keep a vault-owned .lnk record");
+assert(pluginSource.includes("persistLocalShortcutLink(absolutePath, shortcutId)"), "dropping a local shortcut must copy or create a vault .lnk");
+assert(pluginSource.includes("resolveOpenableShortcutPath(shortcut)"), "opening a local shortcut must fall back to the vault .lnk when the original path is gone");
+assert(pluginSource.includes("cleanupManagedShortcutLink(shortcut)"), "deleting a shortcut must remove only the managed local .lnk record");
+assert(pluginSource.includes("ensureLocalShortcutRecords()"), "existing local shortcuts still on disk must get a vault .lnk record");
+{
+  const launcherRender = pluginSource.slice(pluginSource.indexOf("renderLauncher(body, widget) {"), pluginSource.indexOf("renderMusicPlayer(body, widget) {"));
+  assert(launcherRender.includes("if (this.plugin.settings.editMode)"), "launcher edit controls must be gated");
+  assert(launcherRender.indexOf('text: "×"') > launcherRender.indexOf("if (this.plugin.settings.editMode)"), "shortcut delete must live inside edit mode");
+  assert(launcherRender.includes("只会从 Jam Deck 移除本地记录"), "shortcut delete copy must mention the local record");
+}
 assert(pluginSource.includes('"aria-live": "polite"'), "launcher reorder must announce position changes");
 assert(styleSource.includes(".jam-deck-launcher-item.is-insert-before::before"), "launcher reorder must use a thin insertion indicator");
 assert(pluginSource.includes("applyAnimationSetting()") && pluginSource.includes("jam-deck-no-motion"), "the deck must sync the animation class from settings");
@@ -346,6 +395,40 @@ assert(!JamDeckPlugin.isNativeCanvasFocusButton({
   getAttribute: (name) => name === "aria-label" ? "将选中节点发送给 AI" : "",
   classList: { contains: (name) => name === "jam-deck-canvas-ai-toolbar" },
 }), "Jam Deck toolbar actions must not be treated as the native focus button");
+assert(!JamDeckPlugin.isNativeCanvasFocusButton({
+  getAttribute: (name) => name === "aria-label" ? "导出选中附件" : "",
+  classList: { contains: (name) => name === "jam-deck-canvas-export-toolbar" },
+}), "Canvas export must not be treated as the native focus button");
+const canvasExport = JamDeckPlugin.canvasExportHelpers;
+assert(canvasExport, "Canvas export helpers must be exported for fixtures");
+assert(canvasExport.isMedia({ type: "file", file: "shot.gif" }), "GIF nodes must be exportable");
+assert(canvasExport.isMedia({ type: "file", file: "clip.mp4" }), "video file nodes must be exportable");
+assert(canvasExport.isMedia({ type: "file", file: "Work/pic.webp" }), "image file nodes must be exportable");
+assert(!canvasExport.isMedia({ type: "file", file: "Work/brief.md" }), "Markdown notes must not count as exportable media");
+assert(!canvasExport.isMedia({ type: "text", text: "hello" }), "text nodes must not count as exportable media");
+assert(!canvasExport.isMedia({ type: "link", url: "https://example.com" }), "link nodes must not count as exportable media");
+const exportGif = { getData: () => ({ type: "file", file: "a.gif" }) };
+const exportVideo = { getData: () => ({ type: "file", file: "b.mp4" }) };
+const exportText = { getData: () => ({ type: "text", text: "skip" }) };
+const exportVault = {
+  getAbstractFileByPath: (vaultPath) => ({ path: vaultPath }),
+};
+assert.deepStrictEqual(
+  canvasExport.files({ selection: new Set([exportGif, exportVideo, exportText]) }, exportVault).map((file) => file.path),
+  ["a.gif", "b.mp4"],
+  "multi-select must export only image/GIF/video attachments from the authoritative selection",
+);
+assert.deepStrictEqual(
+  canvasExport.files({ selection: new Set([exportText]) }, exportVault),
+  [],
+  "text-only selection must not expose exportable files",
+);
+const occupied = new Set([path.join("D:", "out", "a.gif")]);
+assert.strictEqual(
+  canvasExport.uniquePath(path.join("D:", "out"), "a.gif", (candidate) => occupied.has(candidate)),
+  path.join("D:", "out", "a (1).gif"),
+  "export must not overwrite an existing file with the same name",
+);
 const selectedLinkNode = { getData: () => ({ type: "link", url: "https://miro.com/board" }) };
 assert.deepStrictEqual(
   JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedLinkNode]) }),
@@ -983,6 +1066,7 @@ async function testCanvasNativeConflictLifecycle() {
     folderController: { destroy() { ownerCalls.push("folder-listener"); } },
     imageStackController: { destroy() { ownerCalls.push("stack-listener"); } },
     selectionToolbarController: { destroy() { ownerCalls.push("selection-toolbar-listener"); } },
+    stageController: { destroy() { ownerCalls.push("stage-listener"); } },
     inkOverlay: { async destroy() { ownerCalls.push("ink-listener"); } },
     returnEpoch: 0,
     returnParked: false,
@@ -991,7 +1075,7 @@ async function testCanvasNativeConflictLifecycle() {
   await adapter.suspendForNativeConflict(entry.widgetId);
   await adapter.suspendForNativeConflict(entry.widgetId);
   assert.strictEqual(ownerCalls.filter((call) => call === "remove").length, 1, "one conflict burst must park the owned leaf once");
-  assert(ownerCalls.includes("drop-listener") && ownerCalls.includes("link-listener") && ownerCalls.includes("stack-listener") && ownerCalls.includes("selection-toolbar-listener"), "quiet conflict teardown must remove owned Canvas interaction listeners");
+  assert(ownerCalls.includes("drop-listener") && ownerCalls.includes("link-listener") && ownerCalls.includes("stack-listener") && ownerCalls.includes("selection-toolbar-listener") && ownerCalls.includes("stage-listener"), "quiet conflict teardown must remove owned Canvas interaction listeners");
   assert(!adapter.entries.has(entry.widgetId), "suspended conflict entries must not retain a live Canvas view");
   assert(!ownerCalls.includes("save") && !ownerCalls.includes("close"), "conflict suspension must never save/close the owned Canvas view");
   assert.strictEqual(ownerCalls.filter((call) => call === "unload").length, 1, "quiet conflict teardown must unload only the owned leaf");
@@ -3247,6 +3331,42 @@ async function testArchiveIntegration() {
   instance.settings.widgets[0].config.shortcuts.push({ id: "sc-user-icon", name: "User icon", path: "C:\\Apps\\User.exe", isFolder: false, iconPath: "attachments/user-owned/custom.webp" });
   await instance.deleteShortcut("launcher-test", "sc-user-icon");
   assert(files.has("attachments/user-owned/custom.webp"), "shortcut deletion must never remove an icon outside the managed icon directory");
+
+  instance.persistLocalShortcutLink = async (_abs, id) => {
+    const rel = `attachments/jam-deck-shortcuts/${id}.lnk`;
+    files.set(rel, Buffer.from("lnk"));
+    return rel;
+  };
+  await instance.addDroppedShortcuts("launcher-test", [{ name: "recorded", path: dropFolder }]);
+  const recorded = instance.settings.widgets[0].config.shortcuts.find((item) => item.name === path.basename(dropFolder) || item.path === path.resolve(dropFolder));
+  assert(recorded && recorded.localPath && recorded.localPath.startsWith("attachments/jam-deck-shortcuts/"), "dropped local shortcuts must keep a vault-owned .lnk record");
+  await instance.deleteShortcut("launcher-test", recorded.id);
+
+  const recordId = "sc-local-record";
+  const recordRel = `attachments/jam-deck-shortcuts/${recordId}.lnk`;
+  const vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-sc-"));
+  fs.mkdirSync(path.join(vaultRoot, "attachments", "jam-deck-shortcuts"), { recursive: true });
+  fs.writeFileSync(path.join(vaultRoot, "attachments", "jam-deck-shortcuts", `${recordId}.lnk`), "lnk");
+  instance.app.vault.adapter.getBasePath = () => vaultRoot;
+  files.set(recordRel, Buffer.from("lnk"));
+  instance.settings.widgets[0].config.shortcuts.push({
+    id: recordId,
+    name: "Moved",
+    path: "C:\\gone\\moved.lnk",
+    localPath: recordRel,
+    isFolder: false,
+  });
+  let openedFallback = "";
+  const fallbackLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (request === "electron") return { shell: { openExternal: async () => {}, openPath: async (value) => { openedFallback = value; return ""; } } };
+    return fallbackLoad.call(this, request, parent, isMain);
+  };
+  await instance.openShortcut(instance.settings.widgets[0].config.shortcuts.find((item) => item.id === recordId));
+  Module._load = fallbackLoad;
+  assert.strictEqual(openedFallback, path.join(vaultRoot, "attachments", "jam-deck-shortcuts", `${recordId}.lnk`), "moved original shortcuts must open the vault-owned .lnk record");
+  await instance.deleteShortcut("launcher-test", recordId);
+  assert(!files.has(recordRel), "deleting a shortcut must remove the managed local .lnk record");
 
   assert(await instance.addCanvasEmbedWidget("Work/Test.canvas"));
   const canvasWidget = instance.settings.widgets.find((item) => item.type === "canvas-embed");

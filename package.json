@@ -1,6 +1,6 @@
 {
   "name": "jam-deck",
-  "version": "0.31.7",
+  "version": "0.31.13",
   "private": true,
   "description": "Jam 的 Obsidian 副屏工作台插件：待办、时钟、音乐、剪贴板与画布组件的自适应网格。",
   "scripts": {
