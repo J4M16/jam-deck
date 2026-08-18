@@ -1,5 +1,52 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-18 — 0.31.13 Canvas 导出选中图 / GIF / 视频
+
+- Jam：Canvas 单选或多选图、GIF、视频时，能从悬浮工具栏导出，实质是把附件复制到指定位置。
+- 入口挂在原生 `.canvas-menu`，与 AI / 放映同一条，`clickable-icon` + `download`，不加厚底板。选中里有可导出媒体才显示；混选只拷图片/GIF/视频。
+- 系统目录选择走 Electron `showOpenDialog`，拿不到则用 Windows 文件夹对话框。复制用 `copyFileSync`，源不在磁盘则 `readBinary` 写出；重名加 `(1)` 后缀。上次目录记在设置里，下次当默认路径。不改 AI 单选，不改 F 放映。
+- 验证：标准。差异审查、`npm run verify`、部署与热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-17 — 0.31.12 快捷方式本地记录与编辑删除
+
+- Jam：移动原先保存的快捷方式后连接失效；要本地记录以便恢复；删除走编辑模式。
+- 本地项目写入 `attachments/jam-deck-shortcuts/{id}.lnk`：源是 `.lnk` 则复制，否则用 WScript 生成指向原路径的记录。打开时原路径不在就改开这份记录。启动后给库里还有效、但没有 localPath 的项补记。
+- 删除按钮移进编辑模式；删除只移除 Jam Deck 条目和托管 `.lnk`，不碰原文件。
+- 验证：标准。`npm run verify`、部署与热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-17 — 0.31.11 Canvas 全屏隐藏 Windows 任务栏
+
+- Jam 要求连桌面底部任务栏一起藏掉。仅铺满 Obsidian 窗口做不到，必须进系统全屏。
+- 进入舞台时 `BrowserWindow.setFullScreen(true)`，拿不到窗口对象则执行 `app:toggle-fullscreen`。记下进入前是否已全屏，退出时只还原我们改过的状态。F 放映仍用 `nofullscreen`。
+- 验证：快速。`npm run verify`、部署与热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-17 — 0.31.10 全屏空白与菜单栏
+
+- Jam 反馈：能进工作台，点全屏一片空白，菜单栏仍在。
+- 空白：舞台把 canvas-embed 设成 `position:absolute`，其它组件 `display:none` 后网格没有在流子项，高度塌掉，Canvas `onResize` 量到空矩形。
+- 菜单栏：只在内容区里藏 chrome，HTML 标题栏/原生菜单仍露在 overlay 外面。
+- 修复：进入时把 `.jam-deck-root` 挂到 `document.body` 并 `position:fixed; inset:0`；组件改回网格铺满；补充 titlebar 选择器；有 Electron API 时 `setMenuBarVisibility(false)`。退出还原锚点与菜单。
+- 验证：标准。`npm run verify`、部署与热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-17 — 0.31.9 修复全屏按钮把工作台卡死
+
+- Jam 重启后 Jam Deck 仍无响应。根因是 `CanvasStageController` 观察整个 Canvas leaf 的 `childList/subtree`，按钮已存在时仍调用 `syncButton()` → `setIcon()` 改 SVG，再次触发观察器，打开嵌入 Canvas 即死循环。
+- 修复：按钮已挂在 `.canvas-controls` 上则直接返回，不改图标；观察回调经 `requestAnimationFrame` 合并。`setIcon` 只在首次创建和进入/退出全屏时调用。
+- 验证：标准。`npm run verify` 全绿并已写入 Jamnote 插件目录（0.31.9）。Obsidian 仍卡死，`plugin:reload` 无响应，必须完全退出后再开才能吃到修复。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-17 — 0.31.8 原生 Canvas 全屏舞台
+
+- 需求：嵌入的原生 Canvas 增加全屏选项；点击后该组件占满整个屏幕，并隐藏 Obsidian 菜单栏与侧栏。
+- 入口放在 `.canvas-controls` 缩放簇（始终可见，不依赖选中节点），使用原生 `clickable-icon` + `maximize-2` / `minimize-2`，不另做厚工具条。F 仍只服务放映。
+- 进入：给 `body` / 工作台根 / 该 canvas-embed 打 `is-jam-deck-canvas-stage`；折叠左右侧栏并记下原状态；CSS 隐藏 titlebar、ribbon、页签栏、状态栏、view-header、工作台顶栏、AI 与其他组件；该 widget 绝对铺满网格。退出还原侧栏。销毁与 `parkAll` 都会先退出舞台。
+- 验证：快速。差异审查与 `npm run verify` 全绿；已部署到 Jamnote 副本并 `plugin:reload` 成功（0.31.8）。打开工作台后 CLI eval 无响应，进入/退出需 Jam 在右下角缩放簇点全屏按钮确认。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-17 — 0.31.7 合入 master 并发 GitHub Release
 
 - `develop` 上 0.31.7 已由 Codex 修好最大缩放文件夹消失；`npm run verify` 全绿后合入 `master`，打 tag `v0.31.7` 并发布 GitHub Release（上次发版为 v0.31.3）。
