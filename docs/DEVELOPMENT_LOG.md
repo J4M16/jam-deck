@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-18 — 0.31.13 合入 master 并发 GitHub Release
+
+- `develop` 上 0.31.8–0.31.13（Canvas 全屏舞台、快捷方式本地记录、选中媒体导出）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.13` 并发布 GitHub Release（上次发版为 v0.31.7）。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-18 — 0.31.13 Canvas 导出选中图 / GIF / 视频
 
 - Jam：Canvas 单选或多选图、GIF、视频时，能从悬浮工具栏导出，实质是把附件复制到指定位置。
