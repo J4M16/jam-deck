@@ -1848,7 +1848,7 @@
   width: min(620px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .jam-deck-folder-rename-input {
@@ -1877,7 +1877,38 @@
 .jam-deck-task-field { min-width: 0; display: grid; gap: 6px; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 9px; background: var(--background-secondary); }
 .jam-deck-task-form label { color: var(--text-normal); font-size: 11px; font-weight: 650; }
 .jam-deck-task-form input[type="text"],
-.jam-deck-task-form textarea { display: block; width: 100%; max-width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); font: inherit; font-size: 12px; line-height: 1.5; resize: vertical; }
+.jam-deck-task-form textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.jam-deck-task-form input[type="date"],
+.jam-deck-task-form select {
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.jam-deck-folder-rename-input,
+.jam-deck-shortcut-modal input,
+.jam-deck-browser-modal input,
+.jam-deck-canvas-picker input {
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
 .jam-deck-task-form input[type="text"]:focus,
 .jam-deck-task-form textarea:focus { border-color: var(--interactive-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent); }
 .jam-deck-task-hint { min-width: 0; color: var(--text-faint); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -3673,6 +3704,11 @@ body.is-jam-deck-canvas-stage .view-header {
 }
 body.is-jam-deck-canvas-stage .workspace-tabs .workspace-leaf:not(:has([data-type="jam-deck-view"])) {
   display: none !important;
+}
+body.is-jam-deck-canvas-stage .modal-container,
+body.is-jam-deck-canvas-stage .prompt,
+body.is-jam-deck-canvas-stage .suggestion-container {
+  z-index: 10001;
 }
 body.is-jam-deck-canvas-stage > .jam-deck-root.is-jam-deck-canvas-stage {
   position: fixed !important;

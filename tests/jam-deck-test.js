@@ -52,6 +52,11 @@ assert(pluginSource.includes("fileManager.trashFile"), "Canvas ink lifecycle cle
 assert(styleSource.includes(".theme-dark .jam-deck-root"), "Spatial dark tokens must follow Obsidian's dark theme class");
 assert(pluginSource.includes('imageField.addEventListener("paste"'), "task detail image field must accept pasted images");
 assert(pluginSource.includes("openNewTaskForDate(dateKey)"), "calendar dates must open due-date task drafts");
+assert(pluginSource.includes("function jamDeckShieldModalTyping"), "modals with fields must isolate typing from Canvas and document key handlers");
+assert(pluginSource.includes("jamDeckShieldModalTyping(this)"), "task and other typing modals must install the key shield");
+assert(pluginSource.includes("jamDeckIsTypingTarget(event.target) || jamDeckIsModalEvent(event)"), "present-mode keys must yield to modal and form fields");
+assert(styleSource.includes("-webkit-user-select: text") && styleSource.includes(".jam-deck-task-form input[type=\"text\"]"), "task modal fields must opt into text selection against Obsidian body user-select:none");
+assert(styleSource.includes("body.is-jam-deck-canvas-stage .modal-container"), "Canvas stage must not cover Obsidian modals");
 assert(!pluginSource.includes('placeholder: "新增待办…"'), "task widget must not retain the direct add composer");
 assert(styleSource.includes(".jam-deck-calendar-toolbar"), "calendar must expose month navigation styling");
 assert(styleSource.includes(".jam-deck-task-meta-fields"), "task detail category and due-date fields must remain responsive");

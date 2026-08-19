@@ -881,6 +881,29 @@ const DEFAULT_SETTINGS = {
   musicLauncher: { schemaVersion: 1, lastConnectedProvider: null },
 };
 
+function jamDeckIsTypingTarget(target) {
+  return !!(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function jamDeckIsModalEvent(event) {
+  const target = event && event.target;
+  return !!(target && target.closest && target.closest(".modal-container, .prompt, .suggestion-container"));
+}
+
+function jamDeckShieldModalTyping(modal) {
+  const root = modal && modal.containerEl;
+  if (!root || root.dataset.jamDeckTypingShield === "1") return;
+  root.dataset.jamDeckTypingShield = "1";
+  const shield = (event) => {
+    if (event.key === "Escape") return;
+    if (!jamDeckIsTypingTarget(event.target)) return;
+    event.stopPropagation();
+  };
+  for (const type of ["keydown", "keyup", "keypress", "beforeinput", "compositionstart", "compositionupdate", "compositionend"]) {
+    root.addEventListener(type, shield);
+  }
+}
+
 class WidgetPickerModal extends Modal {
   constructor(app, plugin) {
     super(app);
@@ -955,7 +978,8 @@ class CanvasFilePickerModal extends Modal {
     };
     search.addEventListener("input", renderList);
     renderList();
-    search.focus();
+    jamDeckShieldModalTyping(this);
+    setTimeout(() => { try { search.focus(); } catch (error) {} }, 0);
   }
 
   onClose() {
@@ -987,8 +1011,8 @@ class BrowserConfigModal extends Modal {
       value: (widget.config && widget.config.url) || "",
       attr: { placeholder: "https://example.com" },
     });
-    input.focus();
-    input.select();
+    jamDeckShieldModalTyping(this);
+    setTimeout(() => { try { input.focus(); input.select(); } catch (error) {} }, 0);
 
     const actions = contentEl.createDiv({ cls: "jam-deck-modal-actions" });
     const clear = actions.createEl("button", { text: "清空" });
@@ -1048,6 +1072,7 @@ class FolderRenameModal extends Modal {
     cancel.addEventListener("click", () => this.close());
     const ok = actions.createEl("button", { text: "确定", cls: "mod-cta jam-deck-folder-rename-btn" });
     ok.addEventListener("click", () => submit(input.value));
+    jamDeckShieldModalTyping(this);
     input.select();
     setTimeout(() => input.focus(), 0);
   }
@@ -1095,7 +1120,8 @@ class TaskDetailModal extends Modal {
     const refs = this.renderTaskFields(form, task);
     const images = this.renderTaskImages(form, task);
     this.renderTaskActions(form, task, refs, images);
-    refs.titleInput.focus();
+    jamDeckShieldModalTyping(this);
+    setTimeout(() => { try { refs.titleInput.focus(); } catch (error) {} }, 0);
   }
 
   renderTaskFields(form, task) {
@@ -1373,6 +1399,8 @@ class ShortcutEditorModal extends Modal {
     const pathInput = form.createEl("input", { type: "text", attr: { placeholder: "完整路径，或 https:// 网页链接" } });
     pathInput.value = (this.existing && (this.existing.url || this.existing.path)) || "";
 
+    jamDeckShieldModalTyping(this);
+    setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (error) {} }, 0);
     const hint = form.createDiv({ text: "支持应用、文件夹和 http / https 网页链接。本地项目会在库内保存一份 .lnk 记录，原快捷方式被挪走后仍可打开。", cls: "jam-deck-shortcut-hint" });
 
     const actions = form.createDiv({ cls: "jam-deck-modal-actions" });
@@ -3961,6 +3989,7 @@ class CanvasImageStackController {
 
   onPresentKeydown(event) {
     if (!this.imageFocus || !event) return false;
+    if (jamDeckIsTypingTarget(event.target) || jamDeckIsModalEvent(event)) return false;
     const key = String(event.key || "");
     const code = String(event.code || "");
     const isF = key === "f" || key === "F" || code === "KeyF";
@@ -5911,6 +5940,7 @@ class CanvasFolderController {
 
   onDocumentKeydown(event) {
     if (this.destroyed || !event) return;
+    if (jamDeckIsModalEvent(event) || jamDeckIsTypingTarget(event.target)) return;
     if (event.key === "Escape" && this.activePopover) {
       const trigger = this.activePopover.trigger;
       this.closeFolderColorPopover(true);

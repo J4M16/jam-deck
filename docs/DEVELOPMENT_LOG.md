@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-19 — 0.31.14 修复待办弹窗输入框无法使用
+
+- Jam：刚用 Jam Deck 新建待办，弹窗里的输入框全都用不了。
+- 实机：弹窗能打开，字段点得到、也有焦点，但 computed `user-select` 是从 `body` 继承的 `none`（Obsidian 1.13 不再给 `input/textarea` 单独设 `user-select: text`）。Windows 上这会让 IME 和选区失效，看起来像输入框坏了。嵌入 Canvas 仍是活动叶时，文档级按键也会抢走输入。
+- 修复：待办/快捷方式/浏览器/Canvas 选择/重命名弹窗字段显式 `user-select: text`；`jamDeckShieldModalTyping` 阻止按键冒泡到 Canvas；放映与文件夹 Escape 在弹窗内让路；Canvas 全屏舞台时把 modal 提到舞台之上。
+- 验证：快速。差异审查、`npm run verify`、部署与热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-18 — 0.31.13 合入 master 并发 GitHub Release
 
 - `develop` 上 0.31.8–0.31.13（Canvas 全屏舞台、快捷方式本地记录、选中媒体导出）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.13` 并发布 GitHub Release（上次发版为 v0.31.7）。
