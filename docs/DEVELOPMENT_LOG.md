@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-25 — 0.31.15 合入 master 并发 GitHub Release
+
+- `develop` 上 0.31.15（Linux CI 路径校验）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.15` 并发布 GitHub Release。GitHub Actions `ci` 已通过。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-25 — 0.31.15 修复 GitHub CI 路径校验
 
 - Jam：合入 master 后 GitHub Actions 红叉。日志是 `testAiLocalWebBootstrap` 期望 `D:\\Vault\\Notes`，Linux runner 得到空字符串。
