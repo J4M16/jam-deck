@@ -1,7 +1,7 @@
 {
   "id": "jam-deck",
   "name": "Jam Deck",
-  "version": "0.31.14",
+  "version": "0.31.15",
   "minAppVersion": "1.7.2",
   "description": "Jam 的副屏工作台：待办、时钟、音乐、剪贴板与画布组件的自适应网格。",
   "author": "Jam",
