@@ -46,15 +46,17 @@ const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
 
-function jamDeckPathImpl() {
-  return process.platform === "win32" ? nodePath.win32 : nodePath.posix;
+function jamDeckPathImpl(raw) {
+  if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\")) return nodePath.win32;
+  if (raw.startsWith("/")) return nodePath.posix;
+  return null;
 }
 
 function jamDeckCanonicalWindowsPath(value) {
   if (typeof value !== "string" || !value.trim()) return null;
   const raw = value.trim();
-  const impl = jamDeckPathImpl();
-  if (!impl.isAbsolute(raw)) return null;
+  const impl = jamDeckPathImpl(raw);
+  if (!impl) return null;
   return impl.normalize(raw).replace(/[\\/]+$/, "").toLocaleLowerCase("en-US");
 }
 

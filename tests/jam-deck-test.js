@@ -2909,6 +2909,12 @@ async function testAiLocalWebBootstrap() {
     "d:\\vault\\notes",
     "local workspace matching must canonicalize Windows paths",
   );
+  assert.strictEqual(
+    JamDeckPlugin.canonicalWindowsPath("/home/runner/vault/../vault"),
+    "/home/runner/vault",
+    "local workspace matching must canonicalize POSIX paths on Linux CI",
+  );
+  assert.strictEqual(JamDeckPlugin.localWorkspacePath("", "/home/runner/vault"), "/home/runner/vault");
   assert.strictEqual(JamDeckPlugin.canonicalWindowsPath("relative/notes"), null, "local workspace matching must reject relative paths");
   assert(!pluginSource.includes("D:\\\\jam16\\\\Jamnote") && !pluginSource.includes("D:\\jam16\\Jamnote"), "runtime must not hardcode a personal vault path");
   assert(pluginSource.includes("aiLocalWorkspacePath"), "local workspace path must be a settings field");

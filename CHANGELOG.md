@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## 0.31.15 — 2026-08-25
+
+- **修复 GitHub CI**：本地工作区路径按字符串识别 Windows / POSIX，不再用 `process.platform`。Linux runner 上 `D:\\Vault\\Notes` 这类测试不再被当成相对路径。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 0.31.14 — 2026-08-19
 
 - **修复新建/编辑待办弹窗输入框无法使用**：Obsidian 的 `body { user-select: none }` 会传到弹窗字段上，Windows 上中文输入法经常失效；嵌入 Canvas 的按键也会抢走输入。弹窗字段改为可选中可输入，并挡住 Canvas/放映层抢键。

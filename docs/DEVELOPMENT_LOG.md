@@ -1,5 +1,13 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-25 — 0.31.15 修复 GitHub CI 路径校验
+
+- Jam：合入 master 后 GitHub Actions 红叉。日志是 `testAiLocalWebBootstrap` 期望 `D:\\Vault\\Notes`，Linux runner 得到空字符串。
+- 根因：`jamDeckCanonicalWindowsPath` 用 `process.platform` 选 path 实现。Ubuntu 上 `path.posix.isAbsolute("D:\\Vault\\Notes")` 为假，回退成空路径。Node 20 警告不是失败原因。从 v0.31.7 起 master CI 一直如此。
+- 修复：按路径字符串选 win32 / posix（盘符或 UNC 用 win32，`/` 开头用 posix）。测试补 POSIX 规范化断言。
+- 验证：标准。差异审查、`npm run verify`。合入 master 后看 GitHub CI。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-25 — 0.31.14 合入 master 并发 GitHub Release
 
 - `develop` 上 0.31.14（修复待办弹窗无法输入）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.14` 并发布 GitHub Release（上次发版为 v0.31.13）。
