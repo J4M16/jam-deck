@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-25 — 0.31.14 合入 master 并发 GitHub Release
+
+- `develop` 上 0.31.14（修复待办弹窗无法输入）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.14` 并发布 GitHub Release（上次发版为 v0.31.13）。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-19 — 0.31.14 修复待办弹窗输入框无法使用
 
 - Jam：刚用 Jam Deck 新建待办，弹窗里的输入框全都用不了。
