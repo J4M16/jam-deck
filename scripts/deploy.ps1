@@ -30,6 +30,20 @@ if (-not (Test-Path -LiteralPath $targetManifestPath -PathType Leaf)) { throw "T
 $targetManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $targetManifestPath | ConvertFrom-Json
 if ($targetManifest.id -ne "jam-deck") { throw "Target manifest id is not jam-deck." }
 
+function Get-Sha256([string]$Path) {
+  $stream = [IO.File]::OpenRead($Path)
+  try {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+      return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "")
+    } finally {
+      $sha.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 function Get-DataState([string]$PluginDir) {
   $dataPath = Join-Path $PluginDir "data.json"
   if (-not (Test-Path -LiteralPath $dataPath -PathType Leaf)) {
@@ -39,7 +53,7 @@ function Get-DataState([string]$PluginDir) {
   return [PSCustomObject]@{
     Exists = $true
     Length = [long]$item.Length
-    Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $dataPath).Hash
+    Hash = Get-Sha256 $dataPath
   }
 }
 
@@ -84,8 +98,8 @@ try {
   if ($stagedManifest.id -ne "jam-deck") { throw "Staged manifest id is not jam-deck." }
 
   foreach ($name in $files) {
-    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repoRoot $name)).Hash
-    $stageHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $staging $name)).Hash
+    $sourceHash = Get-Sha256 (Join-Path $repoRoot $name)
+    $stageHash = Get-Sha256 (Join-Path $staging $name)
     if ($sourceHash -ne $stageHash) { throw "Staging hash mismatch: $name" }
     $targetPath = Join-Path $target $name
     if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
@@ -106,8 +120,8 @@ try {
     }
     Copy-Item -LiteralPath (Join-Path $staging $name) -Destination $targetPath -Force
     $replaced.Add($name)
-    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repoRoot $name)).Hash
-    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $targetPath).Hash
+    $sourceHash = Get-Sha256 (Join-Path $repoRoot $name)
+    $targetHash = Get-Sha256 $targetPath
     if ($sourceHash -ne $targetHash) { throw "Deployed hash mismatch: $name" }
   }
   $dataAfter = Get-DataState $target

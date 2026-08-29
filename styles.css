@@ -3781,6 +3781,21 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
   color: var(--text-normal);
 }
 
+.jam-deck-root .jam-deck-island-entry {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.jam-deck-root .jam-deck-island-entry:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--jd-ink, var(--text-normal)) 6%, transparent);
+  box-shadow: none;
+}
+.jam-deck-root .jam-deck-island-entry::after {
+  content: none;
+}
 /* ============================================================
  * Jam Deck 动画开关（与系统「减少动态效果」脱钩）
  * 默认动画全开；插件设置「动画效果」关闭时，JS 给

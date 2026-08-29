@@ -34,7 +34,7 @@ assert(pluginSource.includes('this.adapter.activate(entry, true)'), "external br
 assert(pluginSource.includes("CANVAS_RETURN_ENTRY_ARM_TTL_MS"), "native Canvas link clicks must arm browser-return recovery without requiring an iframe");
 assert(pluginSource.includes("class CanvasLinkNavigationBridge"), "native Canvas link nodes must own a scoped same-frame navigation bridge");
 assert(pluginSource.includes("webFrame.getFrameForSelector"), "Canvas link iframe injection must use an exact Electron child-frame mapping");
-assert(!pluginSource.includes("setWindowOpenHandler"), "Canvas link navigation must not install a global Electron window-open interceptor");
+assert((pluginSource.match(/setWindowOpenHandler/g) || []).length === 1 && pluginSource.includes("island.webContents.setWindowOpenHandler"), "only the isolated island child may deny window-open requests; Canvas link navigation must not install a global interceptor");
 assert(pluginSource.includes('document.activeElement') || pluginSource.includes('ownerDocument.activeElement'), "Canvas browser recovery must attribute departure through the host document iframe element");
 assert(pluginSource.includes('matches("iframe, webview")'), "Canvas browser recovery must support native iframe and webview surfaces without entering cross-origin content");
 assert(!pluginSource.includes("setActiveLeaf(entry.leaf, { focus: false })"), "detached Canvas leaves must never be activated through the workspace");
@@ -66,6 +66,37 @@ assert(styleSource.includes("Jam Deck Canvas Spatial toolbar and fixed-width ann
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-card-menu.jam-deck-node-toolbar--spatial"), "native Canvas toolbar restyling must stay inside the embedded leaf");
 assert(pluginSource.includes("class CanvasSelectionToolbarController"), "Canvas AI must keep a dedicated native selection-toolbar controller");
 assert(pluginSource.includes("class CanvasStageController"), "embedded Canvas must own a dedicated stage/fullscreen controller");
+assert(pluginSource.includes("class IslandModeController"), "Jam Deck must own a dedicated Dynamic Island / floating-strip controller");
+assert(pluginSource.includes('makeToolbarButton(actions, "灵动"'), "toolbar must expose the island entry labeled 灵动");
+assert(pluginSource.includes("ISLAND_WIDTH = 1600") && pluginSource.includes("ISLAND_SHADOW_PAD_X = 36") && pluginSource.includes("ISLAND_SHADOW_PAD_TOP = 0") && pluginSource.includes("ISLAND_SHADOW_PAD_BOTTOM = 40") && pluginSource.includes("ISLAND_CONTENT_HEIGHT = 72") && pluginSource.includes("ISLAND_COLLAPSED_HEIGHT = 10") && pluginSource.includes("ISLAND_LEAVE_MS = 1000"), "island geometry must reserve side/bottom shadow pad and leave-to-collapse timing");
+assert(pluginSource.includes("ISLAND_CONTROL_HEIGHT = 54") && pluginSource.includes("width: 36px; height: 36px"), "island clipboard chips must use the taller 1.5× content height");
+assert(pluginSource.includes("ISLAND_END_PAD = 8") && pluginSource.includes("ISLAND_MORPH_MS = 380") && pluginSource.includes("ISLAND_SIDE_SLOT = 100"), "island end pad, morph duration, and 100px side slots must stay explicit");
+assert(pluginSource.includes(".brand {") && pluginSource.includes("justify-content: center"), "brand mark must stay centered inside the side slot");
+assert(pluginSource.includes("cubic-bezier(.22, 1, .36, 1)") && pluginSource.includes("will-change: top, left, width, height, border-radius") && pluginSource.includes("top: 0"), "collapsed↔expanded island must CSS-morph the stadium");
+assert(pluginSource.includes("#app.is-collapsed .surface") && pluginSource.includes("rgba(252, 252, 250, .98)") && pluginSource.includes("0 2px 8px rgba(27, 31, 35, .14)"), "collapsed peek strip must be white with a soft shadow");
+assert(pluginSource.includes('document.documentElement.addEventListener("mouseleave"') && pluginSource.includes("scheduleLeave"), "island must collapse one second after the pointer leaves");
+assert(pluginSource.includes("ISLAND_PEEK_WINDOW_HEIGHT") && pluginSource.includes("schedulePeekBounds") && pluginSource.includes("inPeekZone"), "collapsed peek hit target must match the visual 10px strip");
+assert(pluginSource.includes("new remote.BrowserWindow") && pluginSource.includes("transparent: true") && pluginSource.includes('backgroundColor: "#00000000"') && pluginSource.includes("frame: false"), "island mode must use a dedicated transparent frameless BrowserWindow");
+assert(pluginSource.includes('island.setAlwaysOnTop(true, "floating")') && pluginSource.includes("island.setBounds(bounds, false)"), "island window must stay on top and move between expanded and peek bounds");
+assert(pluginSource.includes("mainWindow.hide()") && pluginSource.includes("restoreMainWindow") && pluginSource.includes("win.show()"), "island entry must hide the workbench only after the transparent window is ready and restore it on exit");
+assert(pluginSource.includes('island.webContents.on("ipc-message"') && pluginSource.includes("webContents.send(`${this.actionChannel}:state`") && pluginSource.includes("channel !== this.actionChannel"), "island state and actions must use child-WebContents-scoped in-process IPC");
+assert(!pluginSource.includes("JamDeckIslandNativeV2") && !pluginSource.includes("ISLAND_COLOR_KEY") && !pluginSource.includes("jamDeckIslandRunNativeBundle"), "island mode must not retain the PowerShell, color-key, or Win32 region path");
+assert(!pluginSource.includes("applyElectronPillShape") && !pluginSource.includes("withIslandSwitch") && !pluginSource.includes("is-jam-deck-island-switching"), "transparent-window island must not retain hard setShape bands or hidden-frame switching");
+assert(!styleSource.includes("#ff00ff") && !styleSource.includes("body.is-jam-deck-island"), "island mode must not paint magenta host layers in the Obsidian document");
+assert(pluginSource.includes('rail.addEventListener("wheel"') && pluginSource.includes("rail.scrollLeft += delta"), "island clipboard rail must scroll horizontally with the mouse wheel");
+assert(pluginSource.includes("ISLAND_CONTROL_HEIGHT / 2) + 4") && pluginSource.includes('border-top: 0') && pluginSource.includes('background: transparent !important'), "island shell radius must hug the 工作台 pill");
+assert(pluginSource.includes("this.entering") && pluginSource.includes("generation !== this.generation") && pluginSource.includes('render-process-gone') && pluginSource.includes('island.on("unresponsive"'), "island lifecycle must reject stale enters and recover from child renderer failures");
+assert(pluginSource.includes("disableMainWindowThrottling") && pluginSource.includes("restoreMainWindowThrottling") && pluginSource.includes("getBackgroundThrottling"), "hidden workbench timers must stay unthrottled and restore their prior policy on exit");
+assert(pluginSource.includes("nextClipboardSignature !== clipboardSignature"), "countdown refreshes must not rebuild the clipboard rail or reset horizontal scroll");
+assert(pluginSource.includes("suppressExpandUntil") && pluginSource.includes('activity(state.collapsed)') && pluginSource.includes('forceExpand ? "expand" : "activity"'), "collapsed island must suppress rebound and expand from pointer activity on the top-edge strip");
+assert(pluginSource.includes("collapsed ? ISLAND_PEEK_WINDOW_HEIGHT : ISLAND_HEIGHT") && pluginSource.includes("display.y + ISLAND_EXPANDED_TOP_GAP"), "collapsed island window must shrink to the peek strip hit target");
+assert(!pluginSource.includes("jam-deck-island-anchor"), "island mode must not steal the workbench contentEl onto document.body");
+assert(pluginSource.includes('event.key === "Escape"') && pluginSource.includes("toggle-island-mode"), "island mode must exit on Escape and register a command");
+assert(pluginSource.includes("island && island.active) island.exit()"), "entering Canvas stage must leave island mode first");
+assert(styleSource.includes(".jam-deck-island-entry") && styleSource.includes("border-color: transparent") && !styleSource.includes("jam-deck-island-pulse"), "workbench island entry must sit at the end without a stroke or pulse ring");
+assert(pluginSource.indexOf('makeToolbarButton(actions, "整理"') < pluginSource.indexOf('makeToolbarButton(actions, "灵动"') || pluginSource.indexOf('makeToolbarButton(actions, "保存"') < pluginSource.indexOf('makeToolbarButton(actions, "灵动"'), "island entry button must be created after tidy/save so it renders at the toolbar end");
+assert(pluginSource.includes('role="toolbar"') && pluginSource.includes('className = "chip "') && pluginSource.includes('className = "timer"'), "standalone island surface must render as a toolbar with clipboard chips and a compact timer control");
+assert(!pluginSource.includes("jam-deck-island-clip-card"), "island mode must not reuse Polaroid clipboard cards from the workbench");
 assert(pluginSource.includes('querySelector(".canvas-controls")'), "Canvas stage must mount on the native zoom cluster, not the selection popup");
 assert(pluginSource.includes('className = "clickable-icon canvas-control-item jam-deck-canvas-stage-toggle"'), "Canvas stage must reuse native control chrome instead of a new Spatial bar");
 assert(pluginSource.includes('setIcon(this.button, this.active ? "minimize-2" : "maximize-2")'), "Canvas stage must toggle maximize/minimize icons");
@@ -375,6 +406,113 @@ Module._load = function(request, parent, isMain) {
 };
 
 const JamDeckPlugin = require(mainPath);
+
+function makeIslandLifecycleHarness() {
+  const body = { classList: { contains: () => false }, ownerDocument: { documentElement: { classList: { contains: () => false } } } };
+  const view = {
+    contentEl: { ownerDocument: { body, defaultView: {} } },
+    renderCalls: 0,
+    getViewType: () => "jam-deck-view",
+    render() { this.renderCalls += 1; },
+  };
+  const mainListeners = new Map();
+  const mainWindow = {
+    hideCalls: 0,
+    showCalls: 0,
+    focusCalls: 0,
+    throttling: true,
+    destroyed: false,
+    hide() { this.hideCalls += 1; },
+    show() { this.showCalls += 1; },
+    focus() { this.focusCalls += 1; },
+    isVisible: () => true,
+    isMinimized: () => false,
+    isDestroyed() { return this.destroyed; },
+    on(name, listener) { mainListeners.set(name, listener); },
+    removeListener(name, listener) { if (mainListeners.get(name) === listener) mainListeners.delete(name); },
+    webContents: {
+      throttleCalls: [],
+      getBackgroundThrottling() { return mainWindow.throttling; },
+      setBackgroundThrottling(value) { this.throttleCalls.push(value); mainWindow.throttling = value; },
+    },
+  };
+  const plugin = {
+    app: { workspace: { getLeavesOfType: () => [{ view }] } },
+    settings: { animationsEnabled: true, clipboardItems: [], widgets: [] },
+    openDeck: async () => {},
+    formatTime: () => "",
+    imageMimeFromName: () => "image/png",
+  };
+  const controller = new JamDeckPlugin.IslandModeController(plugin);
+  const children = [];
+  controller.getElectronRemote = () => ({});
+  controller.getBrowserWindow = () => mainWindow;
+  controller.resolveDisplayBounds = () => ({ x: 0, y: 0, width: 1920, height: 1080 });
+  controller.prepareIpc = function prepareIpcForTest() { this.actionChannel = "island-test"; };
+  controller.installIpc = () => {};
+  controller.removeIpc = function removeIpcForTest() { this.actionChannel = ""; };
+  controller.sendState = () => {};
+  controller.createIslandWindow = () => {
+    const child = {
+      shown: 0,
+      focused: 0,
+      destroyed: false,
+      webContents: { removeListener: () => {} },
+      isDestroyed() { return this.destroyed; },
+      show() { this.shown += 1; },
+      focus() { this.focused += 1; },
+      destroy() { this.destroyed = true; },
+      setBounds() {},
+    };
+    children.push(child);
+    return child;
+  };
+  return { controller, mainWindow, children, view };
+}
+
+async function testIslandLifecycle() {
+  {
+    const harness = makeIslandLifecycleHarness();
+    let releaseLoad;
+    harness.controller.loadIslandWindow = () => new Promise((resolve) => { releaseLoad = resolve; });
+    const first = harness.controller.enter();
+    const duplicate = harness.controller.enter();
+    assert.strictEqual(await duplicate, false, "double-click during island load must be ignored");
+    assert.strictEqual(harness.children.length, 1, "double-click must create only one island BrowserWindow");
+    releaseLoad();
+    assert.strictEqual(await first, true, "first island enter should complete after its child is ready");
+    assert.strictEqual(harness.mainWindow.hideCalls, 1, "workbench must hide only after island load succeeds");
+    assert.deepStrictEqual(harness.mainWindow.webContents.throttleCalls, [false], "hidden workbench renderer must disable throttling");
+    harness.controller.exit();
+    assert.strictEqual(harness.mainWindow.showCalls, 1, "explicit island exit must restore the workbench once");
+    assert.deepStrictEqual(harness.mainWindow.webContents.throttleCalls, [false, true], "island exit must restore the prior throttling policy");
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    let releaseLoad;
+    harness.controller.loadIslandWindow = () => new Promise((resolve) => { releaseLoad = resolve; });
+    const entering = harness.controller.enter();
+    harness.controller.destroy();
+    releaseLoad();
+    assert.strictEqual(await entering, false, "stale island continuation must stop after plugin unload");
+    assert.strictEqual(harness.mainWindow.hideCalls, 0, "stale island continuation must never hide the workbench");
+    assert.strictEqual(harness.children[0].shown, 0, "stale island continuation must never show its child");
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    harness.controller.loadIslandWindow = async () => { throw new Error("load failed"); };
+    const originalConsoleError = console.error;
+    let failedEnter;
+    try {
+      console.error = () => {};
+      failedEnter = await harness.controller.enter();
+    } finally {
+      console.error = originalConsoleError;
+    }
+    assert.strictEqual(failedEnter, false, "island load failure must be recoverable");
+    assert.strictEqual(harness.mainWindow.hideCalls, 0, "failed island load must leave the workbench visible");
+  }
+}
 const authoritativeTextNode = { getData: () => ({ type: "text", text: "current" }), nodeEl: { matches: () => false } };
 const staleDomNode = { getData: () => ({ type: "file", file: "stale.png" }), nodeEl: { matches: () => true } };
 assert.deepStrictEqual(
@@ -2550,6 +2688,7 @@ assert.strictEqual(restoredFolderPreviewCluster, savedFolderPreviewCluster, "vie
 assert(fs.existsSync(path.join(projectRoot, "assets", "jam-deck-folder-shell.svg")), "the Figma folder shell asset must remain in the source tree");
 assert(deploySource.includes("assets/jam-deck-folder-shell.svg") && deploySource.includes("$assetFiles"), "deploy must stage the folder shell asset alongside the plugin files");
 assert(deploySource.includes("Protected data.json") && deploySource.includes("Get-DataState"), "asset deployment must retain data.json protection checks");
+assert(deploySource.includes("function Get-Sha256") && !deploySource.includes("Get-FileHash"), "deploy hashing must work in minimal Windows PowerShell environments without Get-FileHash");
 
 const stackA = { id: "a", x: 0, y: 0, width: 100, height: 100 };
 const stackHalf = { id: "half", x: 50, y: 0, width: 100, height: 100 };
@@ -3501,7 +3640,7 @@ async function testArchiveIntegration() {
 }
 
 testCanvasCreateName();
-testAiLocalWebBootstrap().then(() => testArchiveIntegration()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
+testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
   console.error(error);

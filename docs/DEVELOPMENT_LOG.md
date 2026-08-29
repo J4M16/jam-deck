@@ -1,5 +1,30 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-29 — 0.31.36 合入 master 并发 GitHub Release
+
+- `develop` 上 0.31.36（灵动岛最终方案）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.36` 并发布 GitHub Release。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-08-29 — 0.31.36 灵动岛（最终方案）
+
+### 最终效果
+- 工作台工具栏末尾「灵动」进入悬浮条；无描边、无脉冲光环。
+- 独立透明顶栏：上沿直角贴齐屏幕顶，下半圆角（`ISLAND_RADIUS = 控制高/2 + 4`，当前 31px，贴合「工作台」按钮）；侧/底保留阴影安全区，阴影不被窗裁切。
+- 布局：左右侧槽各 100px（绿点+「灵动」居中）；中间剪贴板芯片高 54px、可横滑/点击复制/外拖；紧凑倒计时；「工作台」回完整模式。
+- 折叠：鼠标离开岛窗口 1 秒后收成贴顶约 10px 白底微阴影条；仅鼠标进入该 10px 视觉条才展开；Esc 或「工作台」退出。
+- 折叠↔展开：全高窗内 CSS 380ms morph（`cubic-bezier(.22,1,.36,1)`），morph 后再把窗口收到 peek 命中高度，避免透明区误触与逐帧 `setBounds` 卡顿。
+
+### 实现方案
+- `IslandModeController` 新建 `transparent: true` / `frame: false` 子 `BrowserWindow`，用 data URL 绘制岛 UI；主工作台在子窗就绪后隐藏，退出原样恢复。
+- 岛与工作台经子 `WebContents` 实例级 IPC 同步剪贴板/倒计时/动作；倒计时刷新不重建剪贴板条。
+- 生命周期：entering/generation 防重入；子 renderer 崩溃/无响应、主窗关闭、热重载统一清理；主窗隐藏期间关闭 background throttling。
+- 部署脚本 SHA-256 改用 .NET，避免最小 PowerShell 缺 `Get-FileHash`。
+- 已删除主窗品红色键、Win32 `SetWindowRgn` / `setShape` 硬裁、PowerShell 桥与藏帧方案。
+
+### 验证
+- `npm run verify`；部署热重载实机验收贴顶、离开折叠、morph 与阴影。
+- 处理模型签名：Cursor Grok 4.6（主代理）、GPT-5（Codex / 透明窗架构）
+
 ## 2026-08-25 — 0.31.15 合入 master 并发 GitHub Release
 
 - `develop` 上 0.31.15（Linux CI 路径校验）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.15` 并发布 GitHub Release。GitHub Actions `ci` 已通过。
