@@ -45,6 +45,11 @@ const AI_LOCAL_WEB_URL = "http://127.0.0.1:3080/";
 const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
+const ISLAND_WIDTH = 1600;
+const ISLAND_HEIGHT = 100;
+const ISLAND_COLLAPSED_HEIGHT = 10;
+const ISLAND_IDLE_MS = 3000;
+const ISLAND_EXPANDED_TOP_GAP = 8;
 
 function jamDeckPathImpl(raw) {
   if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\")) return nodePath.win32;
@@ -8614,6 +8619,811 @@ class CanvasSelectionToolbarController {
   }
 }
 
+class IslandModeController {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.app = plugin.app;
+    this.active = false;
+    this.collapsed = false;
+    this.destroyed = false;
+    this.body = null;
+    this.ownerWindow = null;
+    this.mainWindow = null;
+    this.islandWindow = null;
+    this.displayBounds = null;
+    this.actionChannel = "";
+    this.ipcListener = null;
+    this.entering = false;
+    this.generation = 0;
+    this.closingIslandWindow = false;
+    this.mainClosedListener = null;
+    this.mainBackgroundThrottling = null;
+    this.mainWindowHidden = false;
+    this.mainWindowWasVisible = true;
+    this.mainWindowWasMinimized = false;
+    this.suppressExpandUntil = 0;
+  }
+
+  getDeckView() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    for (const leaf of leaves) {
+      const view = leaf && leaf.view;
+      if (view && typeof view.render === "function" && typeof view.getViewType === "function" && view.getViewType() === VIEW_TYPE) {
+        return view;
+      }
+    }
+    return null;
+  }
+
+  getElectronRemote() {
+    try {
+      const remote = require("@electron/remote");
+      if (remote && remote.BrowserWindow && remote.screen) return remote;
+    } catch (error) {}
+    try {
+      const electron = require("electron");
+      if (electron.remote && electron.remote.BrowserWindow && electron.remote.screen) return electron.remote;
+    } catch (error) {}
+    return null;
+  }
+
+  getBrowserWindow() {
+    const remote = this.getElectronRemote();
+    if (!remote || typeof remote.getCurrentWindow !== "function") return null;
+    try { return remote.getCurrentWindow(); } catch (error) { return null; }
+  }
+
+  resolveDisplayBounds(win) {
+    const remote = this.getElectronRemote();
+    const screen = remote && remote.screen;
+    let bounds = null;
+    try {
+      if (win && typeof win.getBounds === "function" && screen && typeof screen.getDisplayMatching === "function") {
+        const display = screen.getDisplayMatching(win.getBounds());
+        if (display && display.bounds) bounds = display.bounds;
+      }
+    } catch (error) {}
+    if (!bounds && screen && typeof screen.getPrimaryDisplay === "function") {
+      try {
+        const primary = screen.getPrimaryDisplay();
+        if (primary && primary.bounds) bounds = primary.bounds;
+      } catch (error) {}
+    }
+    if (!bounds && this.ownerWindow) {
+      bounds = {
+        x: 0,
+        y: 0,
+        width: Math.max(ISLAND_WIDTH, Number(this.ownerWindow.screen && this.ownerWindow.screen.width) || 1600),
+        height: Math.max(ISLAND_HEIGHT, Number(this.ownerWindow.screen && this.ownerWindow.screen.height) || 900),
+      };
+    }
+    return bounds;
+  }
+
+  computeIslandBounds(collapsed) {
+    const display = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
+    const width = Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(display.width) - 24));
+    const height = ISLAND_HEIGHT;
+    const x = Math.round(display.x + (display.width - width) / 2);
+    const y = collapsed
+      ? Math.round(display.y - (height - ISLAND_COLLAPSED_HEIGHT))
+      : Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
+    return { x, y, width, height };
+  }
+
+  getPrimaryClockWidget() {
+    const widgets = (this.plugin.settings && this.plugin.settings.widgets) || [];
+    return widgets.find((widget) => widget && widget.type === "clock") || null;
+  }
+
+  clipboardChipSummary(item) {
+    if (!item) return "空";
+    if (item.type === "image") return "图片";
+    const value = String(item.content || "").replace(/\s+/g, " ").trim();
+    if (!value) return "空文本";
+    return value.length > 28 ? `${value.slice(0, 28)}…` : value;
+  }
+
+  clipboardItemState(item) {
+    const state = {
+      ts: Number(item && item.ts) || 0,
+      type: item && item.type === "image" ? "image" : "text",
+      content: item && item.type === "text" ? String(item.content || "") : "",
+      filename: item && item.type === "image" ? String(item.filename || "") : "",
+      summary: this.clipboardChipSummary(item),
+      timeLabel: this.plugin.formatTime(item && item.ts),
+      resourceUrl: "",
+      fileUrl: "",
+      filePath: "",
+      mime: "",
+    };
+    if (state.type !== "image" || !state.filename) return state;
+    state.mime = this.plugin.imageMimeFromName(state.filename);
+    const vaultPath = `${CLIPBOARD_DIR}/${state.filename}`;
+    try { state.resourceUrl = this.app.vault.adapter.getResourcePath(vaultPath); } catch (error) {}
+    try {
+      const base = this.app.vault.adapter.getBasePath();
+      const { pathToFileURL } = require("url");
+      state.filePath = nodePath.join(base, ...vaultPath.split("/"));
+      state.fileUrl = pathToFileURL(state.filePath).href;
+    } catch (error) {}
+    return state;
+  }
+
+  buildSurfaceState() {
+    const widget = this.getPrimaryClockWidget();
+    const countdown = widget ? jamDeckCountdownState(widget) : null;
+    const dark = !!(this.body && this.body.classList && this.body.classList.contains("theme-dark"))
+      || !!(this.body && this.body.ownerDocument && this.body.ownerDocument.documentElement.classList.contains("theme-dark"));
+    return {
+      collapsed: this.collapsed,
+      dark,
+      animationsEnabled: this.plugin.settings.animationsEnabled !== false,
+      idleMs: ISLAND_IDLE_MS,
+      items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
+      countdown: widget && countdown ? {
+        widgetId: widget.id,
+        enabled: countdown.enabled,
+        remaining: jamDeckFormatCountdownClock(countdown.remainingSeconds),
+      } : null,
+    };
+  }
+
+  buildWindowHtml() {
+    const actionChannel = JSON.stringify(this.actionChannel);
+    return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src app: file: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent !important; user-select: none; }
+    button { font: inherit; }
+    #app { position: relative; width: 100%; height: 100%; background: transparent; }
+    .surface {
+      position: absolute; inset: 2px;
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+      align-items: center; gap: 10px; padding: 8px 14px;
+      border-radius: 48px; overflow: hidden;
+      color: #20252b; background: rgba(252, 252, 250, .985);
+      border: 1px solid rgba(32, 37, 43, .08);
+      box-shadow: 0 10px 28px rgba(27, 31, 35, .18), 0 2px 8px rgba(27, 31, 35, .1);
+    }
+    body.is-dark { color-scheme: dark; }
+    body.is-dark .surface {
+      color: #eceeea; background: rgba(38, 40, 39, .985);
+      border-color: rgba(255, 255, 255, .09);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .42), 0 2px 8px rgba(0, 0, 0, .28);
+    }
+    #app.is-collapsed .surface {
+      inset: auto auto 0 50%; width: min(420px, 70%); height: 10px;
+      transform: translateX(-50%); padding: 0; gap: 0;
+      border: 0; border-radius: 0 0 999px 999px;
+      background: #46543e; box-shadow: 0 2px 10px rgba(0, 0, 0, .22);
+    }
+    #app.is-collapsed .surface > * { visibility: hidden; pointer-events: none; }
+    .brand { display: flex; align-items: center; gap: 6px; padding: 0 2px 0 6px; }
+    .brand-dot { width: 7px; height: 7px; border-radius: 50%; background: #8fd14f; box-shadow: 0 0 0 2px rgba(143, 209, 79, .2); }
+    .brand-label { font-size: 12px; font-weight: 720; letter-spacing: .08em; }
+    .rail { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
+    .rail::-webkit-scrollbar { display: none; }
+    .empty { color: #777d82; font-size: 11px; padding: 0 6px; white-space: nowrap; }
+    body.is-dark .empty { color: #a8ada9; }
+    .chip {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+      max-width: 200px; height: 36px; margin: 0; padding: 0 10px 0 6px;
+      border-radius: 999px; border: 1px solid rgba(32, 37, 43, .13);
+      background: rgba(32, 37, 43, .035); color: inherit; cursor: grab; box-shadow: none;
+    }
+    body.is-dark .chip { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .045); }
+    .chip:hover, .chip:focus-visible { border-color: rgba(112, 160, 66, .58); background: rgba(143, 209, 79, .1); outline: none; }
+    .chip:focus-visible, .timer-toggle:focus-visible, .restore:focus-visible { box-shadow: 0 0 0 2px rgba(143, 209, 79, .5); }
+    .chip.is-dragging { opacity: .5; cursor: grabbing; }
+    .thumb, .kind { width: 24px; height: 24px; border-radius: 7px; flex: 0 0 auto; }
+    .thumb { object-fit: cover; background: rgba(32, 37, 43, .08); pointer-events: none; }
+    .kind { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #777d82; background: rgba(32, 37, 43, .07); }
+    body.is-dark .kind { color: #b5bab6; background: rgba(255, 255, 255, .07); }
+    .chip-text { min-width: 0; font-size: 11px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chip-time { font-size: 10px; color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
+    body.is-dark .chip-time { color: #a8ada9; }
+    .timer { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 6px; border-radius: 999px; border: 1px solid rgba(32, 37, 43, .13); background: rgba(32, 37, 43, .035); }
+    body.is-dark .timer { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .045); }
+    .timer.is-running { border-color: rgba(112, 160, 66, .5); background: rgba(143, 209, 79, .1); }
+    .timer-toggle { width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(32, 37, 43, .08); color: inherit; cursor: pointer; }
+    body.is-dark .timer-toggle { background: rgba(255, 255, 255, .08); }
+    .timer-toggle:hover { background: rgba(143, 209, 79, .18); }
+    .timer-toggle svg { width: 14px; height: 14px; fill: currentColor; }
+    .clock { min-width: 6.8ch; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 680; letter-spacing: .04em; }
+    .restore { height: 36px; margin: 0; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(32, 37, 43, .14); background: rgba(32, 37, 43, .05); color: inherit; font-size: 12px; font-weight: 680; cursor: pointer; white-space: nowrap; }
+    body.is-dark .restore { border-color: rgba(255, 255, 255, .11); background: rgba(255, 255, 255, .055); }
+    .restore:hover { border-color: rgba(112, 160, 66, .58); background: rgba(143, 209, 79, .12); }
+    .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: 10px; opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
+    .toast.is-visible { opacity: 1; translate: -50% 0; }
+    body.no-motion .toast { transition: none; }
+  </style>
+</head>
+<body>
+  <main id="app" aria-label="Jam Deck 灵动岛工具栏">
+    <section class="surface" role="toolbar">
+      <div class="brand" aria-hidden="true"><span class="brand-dot"></span><span class="brand-label">灵动</span></div>
+      <div id="rail" class="rail" aria-label="剪贴板芯片"></div>
+      <div id="timerHost"></div>
+      <button id="restore" class="restore" type="button" title="回到完整工作台模式（Esc）">工作台</button>
+    </section>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+  <script>
+    const { ipcRenderer, nativeImage } = require("electron");
+    const ACTION_CHANNEL = ${actionChannel};
+    const STATE_CHANNEL = ACTION_CHANNEL + ":state";
+    const CLIP_MIME = "application/x-jam-deck-clipboard+json";
+    const app = document.getElementById("app");
+    const rail = document.getElementById("rail");
+    const timerHost = document.getElementById("timerHost");
+    const restore = document.getElementById("restore");
+    const toast = document.getElementById("toast");
+    let state = { collapsed: false, dark: false, idleMs: 3000, items: [], countdown: null };
+    let painted = false;
+    let idleTimer = 0;
+    let toastTimer = 0;
+    let lastActivitySent = 0;
+    let clipboardSignature = "";
+
+    const send = (payload) => ipcRenderer.send(ACTION_CHANNEL, payload);
+    const clearIdle = () => { if (idleTimer) window.clearTimeout(idleTimer); idleTimer = 0; };
+    const scheduleIdle = () => {
+      clearIdle();
+      if (state.collapsed) return;
+      idleTimer = window.setTimeout(() => send({ type: "collapse" }), Math.max(250, Number(state.idleMs) || 3000));
+    };
+    const activity = (forceExpand = false) => {
+      scheduleIdle();
+      const now = Date.now();
+      if (forceExpand || now - lastActivitySent >= 240) {
+        lastActivitySent = now;
+        send({ type: forceExpand ? "expand" : "activity" });
+      }
+    };
+    const showToast = (message) => {
+      toast.textContent = message;
+      toast.classList.add("is-visible");
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 900);
+    };
+    const svgIcon = (enabled) => enabled
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+    const escapeHtml = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+
+    function renderClipboard() {
+      rail.replaceChildren();
+      if (!state.items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "复制内容后会出现在这里";
+        rail.appendChild(empty);
+        return;
+      }
+      for (const item of state.items) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip " + (item.type === "image" ? "is-image" : "is-text");
+        chip.draggable = true;
+        chip.title = item.summary + " · " + item.timeLabel + " · 点击复制，可拖出";
+        chip.setAttribute("aria-label", (item.type === "image" ? "剪贴板图片" : "剪贴板文字") + "，" + item.timeLabel + "，点击复制");
+        if (item.type === "image") {
+          const image = document.createElement("img");
+          image.className = "thumb";
+          image.alt = "";
+          image.draggable = false;
+          chip.appendChild(image);
+          if (item.filePath && nativeImage && typeof nativeImage.createThumbnailFromPath === "function") {
+            nativeImage.createThumbnailFromPath(item.filePath, { width: 48, height: 48 }).then((thumbnail) => {
+              if (thumbnail && !thumbnail.isEmpty() && image.isConnected) image.src = thumbnail.toDataURL();
+            }).catch(() => {});
+          } else {
+            image.src = item.resourceUrl || item.fileUrl || "";
+          }
+        } else {
+          const kind = document.createElement("span");
+          kind.className = "kind";
+          kind.textContent = "文";
+          chip.appendChild(kind);
+        }
+        const text = document.createElement("span");
+        text.className = "chip-text";
+        text.textContent = item.summary;
+        chip.appendChild(text);
+        const time = document.createElement("span");
+        time.className = "chip-time";
+        time.textContent = item.timeLabel;
+        chip.appendChild(time);
+        chip.addEventListener("click", () => {
+          send({ type: "copy", ts: item.ts, itemType: item.type });
+          showToast("已复制");
+          activity();
+        });
+        chip.addEventListener("dragstart", (event) => {
+          chip.classList.add("is-dragging");
+          const transfer = event.dataTransfer;
+          if (!transfer) return;
+          transfer.effectAllowed = "copy";
+          try { transfer.setData(CLIP_MIME, JSON.stringify({ ts: item.ts, type: item.type })); } catch (error) {}
+          if (item.type === "text") {
+            transfer.setData("text/plain", item.content || "");
+          } else {
+            const url = item.fileUrl || item.resourceUrl || "";
+            if (url) {
+              try { transfer.setData("text/uri-list", url); } catch (error) {}
+              try { transfer.setData("DownloadURL", (item.mime || "image/png") + ":" + item.filename + ":" + url); } catch (error) {}
+              try { transfer.setData("text/plain", url); } catch (error) {}
+              try { transfer.setData("text/html", '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(item.filename) + '">'); } catch (error) {}
+            }
+            send({ type: "drag-image", ts: item.ts });
+          }
+          activity();
+        });
+        chip.addEventListener("dragend", () => chip.classList.remove("is-dragging"));
+        rail.appendChild(chip);
+      }
+    }
+
+    function renderTimer() {
+      timerHost.replaceChildren();
+      if (!state.countdown) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "无时钟";
+        timerHost.appendChild(empty);
+        return;
+      }
+      const timer = document.createElement("div");
+      timer.className = "timer" + (state.countdown.enabled ? " is-running" : "");
+      timer.setAttribute("role", "group");
+      timer.setAttribute("aria-label", "倒计时");
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "timer-toggle";
+      toggle.innerHTML = svgIcon(state.countdown.enabled);
+      toggle.setAttribute("aria-pressed", String(state.countdown.enabled));
+      toggle.setAttribute("aria-label", state.countdown.enabled ? "停止倒计时" : "开始倒计时");
+      toggle.title = state.countdown.enabled ? "停止" : "开始";
+      toggle.addEventListener("click", () => {
+        toggle.disabled = true;
+        send({ type: "toggle-countdown", widgetId: state.countdown.widgetId });
+        activity();
+      });
+      const clock = document.createElement("div");
+      clock.className = "clock";
+      clock.setAttribute("role", "timer");
+      clock.textContent = state.countdown.remaining;
+      timer.append(toggle, clock);
+      timerHost.appendChild(timer);
+    }
+
+    function render(next) {
+      const wasCollapsed = state.collapsed;
+      state = next || state;
+      document.body.classList.toggle("is-dark", !!state.dark);
+      document.body.classList.toggle("no-motion", state.animationsEnabled === false);
+      app.classList.toggle("is-collapsed", !!state.collapsed);
+      const nextClipboardSignature = JSON.stringify(state.items || []);
+      if (!painted || nextClipboardSignature !== clipboardSignature) {
+        clipboardSignature = nextClipboardSignature;
+        renderClipboard();
+      }
+      renderTimer();
+      if (state.collapsed) clearIdle();
+      else if (!painted || wasCollapsed) scheduleIdle();
+      painted = true;
+      return true;
+    }
+
+    window.jamDeckIslandSetState = render;
+    ipcRenderer.on(STATE_CHANNEL, (_event, next) => render(next));
+    restore.addEventListener("click", () => send({ type: "exit" }));
+    rail.addEventListener("wheel", (event) => {
+      if (rail.scrollWidth <= rail.clientWidth + 1) return;
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (!delta) return;
+      event.preventDefault();
+      rail.scrollLeft += delta;
+      activity();
+    }, { passive: false });
+    app.addEventListener("pointerdown", () => activity(state.collapsed), true);
+    app.addEventListener("pointermove", () => activity(state.collapsed), true);
+    app.addEventListener("wheel", () => activity(state.collapsed), { capture: true, passive: true });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        send({ type: "exit" });
+      } else {
+        activity(state.collapsed);
+      }
+    }, true);
+    window.addEventListener("contextmenu", (event) => event.preventDefault());
+    send({ type: "ready" });
+  </script>
+</body>
+</html>`;
+  }
+
+  prepareIpc() {
+    this.removeIpc();
+    this.actionChannel = `jam-deck-island-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  installIpc(island) {
+    if (!island || island.isDestroyed() || !this.actionChannel) return;
+    this.ipcListener = (_event, channel, payload) => {
+      if (channel !== this.actionChannel || island !== this.islandWindow || island.isDestroyed()) return;
+      void this.handleAction(payload);
+    };
+    island.webContents.on("ipc-message", this.ipcListener);
+  }
+
+  removeIpc() {
+    const island = this.islandWindow;
+    if (island && !island.isDestroyed() && this.ipcListener) {
+      try { island.webContents.removeListener("ipc-message", this.ipcListener); } catch (error) {}
+    }
+    this.ipcListener = null;
+    this.actionChannel = "";
+  }
+
+  async handleAction(payload) {
+    if (!payload || typeof payload.type !== "string") return;
+    if (payload.type === "ready") {
+      this.sendState();
+      return;
+    }
+    if (!this.active) return;
+    if (payload.type === "exit") {
+      this.exit();
+      return;
+    }
+    if (payload.type === "collapse") {
+      this.collapse();
+      return;
+    }
+    if (payload.type === "expand") {
+      this.bumpActivity();
+      return;
+    }
+    if (payload.type === "activity") {
+      if (this.collapsed) this.bumpActivity();
+      return;
+    }
+    if (payload.type === "copy") {
+      const item = (this.plugin.settings.clipboardItems || []).find((entry) => Number(entry && entry.ts) === Number(payload.ts) && entry.type === payload.itemType);
+      if (item) await this.plugin.copyClipboardItem(item);
+      return;
+    }
+    if (payload.type === "drag-image") {
+      const item = (this.plugin.settings.clipboardItems || []).find((entry) => Number(entry && entry.ts) === Number(payload.ts) && entry.type === "image");
+      if (item) this.startImageDrag(item);
+      return;
+    }
+    if (payload.type === "toggle-countdown") {
+      const widget = (this.plugin.settings.widgets || []).find((entry) => entry && entry.id === payload.widgetId && entry.type === "clock");
+      if (!widget) return;
+      const latest = jamDeckCountdownState(widget);
+      const duration = jamDeckFormatCountdownDuration(latest.durationSeconds);
+      const changed = await this.plugin.setCountdownEnabled(widget.id, !latest.enabled, duration);
+      if (!changed) this.refreshCountdown();
+    }
+  }
+
+  startImageDrag(item) {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed() || !item || !item.filename) return;
+    try {
+      const base = this.app.vault.adapter.getBasePath();
+      const file = nodePath.join(base, ...`${CLIPBOARD_DIR}/${item.filename}`.split("/"));
+      const electron = require("electron");
+      let icon = electron.nativeImage.createFromPath(file);
+      if (icon && !icon.isEmpty()) icon = icon.resize({ width: 48, height: 48, quality: "good" });
+      island.webContents.startDrag({ file, icon });
+    } catch (error) {
+      console.error("jam-deck island image drag failed", error);
+    }
+  }
+
+  createIslandWindow(remote) {
+    const bounds = this.computeIslandBounds(false);
+    const island = new remote.BrowserWindow({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      show: false,
+      transparent: true,
+      backgroundColor: "#00000000",
+      frame: false,
+      hasShadow: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      title: "Jam Deck 灵动岛",
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        sandbox: false,
+        backgroundThrottling: false,
+        spellcheck: false,
+      },
+    });
+    try { island.setMenuBarVisibility(false); } catch (error) {}
+    try { island.setAlwaysOnTop(true, "floating"); } catch (error) {
+      try { island.setAlwaysOnTop(true); } catch (inner) {}
+    }
+    try { island.webContents.setBackgroundThrottling(false); } catch (error) {}
+    try { island.webContents.setWindowOpenHandler(() => ({ action: "deny" })); } catch (error) {}
+    island.webContents.on("will-navigate", (event) => event.preventDefault());
+    island.webContents.on("render-process-gone", (_event, details) => {
+      if (!this.active || this.closingIslandWindow) return;
+      console.error("jam-deck island renderer stopped", details);
+      this.finishExit(false);
+      new Notice("Jam Deck：灵动岛进程已退出，工作台已恢复");
+    });
+    island.on("unresponsive", () => {
+      if (!this.active || this.closingIslandWindow) return;
+      console.error("jam-deck island window became unresponsive");
+      this.finishExit(false);
+      new Notice("Jam Deck：灵动岛无响应，工作台已恢复");
+    });
+    island.on("closed", () => {
+      const internal = this.closingIslandWindow;
+      this.islandWindow = null;
+      if (!internal && this.active) this.finishExit(true);
+    });
+    return island;
+  }
+
+  async loadIslandWindow(island) {
+    const html = this.buildWindowHtml();
+    const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+    await island.loadURL(url);
+    const initialState = JSON.stringify(this.buildSurfaceState());
+    await island.webContents.executeJavaScript(`window.jamDeckIslandSetState(${initialState}); new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+  }
+
+  sendState() {
+    const island = this.islandWindow;
+    if (!this.active || !island || island.isDestroyed() || !this.actionChannel) return;
+    try { island.webContents.send(`${this.actionChannel}:state`, this.buildSurfaceState()); } catch (error) {
+      console.error("jam-deck island state sync failed", error);
+    }
+  }
+
+  applyIslandBounds(collapsed) {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed()) return false;
+    const bounds = this.computeIslandBounds(collapsed);
+    try {
+      island.setBounds(bounds, false);
+      return true;
+    } catch (error) {
+      console.error("jam-deck island bounds failed", error);
+      return false;
+    }
+  }
+
+  bumpActivity() {
+    if (!this.active || this.destroyed || !this.collapsed) return;
+    if (Date.now() < this.suppressExpandUntil) return;
+    this.expand();
+  }
+
+  collapse() {
+    if (!this.active || this.collapsed || this.destroyed) return;
+    this.collapsed = true;
+    this.suppressExpandUntil = Date.now() + 450;
+    this.applyIslandBounds(true);
+    this.sendState();
+  }
+
+  expand() {
+    if (!this.active || !this.collapsed || this.destroyed) return;
+    this.collapsed = false;
+    this.suppressExpandUntil = 0;
+    this.applyIslandBounds(false);
+    this.sendState();
+    try { this.islandWindow.focus(); } catch (error) {}
+  }
+
+  refreshClipboard() {
+    this.sendState();
+  }
+
+  refreshCountdown() {
+    this.sendState();
+  }
+
+  refresh() {
+    this.sendState();
+  }
+
+  restoreMainWindow() {
+    const win = this.mainWindow;
+    if (!this.mainWindowHidden || !win || (typeof win.isDestroyed === "function" && win.isDestroyed())) return;
+    try {
+      if (this.mainWindowWasVisible) {
+        if (!this.mainWindowWasMinimized && typeof win.isMinimized === "function" && win.isMinimized() && typeof win.restore === "function") win.restore();
+        if (typeof win.show === "function") win.show();
+        if (!this.mainWindowWasMinimized && typeof win.focus === "function") win.focus();
+      }
+    } catch (error) {
+      console.error("jam-deck workbench restore failed", error);
+    } finally {
+      this.mainWindowHidden = false;
+    }
+  }
+
+  installMainWindowFailSafe() {
+    const win = this.mainWindow;
+    if (!win || typeof win.on !== "function") return;
+    this.removeMainWindowFailSafe();
+    this.mainClosedListener = () => {
+      this.mainWindow = null;
+      this.mainWindowHidden = false;
+      this.active = false;
+      this.generation += 1;
+      this.entering = false;
+      this.destroyIslandWindow();
+      this.removeIpc();
+    };
+    try { win.on("closed", this.mainClosedListener); } catch (error) { this.mainClosedListener = null; }
+  }
+
+  removeMainWindowFailSafe() {
+    const win = this.mainWindow;
+    if (win && this.mainClosedListener && typeof win.removeListener === "function") {
+      try { win.removeListener("closed", this.mainClosedListener); } catch (error) {}
+    }
+    this.mainClosedListener = null;
+  }
+
+  disableMainWindowThrottling() {
+    const contents = this.mainWindow && this.mainWindow.webContents;
+    if (!contents || typeof contents.setBackgroundThrottling !== "function") return;
+    this.mainBackgroundThrottling = null;
+    try {
+      if (typeof contents.getBackgroundThrottling === "function") {
+        this.mainBackgroundThrottling = !!contents.getBackgroundThrottling();
+      }
+      contents.setBackgroundThrottling(false);
+    } catch (error) { this.mainBackgroundThrottling = null; }
+  }
+
+  restoreMainWindowThrottling() {
+    const contents = this.mainWindow && this.mainWindow.webContents;
+    if (contents && typeof contents.setBackgroundThrottling === "function" && typeof this.mainBackgroundThrottling === "boolean") {
+      try { contents.setBackgroundThrottling(this.mainBackgroundThrottling); } catch (error) {}
+    }
+    this.mainBackgroundThrottling = null;
+  }
+
+  destroyIslandWindow() {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed()) {
+      this.islandWindow = null;
+      return;
+    }
+    this.closingIslandWindow = true;
+    try { island.destroy(); } catch (error) {}
+    this.islandWindow = null;
+    this.closingIslandWindow = false;
+  }
+
+  async enter() {
+    if (this.active || this.entering || this.destroyed) return false;
+    const generation = ++this.generation;
+    this.entering = true;
+    try {
+      const view = this.getDeckView();
+      if (!view) await this.plugin.openDeck();
+      const deckView = this.getDeckView();
+      const root = deckView && deckView.contentEl;
+      const body = root && root.ownerDocument && root.ownerDocument.body;
+      const ownerWindow = root && root.ownerDocument && root.ownerDocument.defaultView;
+      if (!deckView || !root || !body || !ownerWindow) {
+        new Notice("Jam Deck：无法进入灵动岛，请先打开工作台");
+        return false;
+      }
+      if (deckView.canvasRuntime && typeof deckView.canvasRuntime.exitAllStages === "function") deckView.canvasRuntime.exitAllStages();
+      const remote = this.getElectronRemote();
+      const mainWindow = this.getBrowserWindow();
+      if (!remote || !mainWindow) {
+        new Notice("Jam Deck：当前环境不支持独立透明窗口（需要桌面 Obsidian）");
+        return false;
+      }
+      this.body = body;
+      this.ownerWindow = ownerWindow;
+      this.mainWindow = mainWindow;
+      this.mainWindowHidden = false;
+      try { this.mainWindowWasVisible = typeof mainWindow.isVisible === "function" ? !!mainWindow.isVisible() : true; } catch (error) { this.mainWindowWasVisible = true; }
+      try { this.mainWindowWasMinimized = typeof mainWindow.isMinimized === "function" ? !!mainWindow.isMinimized() : false; } catch (error) { this.mainWindowWasMinimized = false; }
+      this.installMainWindowFailSafe();
+      this.displayBounds = this.resolveDisplayBounds(mainWindow);
+      this.collapsed = false;
+      this.suppressExpandUntil = 0;
+      this.prepareIpc();
+      const island = this.createIslandWindow(remote);
+      this.islandWindow = island;
+      this.installIpc(island);
+      await this.loadIslandWindow(island);
+      if (this.destroyed || generation !== this.generation || this.islandWindow !== island || island.isDestroyed()) return false;
+      this.active = true;
+      this.sendState();
+      island.show();
+      island.focus();
+      this.disableMainWindowThrottling();
+      this.mainWindowHidden = true;
+      mainWindow.hide();
+      return true;
+    } catch (error) {
+      if (this.destroyed || generation !== this.generation) return false;
+      console.error("jam-deck island enter failed", error);
+      this.active = false;
+      this.destroyIslandWindow();
+      this.removeIpc();
+      this.restoreMainWindow();
+      this.restoreMainWindowThrottling();
+      this.removeMainWindowFailSafe();
+      this.body = null;
+      this.ownerWindow = null;
+      this.mainWindow = null;
+      this.displayBounds = null;
+      new Notice("Jam Deck：灵动岛进入失败，工作台已恢复");
+      return false;
+    } finally {
+      if (generation === this.generation) this.entering = false;
+    }
+  }
+
+  finishExit(fromClosed = false) {
+    const wasActive = this.active;
+    this.generation += 1;
+    this.entering = false;
+    this.active = false;
+    this.collapsed = false;
+    this.suppressExpandUntil = 0;
+    this.restoreMainWindow();
+    this.restoreMainWindowThrottling();
+    this.removeIpc();
+    if (!fromClosed) this.destroyIslandWindow();
+    this.removeMainWindowFailSafe();
+    this.displayBounds = null;
+    this.body = null;
+    this.ownerWindow = null;
+    this.mainWindow = null;
+    if (!this.destroyed) {
+      const view = this.getDeckView();
+      if (view && typeof view.render === "function") view.render();
+    }
+    return wasActive;
+  }
+
+  exit() {
+    if (!this.active && !this.islandWindow) return false;
+    return this.finishExit(false);
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.exit();
+  }
+}
+
 class CanvasStageController {
   constructor(runtime, entry) {
     this.runtime = runtime;
@@ -8840,6 +9650,9 @@ class CanvasStageController {
     const deckRoot = this.getDeckRoot();
     const body = this.entry.ownerDocument && this.entry.ownerDocument.body;
     if (!widgetEl || !deckRoot || !body) return false;
+    const island = this.runtime && this.runtime.deckView && this.runtime.deckView.plugin
+      && this.runtime.deckView.plugin.islandMode;
+    if (island && island.active) island.exit();
     const current = this.runtime && this.runtime.activeStage;
     if (current && current !== this) current.exit();
     this.splitSnapshot = this.snapshotSplits();
@@ -10904,6 +11717,10 @@ class JamDeckView extends ItemView {
   }
 
   render() {
+    if (this.plugin.islandMode && this.plugin.islandMode.active) {
+      this.plugin.islandMode.refresh();
+      return;
+    }
     const root = this.contentEl;
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
@@ -10919,6 +11736,9 @@ class JamDeckView extends ItemView {
     title.createSpan({ text: "副屏工作台", cls: "jam-deck-title-sub" });
 
     const actions = toolbar.createDiv({ cls: "jam-deck-actions" });
+    this.makeToolbarButton(actions, "灵动", "进入灵动岛悬浮条", () => {
+      void this.plugin.enterIslandMode();
+    }, false, "jam-deck-action jam-deck-island-entry");
     this.makeToolbarButton(actions, "+ 添加", "添加组件", () => {
       new WidgetPickerModal(this.app, this.plugin).open();
     });
@@ -11018,12 +11838,13 @@ class JamDeckView extends ItemView {
     }
   }
 
-  makeToolbarButton(parent, text, title, handler, active) {
+  makeToolbarButton(parent, text, title, handler, active, className) {
     const button = parent.createEl("button", {
       text,
-      cls: active ? "jam-deck-action is-active" : "jam-deck-action",
+      cls: className || (active ? "jam-deck-action is-active" : "jam-deck-action"),
       attr: { title },
     });
+    if (active && className) button.addClass("is-active");
     button.addEventListener("click", handler);
   }
 
@@ -13543,6 +14364,7 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictReconcilePromise = null;
     this.canvasNativeConflictReconcileQueued = false;
     this.canvasNativeConflictDisposed = false;
+    this.islandMode = new IslandModeController(this);
     await this.loadSettings();
     await this.ensureClipboardDir();
     this.clipboardBusy = false;
@@ -13560,6 +14382,14 @@ class JamDeckPlugin extends Plugin {
     }});
     this.addCommand({ id: "auto-arrange", name: "恢复默认布局", callback: () => this.autoArrange() });
     this.addCommand({ id: "clear-clipboard", name: "Clear clipboard history", callback: () => this.clearClipboard() });
+    this.addCommand({
+      id: "toggle-island-mode",
+      name: "切换灵动岛模式",
+      callback: () => {
+        if (this.islandMode && this.islandMode.active) this.exitIslandMode();
+        else void this.enterIslandMode();
+      },
+    });
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       this.handleCanvasFileRenamed(file, oldPath).catch((error) => console.error("jam-deck canvas rename sync failed", error));
@@ -13598,9 +14428,23 @@ class JamDeckPlugin extends Plugin {
       window.clearTimeout(this.canvasNativeConflictTimer);
       this.canvasNativeConflictTimer = null;
     }
+    if (this.islandMode) {
+      try { this.islandMode.destroy(); } catch (error) {}
+      this.islandMode = null;
+    }
     for (const owner of (this.canvasInkOwners || new Map()).values()) void owner.flush();
     void this.stopMusicMedia();
     this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => leaf.detach());
+  }
+
+  async enterIslandMode() {
+    if (!this.islandMode) this.islandMode = new IslandModeController(this);
+    return this.islandMode.enter();
+  }
+
+  exitIslandMode() {
+    if (!this.islandMode) return false;
+    return this.islandMode.exit();
   }
 
   async loadSettings() {
@@ -16231,6 +17075,10 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   renderAllViews() {
+    if (this.islandMode && this.islandMode.active) {
+      this.islandMode.refresh();
+      return;
+    }
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       if (leaf.view && typeof leaf.view.render === "function") leaf.view.render();
     }
@@ -16311,6 +17159,10 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   renderClipboardViews() {
+    if (this.islandMode && this.islandMode.active) {
+      this.islandMode.refreshClipboard();
+      return;
+    }
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       const view = leaf.view;
       if (!view || !view.contentEl || typeof view.renderClipboard !== "function") continue;
@@ -16362,6 +17214,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
       });
       if (leaf.view && typeof leaf.view.updateMusicPlayers === "function") leaf.view.updateMusicPlayers();
     }
+    if (this.islandMode && this.islandMode.active) this.islandMode.refreshCountdown();
   }
 
   async setCountdownDuration(widgetId, rawValue) {
@@ -17926,6 +18779,13 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 }
 
+JamDeckPlugin.IslandModeController = IslandModeController;
+JamDeckPlugin.islandConstants = {
+  width: ISLAND_WIDTH,
+  height: ISLAND_HEIGHT,
+  collapsedHeight: ISLAND_COLLAPSED_HEIGHT,
+  idleMs: ISLAND_IDLE_MS,
+};
 JamDeckPlugin.CanvasImageStackController = CanvasImageStackController;
 JamDeckPlugin.CanvasFolderController = CanvasFolderController;
 JamDeckPlugin.CanvasSelectionToolbarController = CanvasSelectionToolbarController;
