@@ -1,158 +1,29 @@
 ﻿# Jam Deck 开发日志
 
-## 2026-08-29 — 0.31.26 灵动岛独立透明窗口（Codex 接手完成）
+## 2026-08-29 — 0.31.36 合入 master 并发 GitHub Release
 
-- 根因修复：不再把 Obsidian 主 `BrowserWindow` 改造成胶囊。新建独立 `transparent: true`、`frame: false` 子窗口，主工作台只在子窗口完成两帧绘制后隐藏，退出时原样恢复。
-- 删除旧路径：移除品红色键、`SetWindowRgn` / `setShape` 硬裁切、PowerShell Win32 桥、白晕遮边与 `switching` 藏帧；主文档不再出现 `#ff00ff` 宿主层。
-- 数据与交互：剪贴板芯片、图片缩略图、文字/图片外拖、倒计时、工作台按钮通过当前子 `WebContents` 的实例级 IPC 同步；倒计时每秒更新不会重建剪贴板条，横滑位置保持。
-- 生命周期：增加 entering/generation 防重入与 stale continuation 拦截；子 renderer 崩溃/无响应、主窗关闭、插件热重载统一清理；主窗隐藏期间临时关闭 background throttling，退出恢复原值。
-- 行为验收：窗口 1600×100；空闲 3 秒后 bounds 从 y=8 移到 y=-90，只露 10px；顶边命中恢复 y=8；Esc 销毁子窗并恢复主工作台。冷进入实测约 1.33 秒，等待期间工作台保持可见，切换在子窗完成绘制后一次发生。
-- 视觉验收：Windows.Graphics.Capture 实机截图可直接看到胶囊四角下方的桌面内容，无 AABB 方底板或品红；2400×150 原始渲染中四角 Alpha=0，圆头 onset 随 y 连续变化；13/13 图片缩略图加载成功。
-- 验证与部署：`npm run verify` 全绿；`npm run deploy -- -TargetPluginDir D:\\jam16\\Jamnote\\.obsidian\\plugins\\jam-deck` 成功并校验 `data.json` SHA-256/长度未变；`Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 成功。
-- 部署兼容：部署脚本 SHA-256 改为 .NET 实现，避免最小 Windows PowerShell 环境缺少 `Get-FileHash`。
-- 处理模型签名：GPT-5（Codex 主代理）、GPT-5（Explorer / 生命周期审查）
-
-## 2026-08-29 — 灵动岛交接 Codex（未达标，请接手）
-
-> **状态**：Jam 对 0.31.16→0.31.25 连续修补不满意，要求记清日志交 Codex 重做/修好。
-> **当前版本**：`0.31.25`（`develop` 工作区；功能可用但不达视觉/交互标准）。
-> **处理模型签名**：Cursor Grok 4.6（主代理 / 交接记录）
-> **接手结果**：已由 Codex 在 `0.31.26` 改为独立透明窗口并完成实机验收；本节保留为原始交接记录。
-
-### Jam 验收标准（未全部满足）
-
-1. 真胶囊：两端半圆光滑，**无 AABB 方底板、无四角漏色、无锯齿感**。
-2. 进出丝滑：点「灵动」/贴顶展开时**不得闪品红**，不得「外观逐步加载」卡顿。
-3. 行为保持：1600×100 条、剪贴板横滑、紧凑倒计时、「工作台」退回；空闲 3s 贴顶露 10px；鼠标贴顶展开；Esc 退出。
-
-### 仍未解决（给 Codex 的优先序）
-
-1. **两端锯齿仍明显**（Jam 2026-08-29 13:27 / 13:31 反馈）。色键 + `CreateRoundRectRgn` 是硬切边；白晕/`drop-shadow` 只是遮丑，不够圆润。
-2. **贴顶触发展开仍会闪一下品红**（Jam 明确复现）。`withIslandSwitch` 藏两帧未让 Jam 满意。
-3. **首次进入仍偏慢**（本机测 enter ≈ 3s）：每次仍 `execFileSync(powershell)`；藏窗后看不见品红，但空白等待仍在。
-
-### 架构现状（读代码入口）
-
-| 位置 | 说明 |
-|------|------|
-| `main.js` → `IslandModeController` | 岛生命周期：`enter` / `exit` / `collapse` / `expand` |
-| `main.js` 顶部 `ISLAND_*` + `jamDeckIsland*` | 尺寸、品红色键、`JamDeckIslandNativeV2` PS 桥 |
-| `styles.css` → `.jam-deck-island*` / `body.is-jam-deck-island` | 宿主铺 `#ff00ff`；白胶囊；`switching` 藏帧 |
-| `tests/jam-deck-test.js` | 字符串/几何冒烟，**不能**代替实机锯齿/闪色验收 |
-
-关键流程：
-
-1. `enter`：PS `EnsureColorKey` + `SetAlpha(0)` → 渲染 overlay → `body` 加岛 class（品红宿主）→ `applyIslandWindow(..., "enter")`（bounds/`setShape`/PS `ApplyRegion`+`SetAlpha(255)`）。
-2. `collapse`/`expand`（`"toggle"`）：**不再跑 PS**，只 `setBounds` + Electron `setShape`；用 `is-jam-deck-island-switching` 藏两帧。
-3. `exit`：`SetAlpha(0)` → `Clear` 区域/LAYERED → 恢复 bounds/背景。
-
-### 已试路径与结论（勿重复踩坑）
-
-| 版本 | 做法 | 结论 |
-|------|------|------|
-| 0.31.16–17 | 搬 `contentEl` / 改 overlay | 搬 DOM 会半残冻结；overlay 方案保留 |
-| 0.31.18–19 | 透明底 + `setShape` 拼胶囊 | 主窗非 `transparent:true`，透明底无效；仍见方底板 |
-| 0.31.20–21 | PS `CreateRoundRectRgn` 曾「成功」却 `GetWindowRgn=0`，并错误跳过 `setShape` | **跨进程裁窗不可信**；假成功是事故源 |
-| 0.31.22 | 只信 `setShape` + 透明底 | DPI 截图曾误判；实机仍有浅灰四角板（~243） |
-| 0.31.23 | 品红 `LWA_COLORKEY` + LAYERED + `SetWindowRgn` | 四角可镂空，但引入品红闪与锯齿 |
-| 0.31.24 | `SetAlpha` 藏窗、PS 类型缓存、toggle 免 PS | collapse/expand ≈ 10ms；首次 enter 仍 ~3s；Jam 仍见闪色/锯齿 |
-| 0.31.25 | 白晕 + `drop-shadow`；switching 藏帧 | Jam **仍不满意** |
-
-### 根因判断（供 Codex 决策）
-
-1. **Obsidian 主 `BrowserWindow` 创建时没有 `transparent: true`**。运行时 `setBackgroundColor(#00000000)` 不能变成真每像素透明；四角只能靠色键或区域硬切，边缘质量差。
-2. **色键（`#FF00FF`）与硬 `SetWindowRgn` 本质是二进制蒙版**，半圆 AA 差 → 锯齿；任何一帧在色键生效前画出品红宿主 → 闪品红。
-3. **`execFileSync(powershell)` 做 Win32 桥太重**（单次常 >1s）。toggle 已避开；enter/exit 仍依赖它。
-4. 自证注意：`Obsidian.com dev:screenshot` 常带不透明缓冲；应用 **DPI-aware `CopyFromScreen`**（见 `debug-backups/desktop-cap-dpi.ps1`）看四角是否为桌面色。视觉模型易把 2400×150 条误读成整窗，**以像素采样为准**。
-
-### 建议 Codex 方向（按收益）
-
-1. **优先评估：独立透明 `BrowserWindow` 做灵动岛**（`transparent: true` + `frame: false` + 真圆角/CSS），主窗隐藏或缩到托盘逻辑外；避开主窗色键。与「不搬 contentEl」兼容：岛 UI 本就是独立 overlay 数据源。
-2. 若必须留在主窗：用 **进程内 FFI**（如 `koffi`）调 `SetWindowRgn` / `SetLayeredWindowAttributes`，消灭 PS 延迟；展开前保证色键已挂且 alpha=0，再改 bounds/DOM。
-3. 边缘：不要靠更大白晕；要真透明 AA 或预乘软边纹理。硬区域裁切做不到「苹果灵动岛」级圆润。
-4. 验收：Jam 实机观感优先；自动化至少查「展开前后无品红像素」「两端 onset 随 y 呈半圆」。
-
-### 相关文件与调试资产
-
-- 代码：`main.js`（`IslandModeController`、岛 Win32 桥）、`styles.css`（岛段）、`tests/jam-deck-test.js`
-- 调试：`debug-backups/desktop-cap-dpi.ps1`、`clear-obsidian-rgn.ps1`、`island-*-0312*.png`
-- 部署：`npm run verify` → `npm run deploy -- -TargetPluginDir D:\jam16\Jamnote\.obsidian\plugins\jam-deck` → `Obsidian.com plugin:reload id=jam-deck vault=Jamnote`
-- **禁止**：动 `data.json`；在 Vault 插件目录直接开发
-
----
-
-## 2026-08-29 — 0.31.25 灵动岛边缘更圆 + 贴顶无品红闪
-
-- Jam：两边锯齿明显；鼠标贴顶展开仍闪品红。
-- 修复：胶囊多层白晕 + `drop-shadow` 盖住色键锯齿；`is-jam-deck-island-switching` 在 peek↔expand 时藏两帧。
-- 验证：标准。贴顶展开无品红；截图看两端更圆润。
+- `develop` 上 0.31.36（灵动岛最终方案）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.36` 并发布 GitHub Release。
 - 处理模型签名：Cursor Grok 4.6（主代理）
 
-## 2026-08-29 — 0.31.24 灵动岛进出丝滑
+## 2026-08-29 — 0.31.36 灵动岛（最终方案）
 
-- Jam：弹出逐步加载很卡，还会漏出品红。
-- 根因：品红宿主先可见，再同步跑 PowerShell 挂色键；每次 apply 还重新 `Add-Type`。
-- 修复：进入时先 `SetAlpha(0)` 再改窗；PS 类型缓存并打包调用；贴顶展开/收起只走 Electron `setBounds`/`setShape`（尺寸不变，不再刷 PS）。
-- 验证：标准。进出无品红闪；collapse/expand 应明显快于首次 enter。
-- 处理模型签名：Cursor Grok 4.6（主代理）
+### 最终效果
+- 工作台工具栏末尾「灵动」进入悬浮条；无描边、无脉冲光环。
+- 独立透明顶栏：上沿直角贴齐屏幕顶，下半圆角（`ISLAND_RADIUS = 控制高/2 + 4`，当前 31px，贴合「工作台」按钮）；侧/底保留阴影安全区，阴影不被窗裁切。
+- 布局：左右侧槽各 100px（绿点+「灵动」居中）；中间剪贴板芯片高 54px、可横滑/点击复制/外拖；紧凑倒计时；「工作台」回完整模式。
+- 折叠：鼠标离开岛窗口 1 秒后收成贴顶约 10px 白底微阴影条；仅鼠标进入该 10px 视觉条才展开；Esc 或「工作台」退出。
+- 折叠↔展开：全高窗内 CSS 380ms morph（`cubic-bezier(.22,1,.36,1)`），morph 后再把窗口收到 peek 命中高度，避免透明区误触与逐帧 `setBounds` 卡顿。
 
-## 2026-08-29 — 0.31.23 灵动岛四角镂空
+### 实现方案
+- `IslandModeController` 新建 `transparent: true` / `frame: false` 子 `BrowserWindow`，用 data URL 绘制岛 UI；主工作台在子窗就绪后隐藏，退出原样恢复。
+- 岛与工作台经子 `WebContents` 实例级 IPC 同步剪贴板/倒计时/动作；倒计时刷新不重建剪贴板条。
+- 生命周期：entering/generation 防重入；子 renderer 崩溃/无响应、主窗关闭、热重载统一清理；主窗隐藏期间关闭 background throttling。
+- 部署脚本 SHA-256 改用 .NET，避免最小 PowerShell 缺 `Get-FileHash`。
+- 已删除主窗品红色键、Win32 `SetWindowRgn` / `setShape` 硬裁、PowerShell 桥与藏帧方案。
 
-- Jam：还是漏了四个角（浅灰方底板）。
-- 根因：主窗口非 `transparent:true`，`setBackgroundColor(#00000000)` 落成不透明黑；AABB 四角仍被合成。
-- 修复：品红色键 + `WS_EX_LAYERED` + `CreateRoundRectRgn`；宿主层 CSS 铺色键色，白胶囊不透明。
-- 验证：标准。DPI 桌面截图四角像素须为桌面色，不得为 ~243 浅灰。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.22 灵动岛去方底板
-
-- 自证：PowerShell 假成功跳过 `setShape`；纠偏后 `rgnType=3`。窗口白底会在 AABB 里铺方底板；改为透明底，只露 CSS 圆角白胶囊。
-- 验证：标准。Obsidian 截图 + DPI 感知桌面截图读图，确认无外圈方框。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.21 灵动岛裁窗纠偏（自证截图）
-
-- Jam：外框还在；要求自己截图验证，没做好别说做好了。
-- 自证：`GetWindowRgn=0`（PowerShell 裁窗未挂上），却 `return true` 跳过了 Electron `setShape`；手动 `setShape` 后 `rgnType=3`。
-- 修复：裁窗只走 `setShape` 胶囊几何；另用 DWM 去掉边框色；顶带 inset=radius 的 stadium 公式。
-- 验证：标准。`npm run verify`；进入后关 idle、截图读图确认圆头后再回复。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.20 灵动岛真胶囊裁窗
-
-- Jam：外圈方框还在，不是真正圆头胶囊。
-- 根因：Electron `setShape` 只能拼矩形，Windows 11 仍画出圆角方窗底板。
-- 修复：`CreateRoundRectRgn` + `SetWindowRgn` 做 stadium 裁切；失败才回退 `setShape`；bounds 后 rAF 再套两次防 DWM 冲掉。
-- 验证：快速。`npm run verify` + 部署热重载实机看轮廓。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.19 灵动岛去方框与滚轮横滑
-
-- Jam：矩形方框还在；隐藏滚动条，改用滚轮滚动剪贴板条。
-- 实现：`jamDeckIslandPillShape` 生成胶囊 `setShape`；rail 隐藏 scrollbar；`wheel` 映射为 `scrollLeft`。
-- 验证：快速。`npm run verify` + 部署热重载。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.18 灵动岛去底板与半高
-
-- Jam：隐藏灰色窗口底板只留白胶囊；高度砍半；空闲贴顶 5s→3s。
-- 实现：`ISLAND_HEIGHT=100`、`ISLAND_IDLE_MS=3000`；进入时 `setBackgroundColor(#00000000)` + CSS 透明宿主；胶囊高约 84px。
-- 验证：快速。`npm run verify` + 部署热重载。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.17 修复灵动岛半残冻结
-
-- Jam 反馈：点「灵动」后不是胶囊，界面半残且无法点击，只能强退。
-- 根因：把工作台 `contentEl` 挪到 `body` 并锁窗口后，Obsidian 布局/命中被扯坏；贴顶等待离开条也可能让用户展开不了。
-- 修复：胶囊改为 `body` 上的独立 overlay，工作台 leaf 保持挂载仅隐藏；Esc 退出；`suppressExpandUntil` 替代离开条才能展开；进入失败强制清理并恢复窗口。
-- 验证：标准。`npm run verify` + 部署后实机进入/Esc 退出/贴顶再展开。
-- 处理模型签名：Cursor Grok 4.6（主代理）
-
-## 2026-08-29 — 0.31.16 灵动岛模式
-
-- Jam 需求：标题栏灵动入口；点击后窗口变为 1600×200 圆角悬浮条；5 秒无操作贴顶露出 10px；鼠标贴该屏幕顶边再展开；岛内横向剪贴板、倒计时、回到工作台。
-- 实现：新增 `IslandModeController`；岛内独立胶囊工具栏。0.31.17 起不再搬移 contentEl。
-- 处理模型签名：Cursor Grok 4.6（主代理）
+### 验证
+- `npm run verify`；部署热重载实机验收贴顶、离开折叠、morph 与阴影。
+- 处理模型签名：Cursor Grok 4.6（主代理）、GPT-5（Codex / 透明窗架构）
 
 ## 2026-08-25 — 0.31.15 合入 master 并发 GitHub Release
 

@@ -46,10 +46,23 @@ const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
 const ISLAND_WIDTH = 1600;
-const ISLAND_HEIGHT = 100;
+// Outer transparent window: content capsule + room for soft drop-shadow (not clipped).
+const ISLAND_SHADOW_PAD_X = 36;
+const ISLAND_SHADOW_PAD_TOP = 0;
+const ISLAND_SHADOW_PAD_BOTTOM = 40;
+const ISLAND_CONTENT_HEIGHT = 72;
+const ISLAND_HEIGHT = ISLAND_SHADOW_PAD_TOP + ISLAND_CONTENT_HEIGHT + ISLAND_SHADOW_PAD_BOTTOM;
 const ISLAND_COLLAPSED_HEIGHT = 10;
-const ISLAND_IDLE_MS = 3000;
-const ISLAND_EXPANDED_TOP_GAP = 8;
+const ISLAND_PEEK_SHADOW_PAD = 14;
+const ISLAND_PEEK_WINDOW_HEIGHT = ISLAND_COLLAPSED_HEIGHT + ISLAND_PEEK_SHADOW_PAD;
+const ISLAND_LEAVE_MS = 1000;
+const ISLAND_EXPANDED_TOP_GAP = 0;
+const ISLAND_MORPH_MS = 380;
+const ISLAND_END_PAD = 8;
+const ISLAND_SIDE_SLOT = 100;
+const ISLAND_CONTROL_HEIGHT = 54;
+// Match the 工作台 / chip pill (height/2), plus the surface's 4px vertical pad so the shell hugs the button.
+const ISLAND_RADIUS = Math.round(ISLAND_CONTROL_HEIGHT / 2) + 4;
 
 function jamDeckPathImpl(raw) {
   if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\")) return nodePath.win32;
@@ -8642,6 +8655,7 @@ class IslandModeController {
     this.mainWindowWasVisible = true;
     this.mainWindowWasMinimized = false;
     this.suppressExpandUntil = 0;
+    this.peekBoundsTimer = 0;
   }
 
   getDeckView() {
@@ -8701,13 +8715,14 @@ class IslandModeController {
   }
 
   computeIslandBounds(collapsed) {
+    // Expanded uses the full capsule frame. Collapsed shrinks to the visual 10px
+    // peek (+ tiny shadow pad) so the hit target matches what you see.
     const display = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
-    const width = Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(display.width) - 24));
-    const height = ISLAND_HEIGHT;
+    const contentWidth = Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(display.width) - 24));
+    const width = contentWidth + ISLAND_SHADOW_PAD_X * 2;
+    const height = collapsed ? ISLAND_PEEK_WINDOW_HEIGHT : ISLAND_HEIGHT;
     const x = Math.round(display.x + (display.width - width) / 2);
-    const y = collapsed
-      ? Math.round(display.y - (height - ISLAND_COLLAPSED_HEIGHT))
-      : Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
+    const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
     return { x, y, width, height };
   }
 
@@ -8759,7 +8774,7 @@ class IslandModeController {
       collapsed: this.collapsed,
       dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
-      idleMs: ISLAND_IDLE_MS,
+      leaveMs: ISLAND_LEAVE_MS,
       items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
         widgetId: widget.id,
@@ -8784,60 +8799,107 @@ class IslandModeController {
     button { font: inherit; }
     #app { position: relative; width: 100%; height: 100%; background: transparent; }
     .surface {
-      position: absolute; inset: 2px;
-      display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
-      align-items: center; gap: 10px; padding: 8px 14px;
-      border-radius: 48px; overflow: hidden;
+      position: absolute;
+      top: 0;
+      left: ${ISLAND_SHADOW_PAD_X}px;
+      right: auto;
+      bottom: auto;
+      width: calc(100% - ${ISLAND_SHADOW_PAD_X * 2}px);
+      height: ${ISLAND_CONTENT_HEIGHT}px;
+      display: grid; grid-template-columns: ${ISLAND_SIDE_SLOT}px minmax(0, 1fr) auto ${ISLAND_SIDE_SLOT}px;
+      align-items: center; gap: 8px; padding: 4px ${ISLAND_END_PAD}px;
+      /* Flat top flush to screen edge; bottom corners at half the prior full-pill radius. */
+      border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px; overflow: hidden;
       color: #20252b; background: rgba(252, 252, 250, .985);
       border: 1px solid rgba(32, 37, 43, .08);
-      box-shadow: 0 10px 28px rgba(27, 31, 35, .18), 0 2px 8px rgba(27, 31, 35, .1);
+      border-top: 0;
+      box-shadow: 0 12px 32px rgba(27, 31, 35, .2), 0 3px 10px rgba(27, 31, 35, .1);
+      transform: translateZ(0);
+      will-change: top, left, width, height, border-radius;
+      transition:
+        top ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        left ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        width ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        height ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        border-radius ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        background-color ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        box-shadow ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        border-color ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        padding ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1),
+        gap ${ISLAND_MORPH_MS}ms cubic-bezier(.22, 1, .36, 1);
+    }
+    .surface > * {
+      transition: opacity 140ms ease;
     }
     body.is-dark { color-scheme: dark; }
     body.is-dark .surface {
       color: #eceeea; background: rgba(38, 40, 39, .985);
       border-color: rgba(255, 255, 255, .09);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, .42), 0 2px 8px rgba(0, 0, 0, .28);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, .46), 0 3px 10px rgba(0, 0, 0, .3);
     }
     #app.is-collapsed .surface {
-      inset: auto auto 0 50%; width: min(420px, 70%); height: 10px;
-      transform: translateX(-50%); padding: 0; gap: 0;
-      border: 0; border-radius: 0 0 999px 999px;
-      background: #46543e; box-shadow: 0 2px 10px rgba(0, 0, 0, .22);
+      top: 0;
+      left: 15%;
+      width: 70%;
+      height: ${ISLAND_COLLAPSED_HEIGHT}px;
+      padding: 0; gap: 0;
+      border-color: rgba(32, 37, 43, .06);
+      border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px;
+      background: rgba(252, 252, 250, .98);
+      box-shadow: 0 2px 8px rgba(27, 31, 35, .14), 0 1px 2px rgba(27, 31, 35, .08);
     }
-    #app.is-collapsed .surface > * { visibility: hidden; pointer-events: none; }
-    .brand { display: flex; align-items: center; gap: 6px; padding: 0 2px 0 6px; }
-    .brand-dot { width: 7px; height: 7px; border-radius: 50%; background: #8fd14f; box-shadow: 0 0 0 2px rgba(143, 209, 79, .2); }
-    .brand-label { font-size: 12px; font-weight: 720; letter-spacing: .08em; }
-    .rail { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
+    body.is-dark #app.is-collapsed .surface {
+      background: rgba(252, 252, 250, .98);
+      border-color: rgba(32, 37, 43, .06);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .22), 0 1px 2px rgba(0, 0, 0, .12);
+    }
+    #app.is-collapsed .surface > * { opacity: 0; pointer-events: none; }
+    body.no-motion .surface,
+    body.no-motion .surface > * { transition: none !important; will-change: auto; }
+    .brand {
+      width: ${ISLAND_SIDE_SLOT}px; min-width: ${ISLAND_SIDE_SLOT}px; max-width: ${ISLAND_SIDE_SLOT}px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 0; box-sizing: border-box;
+    }
+    .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: #b8ff3d; box-shadow: 0 0 0 2px rgba(184, 255, 61, .28); flex: 0 0 auto; }
+    .brand-label { font-size: 13px; font-weight: 720; letter-spacing: .08em; }
+    .rail { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; padding: 0; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
     .rail::-webkit-scrollbar { display: none; }
-    .empty { color: #777d82; font-size: 11px; padding: 0 6px; white-space: nowrap; }
+    .empty { color: #777d82; font-size: 12px; padding: 0 6px; white-space: nowrap; }
     body.is-dark .empty { color: #a8ada9; }
     .chip {
-      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
-      max-width: 200px; height: 36px; margin: 0; padding: 0 10px 0 6px;
-      border-radius: 999px; border: 1px solid rgba(32, 37, 43, .13);
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
+      max-width: 220px; height: ${ISLAND_CONTROL_HEIGHT}px; margin: 0; padding: 0 12px 0 8px;
+      border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .13);
       background: rgba(32, 37, 43, .035); color: inherit; cursor: grab; box-shadow: none;
     }
     body.is-dark .chip { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .045); }
     .chip:hover, .chip:focus-visible { border-color: rgba(112, 160, 66, .58); background: rgba(143, 209, 79, .1); outline: none; }
     .chip:focus-visible, .timer-toggle:focus-visible, .restore:focus-visible { box-shadow: 0 0 0 2px rgba(143, 209, 79, .5); }
     .chip.is-dragging { opacity: .5; cursor: grabbing; }
-    .thumb, .kind { width: 24px; height: 24px; border-radius: 7px; flex: 0 0 auto; }
+    .thumb, .kind { width: 36px; height: 36px; border-radius: 10px; flex: 0 0 auto; }
     .thumb { object-fit: cover; background: rgba(32, 37, 43, .08); pointer-events: none; }
-    .kind { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #777d82; background: rgba(32, 37, 43, .07); }
+    .kind { display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #777d82; background: rgba(32, 37, 43, .07); }
     body.is-dark .kind { color: #b5bab6; background: rgba(255, 255, 255, .07); }
-    .chip-text { min-width: 0; font-size: 11px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .chip-time { font-size: 10px; color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
+    .chip-text { min-width: 0; font-size: 12px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chip-time { font-size: 11px; color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
     body.is-dark .chip-time { color: #a8ada9; }
-    .timer { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 6px; border-radius: 999px; border: 1px solid rgba(32, 37, 43, .13); background: rgba(32, 37, 43, .035); }
+    .timer { display: inline-flex; align-items: center; gap: 8px; height: ${ISLAND_CONTROL_HEIGHT}px; padding: 0 12px 0 8px; border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .13); background: rgba(32, 37, 43, .035); }
     body.is-dark .timer { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .045); }
     .timer.is-running { border-color: rgba(112, 160, 66, .5); background: rgba(143, 209, 79, .1); }
-    .timer-toggle { width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(32, 37, 43, .08); color: inherit; cursor: pointer; }
+    .timer-toggle { width: 40px; height: 40px; margin: 0; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(32, 37, 43, .08); color: inherit; cursor: pointer; }
     body.is-dark .timer-toggle { background: rgba(255, 255, 255, .08); }
     .timer-toggle:hover { background: rgba(143, 209, 79, .18); }
-    .timer-toggle svg { width: 14px; height: 14px; fill: currentColor; }
-    .clock { min-width: 6.8ch; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 680; letter-spacing: .04em; }
-    .restore { height: 36px; margin: 0; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(32, 37, 43, .14); background: rgba(32, 37, 43, .05); color: inherit; font-size: 12px; font-weight: 680; cursor: pointer; white-space: nowrap; }
+    .timer-toggle svg { width: 16px; height: 16px; fill: currentColor; }
+    .clock { min-width: 6.8ch; font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 680; letter-spacing: .04em; }
+    .restore {
+      width: ${ISLAND_SIDE_SLOT}px; min-width: ${ISLAND_SIDE_SLOT}px; max-width: ${ISLAND_SIDE_SLOT}px;
+      height: ${ISLAND_CONTROL_HEIGHT}px; margin: 0; padding: 0 12px; box-sizing: border-box;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .14);
+      background: rgba(32, 37, 43, .05); color: inherit; font-size: 13px; font-weight: 680;
+      cursor: pointer; white-space: nowrap;
+    }
     body.is-dark .restore { border-color: rgba(255, 255, 255, .11); background: rgba(255, 255, 255, .055); }
     .restore:hover { border-color: rgba(112, 160, 66, .58); background: rgba(143, 209, 79, .12); }
     .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: 10px; opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
@@ -8865,22 +8927,25 @@ class IslandModeController {
     const timerHost = document.getElementById("timerHost");
     const restore = document.getElementById("restore");
     const toast = document.getElementById("toast");
-    let state = { collapsed: false, dark: false, idleMs: 3000, items: [], countdown: null };
+    let state = { collapsed: false, dark: false, leaveMs: 1000, items: [], countdown: null };
     let painted = false;
-    let idleTimer = 0;
+    let leaveTimer = 0;
     let toastTimer = 0;
     let lastActivitySent = 0;
     let clipboardSignature = "";
+    let dragging = false;
+    const PEEK_HIT_PX = ${ISLAND_COLLAPSED_HEIGHT};
 
     const send = (payload) => ipcRenderer.send(ACTION_CHANNEL, payload);
-    const clearIdle = () => { if (idleTimer) window.clearTimeout(idleTimer); idleTimer = 0; };
-    const scheduleIdle = () => {
-      clearIdle();
-      if (state.collapsed) return;
-      idleTimer = window.setTimeout(() => send({ type: "collapse" }), Math.max(250, Number(state.idleMs) || 3000));
+    const clearLeave = () => { if (leaveTimer) window.clearTimeout(leaveTimer); leaveTimer = 0; };
+    const scheduleLeave = () => {
+      clearLeave();
+      if (state.collapsed || dragging) return;
+      leaveTimer = window.setTimeout(() => send({ type: "collapse" }), Math.max(250, Number(state.leaveMs) || 1000));
     };
+    const inPeekZone = (event) => Number(event && event.clientY) <= PEEK_HIT_PX;
     const activity = (forceExpand = false) => {
-      scheduleIdle();
+      clearLeave();
       const now = Date.now();
       if (forceExpand || now - lastActivitySent >= 240) {
         lastActivitySent = now;
@@ -8921,7 +8986,7 @@ class IslandModeController {
           image.draggable = false;
           chip.appendChild(image);
           if (item.filePath && nativeImage && typeof nativeImage.createThumbnailFromPath === "function") {
-            nativeImage.createThumbnailFromPath(item.filePath, { width: 48, height: 48 }).then((thumbnail) => {
+            nativeImage.createThumbnailFromPath(item.filePath, { width: 72, height: 72 }).then((thumbnail) => {
               if (thumbnail && !thumbnail.isEmpty() && image.isConnected) image.src = thumbnail.toDataURL();
             }).catch(() => {});
           } else {
@@ -9005,7 +9070,6 @@ class IslandModeController {
     }
 
     function render(next) {
-      const wasCollapsed = state.collapsed;
       state = next || state;
       document.body.classList.toggle("is-dark", !!state.dark);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
@@ -9016,8 +9080,7 @@ class IslandModeController {
         renderClipboard();
       }
       renderTimer();
-      if (state.collapsed) clearIdle();
-      else if (!painted || wasCollapsed) scheduleIdle();
+      if (state.collapsed) clearLeave();
       painted = true;
       return true;
     }
@@ -9033,16 +9096,35 @@ class IslandModeController {
       rail.scrollLeft += delta;
       activity();
     }, { passive: false });
-    app.addEventListener("pointerdown", () => activity(state.collapsed), true);
-    app.addEventListener("pointermove", () => activity(state.collapsed), true);
-    app.addEventListener("wheel", () => activity(state.collapsed), { capture: true, passive: true });
+    app.addEventListener("pointerdown", (event) => {
+      if (state.collapsed && !inPeekZone(event)) return;
+      activity(state.collapsed);
+    }, true);
+    app.addEventListener("pointermove", (event) => {
+      if (state.collapsed) {
+        if (inPeekZone(event)) activity(true);
+        return;
+      }
+      clearLeave();
+    }, true);
+    app.addEventListener("wheel", (event) => {
+      if (state.collapsed && !inPeekZone(event)) return;
+      activity(state.collapsed);
+    }, { capture: true, passive: true });
+    document.addEventListener("dragstart", () => { dragging = true; clearLeave(); }, true);
+    document.addEventListener("dragend", () => { dragging = false; }, true);
+    document.documentElement.addEventListener("mouseenter", (event) => {
+      clearLeave();
+      if (state.collapsed && inPeekZone(event)) activity(true);
+    });
+    document.documentElement.addEventListener("mouseleave", () => scheduleLeave());
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
         send({ type: "exit" });
-      } else {
-        activity(state.collapsed);
+      } else if (!state.collapsed) {
+        activity(false);
       }
     }, true);
     window.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -9216,6 +9298,33 @@ class IslandModeController {
     }
   }
 
+  clearPeekBoundsTimer() {
+    if (!this.peekBoundsTimer) return;
+    const view = this.ownerWindow;
+    if (view && typeof view.clearTimeout === "function") {
+      try { view.clearTimeout(this.peekBoundsTimer); } catch (error) {}
+    } else {
+      try { clearTimeout(this.peekBoundsTimer); } catch (error) {}
+    }
+    this.peekBoundsTimer = 0;
+  }
+
+  schedulePeekBounds() {
+    this.clearPeekBoundsTimer();
+    const generation = this.generation;
+    const delay = this.plugin.settings.animationsEnabled !== false ? ISLAND_MORPH_MS : 0;
+    const run = () => {
+      this.peekBoundsTimer = 0;
+      if (generation !== this.generation || !this.active || !this.collapsed || this.destroyed) return;
+      this.applyIslandBounds(true);
+    };
+    if (this.ownerWindow && typeof this.ownerWindow.setTimeout === "function") {
+      this.peekBoundsTimer = this.ownerWindow.setTimeout(run, delay);
+    } else {
+      this.peekBoundsTimer = setTimeout(run, delay);
+    }
+  }
+
   bumpActivity() {
     if (!this.active || this.destroyed || !this.collapsed) return;
     if (Date.now() < this.suppressExpandUntil) return;
@@ -9225,18 +9334,21 @@ class IslandModeController {
   collapse() {
     if (!this.active || this.collapsed || this.destroyed) return;
     this.collapsed = true;
-    this.suppressExpandUntil = Date.now() + 450;
-    this.applyIslandBounds(true);
+    this.suppressExpandUntil = Date.now() + Math.max(450, ISLAND_MORPH_MS + 80);
+    // Morph in the full frame, then shrink the window to the visual 10px peek hit target.
     this.sendState();
+    this.schedulePeekBounds();
   }
 
   expand() {
     if (!this.active || !this.collapsed || this.destroyed) return;
     this.collapsed = false;
     this.suppressExpandUntil = 0;
+    this.clearPeekBoundsTimer();
+    // Restore the full frame before CSS expands so the stadium has room to morph.
     this.applyIslandBounds(false);
     this.sendState();
-    try { this.islandWindow.focus(); } catch (error) {}
+    try { if (this.islandWindow && !this.islandWindow.isDestroyed()) this.islandWindow.focus(); } catch (error) {}
   }
 
   refreshClipboard() {
@@ -9396,6 +9508,7 @@ class IslandModeController {
     this.active = false;
     this.collapsed = false;
     this.suppressExpandUntil = 0;
+    this.clearPeekBoundsTimer();
     this.restoreMainWindow();
     this.restoreMainWindowThrottling();
     this.removeIpc();
@@ -11736,9 +11849,6 @@ class JamDeckView extends ItemView {
     title.createSpan({ text: "副屏工作台", cls: "jam-deck-title-sub" });
 
     const actions = toolbar.createDiv({ cls: "jam-deck-actions" });
-    this.makeToolbarButton(actions, "灵动", "进入灵动岛悬浮条", () => {
-      void this.plugin.enterIslandMode();
-    }, false, "jam-deck-action jam-deck-island-entry");
     this.makeToolbarButton(actions, "+ 添加", "添加组件", () => {
       new WidgetPickerModal(this.app, this.plugin).open();
     });
@@ -11762,6 +11872,9 @@ class JamDeckView extends ItemView {
         await this.plugin.autoArrange();
       });
     }
+    this.makeToolbarButton(actions, "灵动", "进入灵动岛悬浮条", () => {
+      void this.plugin.enterIslandMode();
+    }, false, "jam-deck-action jam-deck-island-entry");
 
     const aiFab = root.createDiv({
       cls: "jam-deck-ai-fab",
@@ -18784,7 +18897,9 @@ JamDeckPlugin.islandConstants = {
   width: ISLAND_WIDTH,
   height: ISLAND_HEIGHT,
   collapsedHeight: ISLAND_COLLAPSED_HEIGHT,
-  idleMs: ISLAND_IDLE_MS,
+  leaveMs: ISLAND_LEAVE_MS,
+  sideSlot: ISLAND_SIDE_SLOT,
+  morphMs: ISLAND_MORPH_MS,
 };
 JamDeckPlugin.CanvasImageStackController = CanvasImageStackController;
 JamDeckPlugin.CanvasFolderController = CanvasFolderController;

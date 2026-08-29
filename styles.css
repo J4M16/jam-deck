@@ -3782,35 +3782,19 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 }
 
 .jam-deck-root .jam-deck-island-entry {
-  position: relative;
-  border-radius: 999px;
-  padding: 4px 12px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   font-weight: 650;
   letter-spacing: 0.04em;
-  border-color: color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 42%, var(--jd-line, var(--background-modifier-border)));
-  background: color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 10%, var(--jd-paper, var(--background-primary)));
-  color: var(--jd-ink, var(--text-normal));
 }
 .jam-deck-root .jam-deck-island-entry:hover {
-  border-color: color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 70%, var(--jd-line, var(--background-modifier-border)));
-  background: color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 16%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--jd-ink, var(--text-normal)) 6%, transparent);
+  box-shadow: none;
 }
 .jam-deck-root .jam-deck-island-entry::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  pointer-events: none;
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 35%, transparent);
-  animation: jam-deck-island-pulse 2.4s ease-out infinite;
-}
-.jam-deck-root.jam-deck-no-motion .jam-deck-island-entry::after {
-  animation: none;
-}
-@keyframes jam-deck-island-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 34%, transparent); opacity: 1; }
-  70% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--jd-accent, var(--interactive-accent)) 0%, transparent); opacity: 0.35; }
-  100% { box-shadow: 0 0 0 0 transparent; opacity: 0; }
+  content: none;
 }
 /* ============================================================
  * Jam Deck 动画开关（与系统「减少动态效果」脱钩）
