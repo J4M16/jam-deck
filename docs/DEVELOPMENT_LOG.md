@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-08-31 — 0.31.42 合入 master 并发 GitHub Release
+
+- `develop` 上 0.31.37–0.31.42（灵动岛点击穿透、离开折叠修复、折叠延时可配置；移除实验性 AI 第二页）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.42` 并发布 GitHub Release。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-31 — 0.31.42 灵动岛折叠延时可配置
 
 - Jam：胶囊折叠延时改为设置面板配置。
