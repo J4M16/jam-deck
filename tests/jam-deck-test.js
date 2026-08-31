@@ -69,13 +69,17 @@ assert(pluginSource.includes("class CanvasStageController"), "embedded Canvas mu
 assert(pluginSource.includes("class IslandModeController"), "Jam Deck must own a dedicated Dynamic Island / floating-strip controller");
 assert(pluginSource.includes('makeToolbarButton(actions, "灵动"'), "toolbar must expose the island entry labeled 灵动");
 assert(pluginSource.includes("ISLAND_WIDTH = 1600") && pluginSource.includes("ISLAND_SHADOW_PAD_X = 36") && pluginSource.includes("ISLAND_SHADOW_PAD_TOP = 0") && pluginSource.includes("ISLAND_SHADOW_PAD_BOTTOM = 40") && pluginSource.includes("ISLAND_CONTENT_HEIGHT = 72") && pluginSource.includes("ISLAND_COLLAPSED_HEIGHT = 10") && pluginSource.includes("ISLAND_LEAVE_MS = 1000"), "island geometry must reserve side/bottom shadow pad and leave-to-collapse timing");
+assert(pluginSource.includes("islandLeaveMs: ISLAND_LEAVE_MS") && pluginSource.includes("灵动岛折叠延时") && pluginSource.includes("jamDeckNormalizeIslandLeaveMs") && pluginSource.includes("getLeaveMs()"), "island leave delay must be configurable in settings and applied to collapse");
+assert(pluginSource.includes("ISLAND_LEAVE_MS_OPTIONS") && pluginSource.includes("ISLAND_LEAVE_MS_MIN = 300") && pluginSource.includes("ISLAND_LEAVE_MS_MAX = 3000"), "island leave delay options must stay within 0.3–3 seconds");
 assert(pluginSource.includes("ISLAND_CONTROL_HEIGHT = 54") && pluginSource.includes("width: 36px; height: 36px"), "island clipboard chips must use the taller 1.5× content height");
 assert(pluginSource.includes("ISLAND_END_PAD = 8") && pluginSource.includes("ISLAND_MORPH_MS = 380") && pluginSource.includes("ISLAND_SIDE_SLOT = 100"), "island end pad, morph duration, and 100px side slots must stay explicit");
 assert(pluginSource.includes(".brand {") && pluginSource.includes("justify-content: center"), "brand mark must stay centered inside the side slot");
 assert(pluginSource.includes("cubic-bezier(.22, 1, .36, 1)") && pluginSource.includes("will-change: top, left, width, height, border-radius") && pluginSource.includes("top: 0"), "collapsed↔expanded island must CSS-morph the stadium");
 assert(pluginSource.includes("#app.is-collapsed .surface") && pluginSource.includes("rgba(252, 252, 250, .98)") && pluginSource.includes("0 2px 8px rgba(27, 31, 35, .14)"), "collapsed peek strip must be white with a soft shadow");
 assert(pluginSource.includes('document.documentElement.addEventListener("mouseleave"') && pluginSource.includes("scheduleLeave"), "island must collapse one second after the pointer leaves");
-assert(pluginSource.includes("ISLAND_PEEK_WINDOW_HEIGHT") && pluginSource.includes("schedulePeekBounds") && pluginSource.includes("inPeekZone"), "collapsed peek hit target must match the visual 10px strip");
+assert(pluginSource.includes("startLeaveWatch") && pluginSource.includes("isCursorOverIslandContent") && pluginSource.includes("getCursorScreenPoint"), "expanded island must poll cursor against the visible capsule so shadow pads cannot block collapse");
+assert(pluginSource.includes("ISLAND_PEEK_WIDTH_RATIO") && pluginSource.includes("schedulePeekBounds") && pluginSource.includes("inPeekZone") && pluginSource.includes("is-peek-tight"), "collapsed peek hit target must match the visual 10px × 70% strip");
+assert(pluginSource.includes("setIgnoreMouseEvents(true, { forward: true })") && pluginSource.includes("setMousePassthrough"), "collapsed island must click-through so windows under the strip stay usable");
 assert(pluginSource.includes("new remote.BrowserWindow") && pluginSource.includes("transparent: true") && pluginSource.includes('backgroundColor: "#00000000"') && pluginSource.includes("frame: false"), "island mode must use a dedicated transparent frameless BrowserWindow");
 assert(pluginSource.includes('island.setAlwaysOnTop(true, "floating")') && pluginSource.includes("island.setBounds(bounds, false)"), "island window must stay on top and move between expanded and peek bounds");
 assert(pluginSource.includes("mainWindow.hide()") && pluginSource.includes("restoreMainWindow") && pluginSource.includes("win.show()"), "island entry must hide the workbench only after the transparent window is ready and restore it on exit");
@@ -84,12 +88,13 @@ assert(!pluginSource.includes("JamDeckIslandNativeV2") && !pluginSource.includes
 assert(!pluginSource.includes("applyElectronPillShape") && !pluginSource.includes("withIslandSwitch") && !pluginSource.includes("is-jam-deck-island-switching"), "transparent-window island must not retain hard setShape bands or hidden-frame switching");
 assert(!styleSource.includes("#ff00ff") && !styleSource.includes("body.is-jam-deck-island"), "island mode must not paint magenta host layers in the Obsidian document");
 assert(pluginSource.includes('rail.addEventListener("wheel"') && pluginSource.includes("rail.scrollLeft += delta"), "island clipboard rail must scroll horizontally with the mouse wheel");
+assert(!pluginSource.includes("is-page-ai") && !pluginSource.includes('id="aiPage"') && !pluginSource.includes('type: "set-page"') && !pluginSource.includes('type: "ai-send"'), "island must not keep an AI second page");
 assert(pluginSource.includes("ISLAND_CONTROL_HEIGHT / 2) + 4") && pluginSource.includes('border-top: 0') && pluginSource.includes('background: transparent !important'), "island shell radius must hug the 工作台 pill");
 assert(pluginSource.includes("this.entering") && pluginSource.includes("generation !== this.generation") && pluginSource.includes('render-process-gone') && pluginSource.includes('island.on("unresponsive"'), "island lifecycle must reject stale enters and recover from child renderer failures");
 assert(pluginSource.includes("disableMainWindowThrottling") && pluginSource.includes("restoreMainWindowThrottling") && pluginSource.includes("getBackgroundThrottling"), "hidden workbench timers must stay unthrottled and restore their prior policy on exit");
 assert(pluginSource.includes("nextClipboardSignature !== clipboardSignature"), "countdown refreshes must not rebuild the clipboard rail or reset horizontal scroll");
 assert(pluginSource.includes("suppressExpandUntil") && pluginSource.includes('activity(state.collapsed)') && pluginSource.includes('forceExpand ? "expand" : "activity"'), "collapsed island must suppress rebound and expand from pointer activity on the top-edge strip");
-assert(pluginSource.includes("collapsed ? ISLAND_PEEK_WINDOW_HEIGHT : ISLAND_HEIGHT") && pluginSource.includes("display.y + ISLAND_EXPANDED_TOP_GAP"), "collapsed island window must shrink to the peek strip hit target");
+assert(pluginSource.includes("contentWidth * ISLAND_PEEK_WIDTH_RATIO") && pluginSource.includes("height = ISLAND_COLLAPSED_HEIGHT") && pluginSource.includes("display.y + ISLAND_EXPANDED_TOP_GAP"), "collapsed island window must shrink to the peek strip hit target");
 assert(!pluginSource.includes("jam-deck-island-anchor"), "island mode must not steal the workbench contentEl onto document.body");
 assert(pluginSource.includes('event.key === "Escape"') && pluginSource.includes("toggle-island-mode"), "island mode must exit on Escape and register a command");
 assert(pluginSource.includes("island && island.active) island.exit()"), "entering Canvas stage must leave island mode first");
@@ -467,7 +472,7 @@ function makeIslandLifecycleHarness() {
     children.push(child);
     return child;
   };
-  return { controller, mainWindow, children, view };
+  return { controller, mainWindow, children, view, plugin };
 }
 
 async function testIslandLifecycle() {
@@ -513,6 +518,7 @@ async function testIslandLifecycle() {
     assert.strictEqual(harness.mainWindow.hideCalls, 0, "failed island load must leave the workbench visible");
   }
 }
+
 const authoritativeTextNode = { getData: () => ({ type: "text", text: "current" }), nodeEl: { matches: () => false } };
 const staleDomNode = { getData: () => ({ type: "file", file: "stale.png" }), nodeEl: { matches: () => true } };
 assert.deepStrictEqual(

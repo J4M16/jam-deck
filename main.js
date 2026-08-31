@@ -53,9 +53,12 @@ const ISLAND_SHADOW_PAD_BOTTOM = 40;
 const ISLAND_CONTENT_HEIGHT = 72;
 const ISLAND_HEIGHT = ISLAND_SHADOW_PAD_TOP + ISLAND_CONTENT_HEIGHT + ISLAND_SHADOW_PAD_BOTTOM;
 const ISLAND_COLLAPSED_HEIGHT = 10;
-const ISLAND_PEEK_SHADOW_PAD = 14;
-const ISLAND_PEEK_WINDOW_HEIGHT = ISLAND_COLLAPSED_HEIGHT + ISLAND_PEEK_SHADOW_PAD;
+// Collapsed visual strip is centered at 70% of the capsule width (CSS left 15% / width 70%).
+const ISLAND_PEEK_WIDTH_RATIO = 0.7;
 const ISLAND_LEAVE_MS = 1000;
+const ISLAND_LEAVE_MS_MIN = 300;
+const ISLAND_LEAVE_MS_MAX = 3000;
+const ISLAND_LEAVE_MS_OPTIONS = [300, 500, 800, 1000, 1500, 2000, 2500, 3000];
 const ISLAND_EXPANDED_TOP_GAP = 0;
 const ISLAND_MORPH_MS = 380;
 const ISLAND_END_PAD = 8;
@@ -868,6 +871,7 @@ const DEFAULT_SETTINGS = {
   editMode: false,
   savedLayout: null,
   animationsEnabled: true,
+  islandLeaveMs: ISLAND_LEAVE_MS,
   clipboardPollMs: 700,
   clipboardMaxItems: 60,
   aiApiKey: "",
@@ -900,6 +904,22 @@ const DEFAULT_SETTINGS = {
   musicLikes: [],
   musicLauncher: { schemaVersion: 1, lastConnectedProvider: null },
 };
+
+function jamDeckNormalizeIslandLeaveMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return ISLAND_LEAVE_MS;
+  const clamped = Math.min(ISLAND_LEAVE_MS_MAX, Math.max(ISLAND_LEAVE_MS_MIN, Math.round(n)));
+  let best = ISLAND_LEAVE_MS_OPTIONS[0];
+  let bestDist = Math.abs(best - clamped);
+  for (const option of ISLAND_LEAVE_MS_OPTIONS) {
+    const dist = Math.abs(option - clamped);
+    if (dist < bestDist) {
+      best = option;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
 
 function jamDeckIsTypingTarget(target) {
   return !!(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
@@ -8656,6 +8676,9 @@ class IslandModeController {
     this.mainWindowWasMinimized = false;
     this.suppressExpandUntil = 0;
     this.peekBoundsTimer = 0;
+    this.peekTight = false;
+    this.leaveWatchTimer = 0;
+    this.leaveOutsideSince = 0;
   }
 
   getDeckView() {
@@ -8715,15 +8738,94 @@ class IslandModeController {
   }
 
   computeIslandBounds(collapsed) {
-    // Expanded uses the full capsule frame. Collapsed shrinks to the visual 10px
-    // peek (+ tiny shadow pad) so the hit target matches what you see.
+    // Expanded uses the full capsule frame. Collapsed shrinks to the visible
+    // 10px × 70% peek strip so transparent side pads no longer cover browser tabs.
     const display = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
     const contentWidth = Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(display.width) - 24));
+    if (collapsed) {
+      const width = Math.max(240, Math.round(contentWidth * ISLAND_PEEK_WIDTH_RATIO));
+      const height = ISLAND_COLLAPSED_HEIGHT;
+      const x = Math.round(display.x + (display.width - width) / 2);
+      const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
+      return { x, y, width, height };
+    }
     const width = contentWidth + ISLAND_SHADOW_PAD_X * 2;
-    const height = collapsed ? ISLAND_PEEK_WINDOW_HEIGHT : ISLAND_HEIGHT;
+    const height = ISLAND_HEIGHT;
     const x = Math.round(display.x + (display.width - width) / 2);
     const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
     return { x, y, width, height };
+  }
+
+  setMousePassthrough(enabled) {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed() || typeof island.setIgnoreMouseEvents !== "function") return;
+    try {
+      if (enabled) island.setIgnoreMouseEvents(true, { forward: true });
+      else island.setIgnoreMouseEvents(false);
+    } catch (error) {
+      console.error("jam-deck island mouse passthrough failed", error);
+    }
+  }
+
+  clearLeaveWatch() {
+    if (!this.leaveWatchTimer) {
+      this.leaveOutsideSince = 0;
+      return;
+    }
+    const view = this.ownerWindow;
+    if (view && typeof view.clearInterval === "function") {
+      try { view.clearInterval(this.leaveWatchTimer); } catch (error) {}
+    } else {
+      try { clearInterval(this.leaveWatchTimer); } catch (error) {}
+    }
+    this.leaveWatchTimer = 0;
+    this.leaveOutsideSince = 0;
+  }
+
+  isCursorOverIslandContent() {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed()) return false;
+    const remote = this.getElectronRemote();
+    const screenApi = remote && remote.screen;
+    if (!screenApi || typeof screenApi.getCursorScreenPoint !== "function") return false;
+    let bounds;
+    try { bounds = island.getBounds(); } catch (error) { return false; }
+    if (!bounds) return false;
+    let point;
+    try { point = screenApi.getCursorScreenPoint(); } catch (error) { return false; }
+    // Only the visible capsule counts. Transparent shadow pads must not keep it expanded.
+    const left = bounds.x + ISLAND_SHADOW_PAD_X;
+    const top = bounds.y + ISLAND_SHADOW_PAD_TOP;
+    const right = bounds.x + bounds.width - ISLAND_SHADOW_PAD_X;
+    const bottom = top + ISLAND_CONTENT_HEIGHT;
+    return point.x >= left && point.x < right && point.y >= top && point.y < bottom;
+  }
+
+  startLeaveWatch() {
+    this.clearLeaveWatch();
+    if (!this.active || this.collapsed || this.destroyed) return;
+    const tick = () => {
+      if (!this.active || this.collapsed || this.destroyed) {
+        this.clearLeaveWatch();
+        return;
+      }
+      if (this.isCursorOverIslandContent()) {
+        this.leaveOutsideSince = 0;
+        return;
+      }
+      const now = Date.now();
+      if (!this.leaveOutsideSince) this.leaveOutsideSince = now;
+      else if (now - this.leaveOutsideSince >= this.getLeaveMs()) this.collapse();
+    };
+    if (this.ownerWindow && typeof this.ownerWindow.setInterval === "function") {
+      this.leaveWatchTimer = this.ownerWindow.setInterval(tick, 100);
+    } else {
+      this.leaveWatchTimer = setInterval(tick, 100);
+    }
+  }
+
+  getLeaveMs() {
+    return jamDeckNormalizeIslandLeaveMs(this.plugin.settings && this.plugin.settings.islandLeaveMs);
   }
 
   getPrimaryClockWidget() {
@@ -8772,9 +8874,10 @@ class IslandModeController {
       || !!(this.body && this.body.ownerDocument && this.body.ownerDocument.documentElement.classList.contains("theme-dark"));
     return {
       collapsed: this.collapsed,
+      peekTight: !!(this.collapsed && this.peekTight),
       dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
-      leaveMs: ISLAND_LEAVE_MS,
+      leaveMs: this.getLeaveMs(),
       items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
         widgetId: widget.id,
@@ -8839,8 +8942,8 @@ class IslandModeController {
     }
     #app.is-collapsed .surface {
       top: 0;
-      left: 15%;
-      width: 70%;
+      left: ${Math.round((1 - ISLAND_PEEK_WIDTH_RATIO) * 50)}%;
+      width: ${Math.round(ISLAND_PEEK_WIDTH_RATIO * 100)}%;
       height: ${ISLAND_COLLAPSED_HEIGHT}px;
       padding: 0; gap: 0;
       border-color: rgba(32, 37, 43, .06);
@@ -8848,6 +8951,8 @@ class IslandModeController {
       background: rgba(252, 252, 250, .98);
       box-shadow: 0 2px 8px rgba(27, 31, 35, .14), 0 1px 2px rgba(27, 31, 35, .08);
     }
+    /* After the window itself shrinks to the peek strip, fill that window. */
+    #app.is-collapsed.is-peek-tight .surface { left: 0; width: 100%; }
     body.is-dark #app.is-collapsed .surface {
       background: rgba(252, 252, 250, .98);
       border-color: rgba(32, 37, 43, .06);
@@ -9074,6 +9179,7 @@ class IslandModeController {
       document.body.classList.toggle("is-dark", !!state.dark);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
       app.classList.toggle("is-collapsed", !!state.collapsed);
+      app.classList.toggle("is-peek-tight", !!state.peekTight);
       const nextClipboardSignature = JSON.stringify(state.items || []);
       if (!painted || nextClipboardSignature !== clipboardSignature) {
         clipboardSignature = nextClipboardSignature;
@@ -9105,7 +9211,16 @@ class IslandModeController {
         if (inPeekZone(event)) activity(true);
         return;
       }
-      clearLeave();
+      // Only the visible capsule cancels leave. Transparent shadow pads must schedule collapse.
+      const surface = document.querySelector(".surface");
+      if (surface) {
+        const rect = surface.getBoundingClientRect();
+        if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+          clearLeave();
+          return;
+        }
+      }
+      scheduleLeave();
     }, true);
     app.addEventListener("wheel", (event) => {
       if (state.collapsed && !inPeekZone(event)) return;
@@ -9316,7 +9431,10 @@ class IslandModeController {
     const run = () => {
       this.peekBoundsTimer = 0;
       if (generation !== this.generation || !this.active || !this.collapsed || this.destroyed) return;
+      this.peekTight = true;
       this.applyIslandBounds(true);
+      this.setMousePassthrough(true);
+      this.sendState();
     };
     if (this.ownerWindow && typeof this.ownerWindow.setTimeout === "function") {
       this.peekBoundsTimer = this.ownerWindow.setTimeout(run, delay);
@@ -9334,8 +9452,12 @@ class IslandModeController {
   collapse() {
     if (!this.active || this.collapsed || this.destroyed) return;
     this.collapsed = true;
+    this.peekTight = false;
+    this.clearLeaveWatch();
     this.suppressExpandUntil = Date.now() + Math.max(450, ISLAND_MORPH_MS + 80);
-    // Morph in the full frame, then shrink the window to the visual 10px peek hit target.
+    // Click-through immediately so the still-wide morphing frame cannot cover browser tabs.
+    this.setMousePassthrough(true);
+    // Morph in the full frame, then shrink the window to the visual 10px × 70% peek.
     this.sendState();
     this.schedulePeekBounds();
   }
@@ -9343,11 +9465,14 @@ class IslandModeController {
   expand() {
     if (!this.active || !this.collapsed || this.destroyed) return;
     this.collapsed = false;
+    this.peekTight = false;
     this.suppressExpandUntil = 0;
     this.clearPeekBoundsTimer();
+    this.setMousePassthrough(false);
     // Restore the full frame before CSS expands so the stadium has room to morph.
     this.applyIslandBounds(false);
     this.sendState();
+    this.startLeaveWatch();
     try { if (this.islandWindow && !this.islandWindow.isDestroyed()) this.islandWindow.focus(); } catch (error) {}
   }
 
@@ -9466,6 +9591,7 @@ class IslandModeController {
       this.installMainWindowFailSafe();
       this.displayBounds = this.resolveDisplayBounds(mainWindow);
       this.collapsed = false;
+      this.peekTight = false;
       this.suppressExpandUntil = 0;
       this.prepareIpc();
       const island = this.createIslandWindow(remote);
@@ -9474,9 +9600,11 @@ class IslandModeController {
       await this.loadIslandWindow(island);
       if (this.destroyed || generation !== this.generation || this.islandWindow !== island || island.isDestroyed()) return false;
       this.active = true;
+      this.setMousePassthrough(false);
       this.sendState();
       island.show();
       island.focus();
+      this.startLeaveWatch();
       this.disableMainWindowThrottling();
       this.mainWindowHidden = true;
       mainWindow.hide();
@@ -9507,7 +9635,9 @@ class IslandModeController {
     this.entering = false;
     this.active = false;
     this.collapsed = false;
+    this.peekTight = false;
     this.suppressExpandUntil = 0;
+    this.clearLeaveWatch();
     this.clearPeekBoundsTimer();
     this.restoreMainWindow();
     this.restoreMainWindowThrottling();
@@ -12891,29 +13021,38 @@ class JamDeckView extends ItemView {
   async sendAiMessage() {
     const input = this.aiInputEl || (this.aiChat && this.aiChat.querySelector("textarea"));
     const text = input ? input.value.trim() : "";
-    const imageCtx = this.aiCanvasContext && this.aiCanvasContext.kind === "image" && this.aiCanvasContext.image
-      ? this.aiCanvasContext
-      : null;
-    if ((!text && !imageCtx) || this.aiBusy) return;
-    if (imageCtx) {
-      if (this.plugin.settings.aiProvider !== "qwen") {
-        this.addAiMessage("assistant", "看图需要千问（多模态）。请点击标题旁的模型按钮切换到千问。");
-        return;
-      }
-      if (!this.plugin.settings.qwenApiKey) {
-        this.addAiMessage("assistant", "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key");
-        return;
-      }
-    } else if (!this.plugin.settings.aiApiKey) {
-      this.addAiMessage("assistant", "还没配置 API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key");
-      return;
-    }
-    this.addAiMessage("user", text || "（图片）");
     if (input) {
       input.value = "";
       this.aiInputValue = "";
       this.growAiInput(input);
     }
+    return this.sendAiText(text);
+  }
+
+  async sendAiText(rawText) {
+    const text = String(rawText || "").trim();
+    const imageCtx = this.aiCanvasContext && this.aiCanvasContext.kind === "image" && this.aiCanvasContext.image
+      ? this.aiCanvasContext
+      : null;
+    if ((!text && !imageCtx) || this.aiBusy) return { ok: false, reason: "idle" };
+    const config = this.plugin.getAiConfig();
+    if (imageCtx) {
+      if (this.plugin.settings.aiProvider !== "qwen") {
+        this.addAiMessage("assistant", "看图需要千问（多模态）。请点击标题旁的模型按钮切换到千问。");
+        return { ok: false, reason: "need-qwen" };
+      }
+      if (!config.apiKey) {
+        this.addAiMessage("assistant", "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key");
+        return { ok: false, reason: "no-key" };
+      }
+    } else if (!config.apiKey) {
+      const tip = this.plugin.settings.aiProvider === "qwen"
+        ? "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key"
+        : "还没配置 API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
+      this.addAiMessage("assistant", tip);
+      return { ok: false, reason: "no-key" };
+    }
+    this.addAiMessage("user", text || "（图片）");
     this.aiBusy = true;
     if (this.aiSendBtn) {
       this.aiSendBtn.disabled = true;
@@ -12942,23 +13081,24 @@ class JamDeckView extends ItemView {
         const qwenConfig = this.plugin.getAiConfig();
         await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, qwenConfig.label);
         await this.plugin.appendAiLog("assistant", content, qwenConfig.label);
-      } else {
-        const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
-        const stats = await this.plugin.applyAiOperations(result.operations, this.aiCanvasContext);
-        const summary = this.buildAiSummary(result.reply, stats);
-        if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: summary };
-        this.aiLastResult = stats;
-        if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-          const last = this.aiMessagesEl.lastElementChild;
-          if (last) {
-            last.empty();
-            last.createSpan({ text: summary, cls: "jam-deck-ai-message-text" });
-          }
-        }
-        const dsConfig = this.plugin.getAiConfig();
-        await this.plugin.appendAiLog("user", text, dsConfig.label);
-        await this.plugin.appendAiLog("assistant", summary, dsConfig.label);
+        return { ok: true, reply: content };
       }
+      const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
+      const stats = await this.plugin.applyAiOperations(result.operations, this.aiCanvasContext);
+      const summary = this.buildAiSummary(result.reply, stats);
+      if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: summary };
+      this.aiLastResult = stats;
+      if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
+        const last = this.aiMessagesEl.lastElementChild;
+        if (last) {
+          last.empty();
+          last.createSpan({ text: summary, cls: "jam-deck-ai-message-text" });
+        }
+      }
+      const dsConfig = this.plugin.getAiConfig();
+      await this.plugin.appendAiLog("user", text, dsConfig.label);
+      await this.plugin.appendAiLog("assistant", summary, dsConfig.label);
+      return { ok: true, reply: summary };
     } catch (error) {
       const message = `出错了：${error.message || "未知错误"}`;
       if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: message };
@@ -12969,6 +13109,7 @@ class JamDeckView extends ItemView {
           last.createSpan({ text: message, cls: "jam-deck-ai-message-text" });
         }
       }
+      return { ok: false, reason: "error", reply: message };
     } finally {
       this.aiBusy = false;
       if (this.aiSendBtn) {
@@ -14585,6 +14726,7 @@ class JamDeckPlugin extends Plugin {
     this.settings.canvasExportDir = typeof this.settings.canvasExportDir === "string"
       ? this.settings.canvasExportDir.trim()
       : "";
+    this.settings.islandLeaveMs = jamDeckNormalizeIslandLeaveMs(this.settings.islandLeaveMs);
     const savedVersion = saved ? Number(saved.dataVersion) || 0 : DEFAULT_SETTINGS.dataVersion;
     if (savedVersion < 4) {
       const previousWidgets = this.settings.widgets;
@@ -18898,9 +19040,13 @@ JamDeckPlugin.islandConstants = {
   height: ISLAND_HEIGHT,
   collapsedHeight: ISLAND_COLLAPSED_HEIGHT,
   leaveMs: ISLAND_LEAVE_MS,
+  leaveMsMin: ISLAND_LEAVE_MS_MIN,
+  leaveMsMax: ISLAND_LEAVE_MS_MAX,
+  leaveMsOptions: ISLAND_LEAVE_MS_OPTIONS.slice(),
   sideSlot: ISLAND_SIDE_SLOT,
   morphMs: ISLAND_MORPH_MS,
 };
+JamDeckPlugin.normalizeIslandLeaveMs = jamDeckNormalizeIslandLeaveMs;
 JamDeckPlugin.CanvasImageStackController = CanvasImageStackController;
 JamDeckPlugin.CanvasFolderController = CanvasFolderController;
 JamDeckPlugin.CanvasSelectionToolbarController = CanvasSelectionToolbarController;
@@ -19018,6 +19164,22 @@ class JamDeckSettingTab extends PluginSettingTab {
           this.plugin.settings.animationsEnabled = value;
           await this.plugin.saveSettings();
           this.plugin.applyAnimationSetting();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("灵动岛折叠延时")
+      .setDesc("指针离开可见胶囊后，等待多久收成顶边白条。范围 0.3–3 秒，默认 1 秒。")
+      .addDropdown((dropdown) => {
+        for (const ms of ISLAND_LEAVE_MS_OPTIONS) {
+          const seconds = (ms / 1000).toFixed(1).replace(/\.0$/, "");
+          dropdown.addOption(String(ms), ms === ISLAND_LEAVE_MS ? `${seconds} 秒（默认）` : `${seconds} 秒`);
+        }
+        dropdown.setValue(String(jamDeckNormalizeIslandLeaveMs(this.plugin.settings.islandLeaveMs)));
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.islandLeaveMs = jamDeckNormalizeIslandLeaveMs(value);
+          await this.plugin.saveSettings();
+          if (this.plugin.islandMode && this.plugin.islandMode.active) this.plugin.islandMode.sendState();
         });
       });
 
