@@ -39,6 +39,9 @@ assert(pluginSource.includes('document.activeElement') || pluginSource.includes(
 assert(pluginSource.includes('matches("iframe, webview")'), "Canvas browser recovery must support native iframe and webview surfaces without entering cross-origin content");
 assert(!pluginSource.includes("setActiveLeaf(entry.leaf, { focus: false })"), "detached Canvas leaves must never be activated through the workspace");
 assert(pluginSource.includes('addEventListener("keydown", keydown, true)'), "embedded Canvas must bridge selected image copy shortcuts");
+assert(pluginSource.includes('addEventListener("paste", paste, true)'), "embedded Canvas must capture paste onto the owned board");
+assert(pluginSource.includes("runCanvasHistoryAction"), "embedded Canvas must route Ctrl+Z through native canvas history");
+assert(pluginSource.includes("handleCanvasPaste"), "embedded Canvas must paste clipboard images without relying on the detached leaf keymap");
 assert(pluginSource.includes("copyCanvasImageFile(file)"), "selected Canvas image copy must write the real image to the system clipboard");
 assert(pluginSource.includes("class CanvasInkOverlay"), "embedded Canvas must own a leaf-local vector ink overlay");
 assert(pluginSource.includes("setPointerCapture"), "Canvas ink must keep pointer gestures coherent outside the initial target");
@@ -3002,6 +3005,23 @@ assert.strictEqual(migrated.customField, 42, "migration must preserve unknown ta
 assert.deepStrictEqual(migrated.links, []);
 assert.deepStrictEqual(migrated.images, []);
 assert.strictEqual(migrated.journalPath, null);
+plugin.settings = { deckTasks: [
+  { id: "task-dup", text: "GitHub 令牌", status: "archived" },
+  { id: "task-dup", text: "领取储蓄卡", status: "active" },
+  { id: "task-dup", text: "整理视频", status: "active" },
+] };
+assert.strictEqual(plugin.repairDuplicateDeckTaskIds(), 2, "later duplicate task ids must be reassigned");
+assert.strictEqual(plugin.settings.deckTasks[0].id, "task-dup", "first task keeps the original id so archive refs stay valid");
+assert.strictEqual(plugin.settings.deckTasks[0].text, "GitHub 令牌");
+assert.strictEqual(new Set(plugin.settings.deckTasks.map((task) => task.id)).size, 3, "all tasks must have unique ids after repair");
+assert.strictEqual(plugin.getDeckTask(plugin.settings.deckTasks[1].id).text, "领取储蓄卡");
+assert.strictEqual(plugin.getDeckTask(plugin.settings.deckTasks[2].id).text, "整理视频");
+plugin.settings.deckTasks = [];
+const firstId = plugin.nextDeckTaskId();
+plugin.settings.deckTasks = [{ id: firstId, text: "a" }];
+const secondId = plugin.nextDeckTaskId();
+assert.notStrictEqual(firstId, secondId, "nextDeckTaskId must not reuse an existing id");
+assert(pluginSource.includes("this.nextDeckTaskId()") && !pluginSource.includes("makeDeckTask(`task-${Date.now()}`"), "AI and quick-add task creation must allocate unique ids");
 assert.strictEqual(plugin.resolveTaskCategory({ text: "【设计】卡牌" }), "work");
 assert.strictEqual(plugin.resolveTaskCategory({ text: "买牛奶" }), "life");
 assert.strictEqual(plugin.resolveTaskCategory({ text: "【设计】卡牌", category: "life" }), "life", "explicit category must win over title inference");

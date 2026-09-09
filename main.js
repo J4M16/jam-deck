@@ -10207,6 +10207,118 @@ class CanvasRuntimeAdapter {
     return file;
   }
 
+  getOwnedCanvas(entry) {
+    const canvas = entry && entry.leaf && entry.leaf.view && entry.leaf.view.canvas;
+    return canvas && !canvas.readonly ? canvas : null;
+  }
+
+  isInkCapturingKeys(entry) {
+    return !!(entry && entry.inkOverlay && entry.inkOverlay.active);
+  }
+
+  runCanvasHistoryAction(entry, action) {
+    const canvas = this.getOwnedCanvas(entry);
+    if (!canvas) return false;
+    if (action === "redo") {
+      if (typeof canvas.redo !== "function") return false;
+      canvas.redo();
+      return true;
+    }
+    if (typeof canvas.undo !== "function") return false;
+    canvas.undo();
+    return true;
+  }
+
+  canvasPastePosition(canvas) {
+    if (canvas && typeof canvas.posCenter === "function") {
+      try {
+        const pos = canvas.posCenter();
+        if (pos && Number.isFinite(Number(pos.x)) && Number.isFinite(Number(pos.y))) return { x: pos.x, y: pos.y };
+      } catch (error) {}
+    }
+    if (canvas && canvas.pointer && Number.isFinite(Number(canvas.pointer.x)) && Number.isFinite(Number(canvas.pointer.y))) {
+      return { x: canvas.pointer.x, y: canvas.pointer.y };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  getCanvasPasteImageSources(entry, clipboardData) {
+    const external = this.getCanvasExternalImageDrop(entry, clipboardData);
+    if (external && external.length) return { kind: "external", sources: external };
+    const canvas = this.getOwnedCanvas(entry);
+    if (!canvas || !clipboardData) return null;
+    const imageExtensions = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
+    const sources = [];
+    const seen = new Set();
+    for (const candidate of Array.from(clipboardData.files || [])) {
+      if (!candidate) continue;
+      const name = String(candidate.name || "paste.png");
+      const ext = name.toLowerCase().split(".").pop();
+      const isImage = (typeof candidate.type === "string" && candidate.type.startsWith("image/")) || imageExtensions.has(ext);
+      if (!isImage || typeof candidate.arrayBuffer !== "function") continue;
+      const key = name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sources.push({ canvas, file: candidate, path: null, name, size: Number(candidate.size) || 0 });
+    }
+    for (const item of Array.from(clipboardData.items || [])) {
+      if (!item || typeof item.type !== "string" || !item.type.startsWith("image/")) continue;
+      const file = typeof item.getAsFile === "function" ? item.getAsFile() : null;
+      if (!file || typeof file.arrayBuffer !== "function") continue;
+      const name = file.name || `paste-${Date.now()}.png`;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      sources.push({ canvas, file, path: null, name, size: Number(file.size) || 0 });
+    }
+    return sources.length ? { kind: "external", sources } : null;
+  }
+
+  getElectronClipboardImageSource(entry) {
+    const canvas = this.getOwnedCanvas(entry);
+    const plugin = this.deckView && this.deckView.plugin;
+    if (!canvas || !plugin || !plugin.clipboard || typeof plugin.clipboard.readImage !== "function") return null;
+    let image;
+    try { image = plugin.clipboard.readImage(); } catch (error) { return null; }
+    if (!image || (typeof image.isEmpty === "function" && image.isEmpty()) || typeof image.toPNG !== "function") return null;
+    let png;
+    try { png = image.toPNG(); } catch (error) { return null; }
+    if (!png || !png.byteLength) return null;
+    const data = png instanceof Uint8Array
+      ? png
+      : new Uint8Array(png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength));
+    if (!data.byteLength) return null;
+    return { kind: "buffer", sources: [{ canvas, data, name: `paste-${Date.now()}.png` }] };
+  }
+
+  clipboardDataHasText(clipboardData) {
+    if (!clipboardData || typeof clipboardData.getData !== "function") return false;
+    try {
+      if (clipboardData.getData("obsidian/canvas")) return true;
+      if (String(clipboardData.getData("text/plain") || "").trim()) return true;
+    } catch (error) {}
+    return false;
+  }
+
+  handleCanvasPaste(entry, event) {
+    if (!entry || entry.closing || jamDeckIsTypingTarget(event.target) || jamDeckIsModalEvent(event) || this.isInkCapturingKeys(entry)) return false;
+    const stackController = entry.imageStackController;
+    if (stackController && (stackController.imageFocus || stackController.previewWrapper)) return false;
+    const canvas = this.getOwnedCanvas(entry);
+    if (!canvas) return false;
+    const fromEvent = this.getCanvasPasteImageSources(entry, event.clipboardData);
+    const imagePayload = fromEvent || (this.clipboardDataHasText(event.clipboardData) ? null : this.getElectronClipboardImageSource(entry));
+    if (imagePayload) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.queueCanvasImagePlacement(entry, imagePayload.kind, imagePayload.sources, this.canvasPastePosition(canvas));
+      return true;
+    }
+    try { if (canvas.wrapperEl && typeof canvas.wrapperEl.focus === "function") canvas.wrapperEl.focus(); } catch (error) {}
+    if (typeof canvas.handlePaste !== "function") return false;
+    canvas.handlePaste(event);
+    return true;
+  }
+
   installCanvasInteractionBridge(entry) {
     if (!entry || entry.interactionInstalled || !entry.leaf || !entry.leaf.containerEl) return;
     const target = entry.leaf.containerEl;
@@ -10231,8 +10343,29 @@ class CanvasRuntimeAdapter {
         return;
       }
       const key = String(event.key || "").toLowerCase();
-      const editable = event.target && event.target.closest && event.target.closest("input, textarea, [contenteditable='true']");
-      if (editable || key !== "c" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      const editable = jamDeckIsTypingTarget(event.target);
+      const mod = event.ctrlKey || event.metaKey;
+      if (!editable && !this.isInkCapturingKeys(entry) && mod && !event.altKey) {
+        if (key === "z" && event.shiftKey) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          this.runCanvasHistoryAction(entry, "redo");
+          return;
+        }
+        if (key === "z") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          this.runCanvasHistoryAction(entry, "undo");
+          return;
+        }
+        if (key === "y") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          this.runCanvasHistoryAction(entry, "redo");
+          return;
+        }
+      }
+      if (editable || key !== "c" || !mod || event.altKey || event.shiftKey) return;
       const file = this.getSelectedCanvasImage(entry);
       if (!file) return;
       event.preventDefault();
@@ -10242,12 +10375,18 @@ class CanvasRuntimeAdapter {
         new Notice(`Jam Deck：复制 Canvas 图片失败 · ${error.message || "未知错误"}`);
       });
     };
+    const paste = (event) => {
+      activate();
+      this.handleCanvasPaste(entry, event);
+    };
     target.addEventListener("pointerdown", pointerdown, true);
     target.addEventListener("focusin", activate, true);
     target.addEventListener("keydown", keydown, true);
+    target.addEventListener("paste", paste, true);
     entry.dropDisposers.push(() => target.removeEventListener("pointerdown", pointerdown, true));
     entry.dropDisposers.push(() => target.removeEventListener("focusin", activate, true));
     entry.dropDisposers.push(() => target.removeEventListener("keydown", keydown, true));
+    entry.dropDisposers.push(() => target.removeEventListener("paste", paste, true));
     const ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
     if (ownerWindow) {
       let coordinator = this.returnCoordinators.get(ownerWindow);
@@ -10356,36 +10495,43 @@ class CanvasRuntimeAdapter {
         return;
       }
       const items = context.kind === "clipboard" ? (context.items || []) : (context.sources || []);
-      if (!items.length) return;
-      // 本次拖入批次从鼠标位置重新开始排布
-      entry.dropCursorRect = null;
-      const jobs = [];
-      for (let index = 0; index < items.length; index += 1) {
-        const source = items[index];
-        const operation = {
-          id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          entryToken: entry.token,
-          controller: new AbortController(),
-          inserted: false,
-          committed: false,
-          node: null,
-          createdPath: null,
-          createdFile: null,
-          dropIndex: index,
-        };
-        entry.dropOperations.set(operation.id, operation);
-        const commit = context.kind === "clipboard"
-          ? () => this.commitClipboardImageDrop(entry, context.canvas, source, pos, operation)
-          : () => this.commitExternalImageDrop(entry, context.canvas, source, pos, operation);
-        jobs.push({ operation, commit });
-      }
-      this.enqueueCanvasDrop(entry, jobs);
+      this.queueCanvasImagePlacement(entry, context.kind, items, pos);
     };
     target.addEventListener("dragover", dragover, true);
     target.addEventListener("drop", drop, true);
     entry.dropDisposers.push(() => target.removeEventListener("dragover", dragover, true));
     entry.dropDisposers.push(() => target.removeEventListener("drop", drop, true));
     entry.dropInstalled = true;
+  }
+
+  queueCanvasImagePlacement(entry, kind, items, pos) {
+    if (!entry || entry.closing || !Array.isArray(items) || !items.length) return;
+    const canvas = (items[0] && items[0].canvas) || this.getOwnedCanvas(entry);
+    if (!canvas || typeof canvas.createFileNode !== "function") return;
+    entry.dropCursorRect = null;
+    const jobs = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const source = items[index];
+      const operation = {
+        id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        entryToken: entry.token,
+        controller: new AbortController(),
+        inserted: false,
+        committed: false,
+        node: null,
+        createdPath: null,
+        createdFile: null,
+        dropIndex: index,
+      };
+      entry.dropOperations.set(operation.id, operation);
+      const commit = kind === "clipboard"
+        ? () => this.commitClipboardImageDrop(entry, canvas, source, pos, operation)
+        : kind === "buffer"
+          ? () => this.commitBufferImageDrop(entry, canvas, source, pos, operation)
+          : () => this.commitExternalImageDrop(entry, canvas, source, pos, operation);
+      jobs.push({ operation, commit });
+    }
+    this.enqueueCanvasDrop(entry, jobs);
   }
 
   enqueueCanvasDrop(entry, jobs) {
@@ -10567,6 +10713,16 @@ class CanvasRuntimeAdapter {
       entry,
       canvas,
       (signal) => this.deckView.plugin.createCanvasAttachmentFromExternal(source, entry.filePath, signal),
+      pos,
+      operation,
+    );
+  }
+
+  async commitBufferImageDrop(entry, canvas, source, pos, operation) {
+    return this.commitCanvasImageDrop(
+      entry,
+      canvas,
+      (signal) => this.deckView.plugin.writeCanvasAttachmentBuffer(source.data, source.name, entry.filePath, signal),
       pos,
       operation,
     );
@@ -14712,6 +14868,11 @@ class JamDeckPlugin extends Plugin {
     this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
       ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
       : [];
+    if (this.repairDuplicateDeckTaskIds()) {
+      try { await this.saveSettings(); } catch (error) {
+        console.error("jam-deck duplicate task id repair failed to save", error);
+      }
+    }
     this.settings.musicLikes = Array.isArray(this.settings.musicLikes)
       ? this.settings.musicLikes.filter((value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)).slice(0, 500)
       : [];
@@ -14757,6 +14918,37 @@ class JamDeckPlugin extends Plugin {
       this.settings.aiLocalWorkspacePath,
       jamDeckVaultBasePath(this.app),
     );
+  }
+
+  nextDeckTaskId() {
+    const used = new Set((this.settings.deckTasks || []).map((task) => task && task.id).filter(Boolean));
+    return this.allocateDeckTaskId(used);
+  }
+
+  allocateDeckTaskId(existingIds) {
+    const used = existingIds instanceof Set ? existingIds : new Set();
+    let id = "";
+    do {
+      id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    } while (used.has(id));
+    used.add(id);
+    return id;
+  }
+
+  repairDuplicateDeckTaskIds() {
+    const seen = new Set();
+    let changed = 0;
+    for (const task of this.settings.deckTasks || []) {
+      if (!task || typeof task !== "object") continue;
+      const id = typeof task.id === "string" ? task.id : "";
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        continue;
+      }
+      task.id = this.allocateDeckTaskId(seen);
+      changed += 1;
+    }
+    return changed;
   }
 
   applyAnimationSetting() {
@@ -15218,8 +15410,7 @@ class JamDeckPlugin extends Plugin {
             result.skipped++;
             continue;
           }
-          const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          const task = this.makeDeckTask(id, text, String(op.description || "").trim(), [], {
+          const task = this.makeDeckTask(this.nextDeckTaskId(), text, String(op.description || "").trim(), [], {
             dueDate: this.isValidLocalDate(op.dueDate) ? op.dueDate : null,
             category: ["work", "life"].includes(op.category) ? op.category : null,
           });
@@ -16031,7 +16222,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     const firstIndex = lines.findIndex((line) => line.trim());
     const title = lines[firstIndex].trim().slice(0, 120);
     const description = lines.slice(firstIndex + 1).join("\n").trim();
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     await this.persistNewDroppedTask(this.makeDeckTask(id, title, description, []), []);
     return true;
   }
@@ -16040,7 +16231,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     const sourcePath = `${CLIPBOARD_DIR}/${item.filename}`;
     const file = this.app.vault.getAbstractFileByPath(sourcePath);
     if (!file) throw new Error("剪贴板图片已经过期");
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     const image = await this.createTaskAssetFromBuffer(await this.app.vault.readBinary(file), item.filename, id, 0);
     const task = this.makeDeckTask(id, `图片待办 · ${item.filename}`, "", [image]);
     await this.persistNewDroppedTask(task, [image.path]);
@@ -16049,7 +16240,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   async createTaskFromExternalImages(files) {
     const imagesOnly = files.filter((file) => file && file.type && file.type.startsWith("image/"));
     if (!imagesOnly.length) throw new Error("拖入待办的文件不是图片");
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     const images = [];
     try {
       for (let index = 0; index < imagesOnly.length; index++) images.push(await this.importTaskImage(imagesOnly[index], id, index));
@@ -16085,7 +16276,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   async addDeckTask(text) {
-    this.settings.deckTasks.unshift(this.makeDeckTask(`task-${Date.now()}`, text, "", []));
+    this.settings.deckTasks.unshift(this.makeDeckTask(this.nextDeckTaskId(), text, "", []));
     await this.saveSettings();
     this.renderAllViews();
   }
@@ -16096,7 +16287,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   async createDeckTaskFromDraft(draft) {
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     const imported = [];
     try {
       for (let index = 0; index < (draft.pendingFiles || []).length; index++) {

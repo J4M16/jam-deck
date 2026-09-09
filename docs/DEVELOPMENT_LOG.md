@@ -1,5 +1,20 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-08 — 0.31.44 嵌入 Canvas 撤销与贴图
+
+- Jam：画布里 Ctrl+Z 无效，也不能 Ctrl+V 贴图。
+- 根因：嵌入 Canvas 的 keymap 挂在未激活的 detached leaf 上；工作台 `setActiveLeaf(host)` 后原生 Ctrl+Z 到不了 `canvas.undo()`。截图往往不在 paste 的 `clipboardData.files` 里，只在 Electron `clipboard.readImage()`。
+- 交互桥接管 Ctrl+Z/Y 调用原生历史；paste 优先贴图（事件文件 / 系统剪贴板图），无图再交给原生文本粘贴。画笔模式仍只撤笔迹。
+- 验证：快速。差异审查、`npm run verify`、部署热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-09-04 — 0.31.43 修复待办重复 id 导致弹窗串单
+
+- Jam：列表标题「领取储蓄卡」，点开弹窗却是「GitHub 令牌」。判断是 AI 批量新建撞上同一毫秒 id。
+- 数据：`task-1787544566497` 被 GitHub 令牌 / 领取储蓄卡 / 整理视频共用；`getDeckTask` 命中第一条。加载时后出现的重复 id 重分配，归档那条保留原 id。新建（含 AI addTask）改走 `nextDeckTaskId()`。
+- 验证：标准。差异审查、`npm run verify`、部署热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-31 — 0.31.42 合入 master 并发 GitHub Release
 
 - `develop` 上 0.31.37–0.31.42（灵动岛点击穿透、离开折叠修复、折叠延时可配置；移除实验性 AI 第二页）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.42` 并发布 GitHub Release。

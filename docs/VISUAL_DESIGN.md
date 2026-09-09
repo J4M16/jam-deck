@@ -56,6 +56,7 @@
 
 默认只调整 Jam Deck 自有宿主外壳，禁止用泛化选择器覆盖原生 Canvas 内部节点、pointer-events、层级和工具条。用户明确要求的图片节点、底部卡片菜单、画笔浮层和缩放簇全屏按钮例外必须全部以 `.jam-deck-canvas-leaf` 开头；图片规则还要同时限定 `.media-embed > img`，不得影响普通 Canvas 标签页或非图片节点。
 
+- 嵌入 Canvas 支持 Ctrl+Z / Ctrl+Y 走原生画布历史（画笔模式仍只撤销笔迹）；Ctrl+V 把剪贴板图片落到视口中心，复用拖入附件路径。无图时把文本 / 链接 / Canvas 片段交给原生粘贴。
 - 底部缩放簇增加全屏按钮：原生 `clickable-icon` + maximize/minimize，不加厚底板。进入后把工作台根挂到窗口铺满，该 canvas-embed 留在网格里占满；隐藏 Obsidian 标题栏、页签栏、ribbon、左右侧栏、状态栏、原生菜单栏、Windows 任务栏与工作台顶栏/其他组件。窗口走系统全屏以藏任务栏；Esc 或同一按钮退出并还原。不改 F 放映，放映仍不得进入系统全屏。
 - 选中图片、GIF 或视频后，原生 `.canvas-menu` 悬浮工具栏增加导出：原生 `clickable-icon` + download，不加厚底板。单选与多选均可；只复制当前 selection 里的媒体附件到用户选择的系统目录。不进入系统全屏，也不改 AI 单选与 F 放映。
 - 图片节点保持边到边铺满并隐藏文件名，圆角必须直接复用快捷方式图标的 --jd-radius-sm（当前 10px）；Canvas 分组使用下一层级 --jd-radius-md（当前 14px），不得另造近似数值。
