@@ -1,5 +1,15 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-09 — 0.31.45 AI 多模态供应商千问 → GLM
+
+- Jam：千问 API 过期，换成智谱 GLM-5.3-Flash（key 在桌面 api.txt）。
+- 改动：`getAiConfig()` 的 qwen 分支整支替换为 glm——端点固定 `open.bigmodel.cn/api/paas/v4`，默认模型 `glm-5.3-flash`；删除 Token Plan `sk-sp-` 前缀路由（过时路径直接删）。设置字段 `qwenApiKey/qwenModel` → `glmApiKey/glmModel`，provider 值 `qwen` → `glm`，UI 文案、系统提示、测试断言、README/INSTALL 同步。
+- 注意：不留兼容层，旧 data.json 里的千问 key 失效，升级后要在设置页重填 GLM key 并切换「当前模型」。
+- 附带：WorkBuddy 的 qwen-coach / qwen-vision-check skill（`~/.workbuddy/skills/`）与 `~/.workbuddy/models.json`、`~/.codebuddy/models.json` 同步换 GLM，文本与视觉调用均实测通过。教训：同一文件的多个 Edit 不能并行批量发——互相覆盖丢改且工具报成功，必须串行。
+- 另：把上一会话遗留未提交的 0.31.43/0.31.44（Grok 4.6）单独 commit 并 push（verify 基线全绿后入库）。
+- 验证：快速。差异审查、`npm run verify`、部署热重载。
+- 处理模型签名：Kimi-K3（执行）
+
 ## 2026-09-08 — 0.31.44 嵌入 Canvas 撤销与贴图
 
 - Jam：画布里 Ctrl+Z 无效，也不能 Ctrl+V 贴图。

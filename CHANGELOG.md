@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.31.45 — 2026-09-09
+
+- **AI 多模态供应商由千问换成 GLM**：千问 API 过期，`getAiConfig()` 改走智谱开放平台（open.bigmodel.cn），默认模型 glm-5.3-flash（原生多模态，可看图）；DeepSeek 分支不变。设置项 `qwenApiKey/qwenModel` 更名 `glmApiKey/glmModel`，供应商值 `qwen` 更名 `glm`，不留兼容层——升级后需在设置页重填 GLM key 并把「当前模型」切到 GLM。WorkBuddy 侧 qwen-coach / qwen-vision-check 两个 skill 同步换用 GLM。
+- 处理模型签名：Kimi-K3（执行）
+
 ## 0.31.44 — 2026-09-08
 
 - **Canvas 支持 Ctrl+Z / Ctrl+V**：嵌入画布的撤销走原生历史；Ctrl+V 把截图或剪贴板图片贴到视口中心。画笔模式 Ctrl+Z 仍只撤笔迹。

@@ -876,8 +876,8 @@ const DEFAULT_SETTINGS = {
   clipboardMaxItems: 60,
   aiApiKey: "",
   aiModel: "deepseek-v4-flash",
-  qwenApiKey: "",
-  qwenModel: "qwen3.8-max",
+  glmApiKey: "",
+  glmModel: "glm-5.3-flash",
   aiProvider: "deepseek",
   aiLocalWorkspacePath: "",
   canvasExportDir: "",
@@ -12164,7 +12164,7 @@ class JamDeckView extends ItemView {
 
     const aiFab = root.createDiv({
       cls: "jam-deck-ai-fab",
-      attr: { role: "button", tabindex: "0",  "aria-label": "AI 对话助手 AI 对话助手（DeepSeek / 千问）" },
+      attr: { role: "button", tabindex: "0",  "aria-label": "AI 对话助手（DeepSeek / GLM）" },
     });
     aiFab.createSpan({ text: "AI", cls: "jam-deck-ai-fab-label" });
     let fabDrag = null;
@@ -12248,14 +12248,14 @@ class JamDeckView extends ItemView {
   }
 
   toggleAiProvider() {
-    const next = this.plugin.settings.aiProvider === "qwen" ? "deepseek" : "qwen";
+    const next = this.plugin.settings.aiProvider === "glm" ? "deepseek" : "glm";
     this.plugin.settings.aiProvider = next;
     void this.plugin.saveSettings();
-    const label = next === "qwen" ? "千问（可看图）" : "DeepSeek";
+    const label = next === "glm" ? "GLM（可看图）" : "DeepSeek";
     new Notice(`Jam Deck：AI 已切换到 ${label}`);
     if (next === "deepseek" && this.aiCanvasContext && this.aiCanvasContext.kind === "image") {
-      // 图片上下文只属于千问多模态：切到 DeepSeek 后降级为纯节点上下文，
-      // 纯文本对话可以继续，避免“看图需要千问”误拦截。
+      // 图片上下文只属于 GLM 多模态：切到 DeepSeek 后降级为纯节点上下文，
+      // 纯文本对话可以继续，避免“看图需要 GLM”误拦截。
       const ctx = this.aiCanvasContext;
       this.aiCanvasContext = { canvas: ctx.canvas || null, nodeId: ctx.nodeId || null, rect: ctx.rect || null };
       this.clearAiImageDock();
@@ -12529,8 +12529,8 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "qwen") {
-      this.plugin.settings.aiProvider = "qwen";
+    if (this.plugin.settings.aiProvider !== "glm") {
+      this.plugin.settings.aiProvider = "glm";
       void this.plugin.saveSettings();
     }
     this.aiCanvasContext = {
@@ -12555,7 +12555,7 @@ class JamDeckView extends ItemView {
     });
     this.aiMessages.push({
       role: "assistant",
-      content: "已载入图片（千问 · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。",
+      content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。",
     });
     if (this.aiChat) {
       this.aiChat.hidden = false;
@@ -12587,15 +12587,15 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "qwen") {
-      this.plugin.settings.aiProvider = "qwen";
+    if (this.plugin.settings.aiProvider !== "glm") {
+      this.plugin.settings.aiProvider = "glm";
       void this.plugin.saveSettings();
     }
     this.aiCanvasContext = { canvas: null, nodeId: null, kind: "image", image: { path, mime: sendMime, base64: sendBase64 } };
     this.aiQuickDone = true;
     const displayName = name || String(path || "").split("/").pop() || "图片";
     this.aiMessages.push({ role: "user", image: { src: displaySrc, alt: displayName }, text: "[图片]" });
-    this.aiMessages.push({ role: "assistant", content: "已载入图片（千问 · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
+    this.aiMessages.push({ role: "assistant", content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
     if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 2]);
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 1]);
@@ -12703,11 +12703,11 @@ class JamDeckView extends ItemView {
 
   refreshAiAssistantPage() {
     if (this.aiProviderBtn) {
-      const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+      const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
       this.aiProviderBtn.textContent = provider;
-      this.aiProviderBtn.title = provider === "千问"
-        ? "当前：千问（多模态）· 点击切换到 DeepSeek"
-        : "当前：DeepSeek · 点击切换到千问（可看图）";
+      this.aiProviderBtn.title = provider === "GLM"
+        ? "当前：GLM（多模态）· 点击切换到 DeepSeek"
+        : "当前：DeepSeek · 点击切换到 GLM（可看图）";
     }
     this.renderAiAssistantPage();
   }
@@ -12851,11 +12851,11 @@ class JamDeckView extends ItemView {
   renderAiChatHeader(header, { assistantPageId, localWebPageId }) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
-    const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+    const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
     const providerBtn = titleGroup.createEl("button", {
       text: provider,
       cls: "jam-deck-ai-provider-btn",
-      attr: { type: "button", title: provider === "千问" ? "当前：千问（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到千问（可看图）" },
+      attr: { type: "button", title: provider === "GLM" ? "当前：GLM（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到 GLM（可看图）" },
     });
     this.aiProviderBtn = providerBtn;
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
@@ -13193,17 +13193,17 @@ class JamDeckView extends ItemView {
     if ((!text && !imageCtx) || this.aiBusy) return { ok: false, reason: "idle" };
     const config = this.plugin.getAiConfig();
     if (imageCtx) {
-      if (this.plugin.settings.aiProvider !== "qwen") {
-        this.addAiMessage("assistant", "看图需要千问（多模态）。请点击标题旁的模型按钮切换到千问。");
-        return { ok: false, reason: "need-qwen" };
+      if (this.plugin.settings.aiProvider !== "glm") {
+        this.addAiMessage("assistant", "看图需要 GLM（多模态）。请点击标题旁的模型按钮切换到 GLM。");
+        return { ok: false, reason: "need-glm" };
       }
       if (!config.apiKey) {
-        this.addAiMessage("assistant", "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key");
+        this.addAiMessage("assistant", "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key");
         return { ok: false, reason: "no-key" };
       }
     } else if (!config.apiKey) {
-      const tip = this.plugin.settings.aiProvider === "qwen"
-        ? "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key"
+      const tip = this.plugin.settings.aiProvider === "glm"
+        ? "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key"
         : "还没配置 API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
       this.addAiMessage("assistant", tip);
       return { ok: false, reason: "no-key" };
@@ -13214,7 +13214,7 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.disabled = true;
       this.aiSendBtn.textContent = "…";
     }
-    const providerLabel = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+    const providerLabel = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
     this.addAiMessage("assistant", `${providerLabel} 处理中…`);
     try {
       if (imageCtx) {
@@ -13234,9 +13234,9 @@ class JamDeckView extends ItemView {
           bubble.empty();
           bubble.createSpan({ text: content, cls: "jam-deck-ai-message-text" });
         }
-        const qwenConfig = this.plugin.getAiConfig();
-        await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, qwenConfig.label);
-        await this.plugin.appendAiLog("assistant", content, qwenConfig.label);
+        const glmConfig = this.plugin.getAiConfig();
+        await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, glmConfig.label);
+        await this.plugin.appendAiLog("assistant", content, glmConfig.label);
         return { ok: true, reply: content };
       }
       const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
@@ -15284,18 +15284,12 @@ class JamDeckPlugin extends Plugin {
   }
 
   getAiConfig() {
-    if (this.settings.aiProvider === "qwen") {
-      const key = this.settings.qwenApiKey || "";
-      // Token Plan 个人版专属 key 以 sk-sp- 开头，必须配套专属 Base URL；
-      // 通用按量付费 key 以 sk- 开头走 dashscope 端点。两者不可混用。
-      const tokenPlan = key.startsWith("sk-sp-");
+    if (this.settings.aiProvider === "glm") {
       return {
-        baseUrl: tokenPlan
-          ? "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-          : "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        apiKey: key,
-        model: this.settings.qwenModel || "qwen3.8-max",
-        label: tokenPlan ? "千问(Token Plan)" : "千问",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        apiKey: this.settings.glmApiKey || "",
+        model: this.settings.glmModel || "glm-5.3-flash",
+        label: "GLM",
       };
     }
     return {
@@ -15645,7 +15639,7 @@ class JamDeckPlugin extends Plugin {
 
   async streamChatWithImage(imageBase64, mime, prompt, onChunk) {
     const config = this.getAiConfig();
-    const system = `你是通义千问 ${config.model}（阿里云百炼多模态模型），运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
+    const system = `你是 GLM ${config.model}（智谱多模态模型），运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
     return this.streamChat([
       { role: "system", content: system },
       {
@@ -19345,7 +19339,7 @@ class JamDeckSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Jam Deck" });
-    containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / 千问）", cls: "jam-deck-setting-hint" });
+    containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / GLM）", cls: "jam-deck-setting-hint" });
 
     new Setting(containerEl)
       .setName("动画效果")
@@ -19400,46 +19394,43 @@ class JamDeckSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "千问（多模态，可看图）", cls: "jam-deck-setting-h3" });
+    containerEl.createEl("h3", { text: "GLM（多模态，可看图）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)
-      .setName("千问 API Key")
-      .setDesc("Token Plan 用户：在 Token Plan 控制台「我的订阅」生成专属 key（sk-sp- 开头），插件自动走专属端点。按量付费用户：百炼 API-KEY 管理（sk- 开头）。只存本地 data.json，不上传。")
+      .setName("GLM API Key")
+      .setDesc("智谱开放平台（bigmodel.cn）→ API Keys 创建。只存本地 data.json，不上传。")
       .addText((text) => {
-        text.setPlaceholder("sk-sp-… 或 sk-…").setValue(this.plugin.settings.qwenApiKey).onChange(async (value) => {
-          this.plugin.settings.qwenApiKey = value.trim();
+        text.setPlaceholder("xxxxxxxx.xxxxxxxxxxxxxxxx").setValue(this.plugin.settings.glmApiKey).onChange(async (value) => {
+          this.plugin.settings.glmApiKey = value.trim();
           await this.plugin.saveSettings();
         });
         text.inputEl.type = "password";
       });
 
     new Setting(containerEl)
-      .setName("千问模型")
-      .setDesc("qwen3.8-max 旗舰（2026-08-03 发布，原生多模态，推荐）；qwen3.8-max-preview 预览名；qwen-vl-max 视觉稳定版。")
+      .setName("GLM 模型")
+      .setDesc("glm-5.3-flash 原生多模态（推荐，输入 ¥0.8/M 输出 ¥2.8/M）；glm-5.3 旗舰。")
       .addDropdown((dropdown) => {
-        dropdown.addOption("qwen3.8-max", "qwen3.8-max（推荐）");
-        dropdown.addOption("qwen3.8-max-preview", "qwen3.8-max-preview");
-        dropdown.addOption("qwen-vl-max", "qwen-vl-max");
-        dropdown.addOption("qwen-vl-plus", "qwen-vl-plus");
-        dropdown.addOption("qwen3-vl-plus", "qwen3-vl-plus");
-        dropdown.setValue(this.plugin.settings.qwenModel || "qwen3.8-max");
+        dropdown.addOption("glm-5.3-flash", "glm-5.3-flash（推荐）");
+        dropdown.addOption("glm-5.3", "glm-5.3");
+        dropdown.setValue(this.plugin.settings.glmModel || "glm-5.3-flash");
         dropdown.onChange(async (value) => {
-          this.plugin.settings.qwenModel = value;
+          this.plugin.settings.glmModel = value;
           await this.plugin.saveSettings();
         });
       });
 
     new Setting(containerEl)
       .setName("当前模型")
-      .setDesc("AI 对话窗标题旁的按钮也可随时切换。DeepSeek 处理文本；千问可识别图片。")
+      .setDesc("AI 对话窗标题旁的按钮也可随时切换。DeepSeek 处理文本；GLM 可识别图片。")
       .addDropdown((dropdown) => {
         dropdown.addOption("deepseek", "DeepSeek（文本）");
-        dropdown.addOption("qwen", "千问（多模态）");
+        dropdown.addOption("glm", "GLM（多模态）");
         dropdown.setValue(this.plugin.settings.aiProvider || "deepseek");
         dropdown.onChange(async (value) => {
           this.plugin.settings.aiProvider = value;
           await this.plugin.saveSettings();
-          new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "qwen" ? "千问" : "DeepSeek"}`);
+          new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "glm" ? "GLM" : "DeepSeek"}`);
         });
       });
 
