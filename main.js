@@ -8737,11 +8737,16 @@ class IslandModeController {
     return bounds;
   }
 
+  computeContentWidth(display) {
+    const bounds = display || this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
+    return Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(bounds.width) - 24));
+  }
+
   computeIslandBounds(collapsed) {
     // Expanded uses the full capsule frame. Collapsed shrinks to the visible
     // 10px × 70% peek strip so transparent side pads no longer cover browser tabs.
     const display = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
-    const contentWidth = Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(display.width) - 24));
+    const contentWidth = this.computeContentWidth(display);
     if (collapsed) {
       const width = Math.max(240, Math.round(contentWidth * ISLAND_PEEK_WIDTH_RATIO));
       const height = ISLAND_COLLAPSED_HEIGHT;
@@ -8889,6 +8894,16 @@ class IslandModeController {
 
   buildWindowHtml() {
     const actionChannel = JSON.stringify(this.actionChannel);
+    // The collapsed strip must land exactly on the peek window rect from
+    // computeIslandBounds(true); hardcoded 15%/70% left both edges jumping
+    // ~25px inward when the window shrinks after the morph (ISLAND_SHADOW_PAD_X
+    // padding makes 70% of the big window wider than the peek window).
+    const htmlDisplay = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
+    const htmlContentWidth = this.computeContentWidth(htmlDisplay);
+    const htmlWindowWidth = htmlContentWidth + ISLAND_SHADOW_PAD_X * 2;
+    const htmlPeekWidth = Math.max(240, Math.round(htmlContentWidth * ISLAND_PEEK_WIDTH_RATIO));
+    const peekLeftPct = (((htmlWindowWidth - htmlPeekWidth) / 2 / htmlWindowWidth) * 100).toFixed(3);
+    const peekWidthPct = ((htmlPeekWidth / htmlWindowWidth) * 100).toFixed(3);
     return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -8942,8 +8957,8 @@ class IslandModeController {
     }
     #app.is-collapsed .surface {
       top: 0;
-      left: ${Math.round((1 - ISLAND_PEEK_WIDTH_RATIO) * 50)}%;
-      width: ${Math.round(ISLAND_PEEK_WIDTH_RATIO * 100)}%;
+      left: ${peekLeftPct}%;
+      width: ${peekWidthPct}%;
       height: ${ISLAND_COLLAPSED_HEIGHT}px;
       padding: 0; gap: 0;
       border-color: transparent;

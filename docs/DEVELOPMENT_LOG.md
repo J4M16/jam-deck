@@ -5,6 +5,7 @@
 - Jam：灵动岛收起条是「顶部平切 + 下半圆角」的半个圆角矩形，近实色白，在 Mac 上观感差；要同高度的真圆角一条、20% 透明白。
 - 改动：`IslandModeController.buildWindowHtml()` 收起态 `.surface`——`border-radius: 0 0 31px 31px` → `999px`（10px 高被 CSS 钳制为胶囊端），背景 `rgba(252,252,250,.98)` → `rgba(255,255,255,.2)`，边框色改透明（半透明填充下描边显脏），软阴影保留保可见性；删除 `body.is-dark` 下强制近实色白的收起覆盖块，明暗主题共用同一收起样式。展开态不变。
 - 测试：`tests/jam-deck-test.js` 第 81 行断言与旧实色绑定，同步改为断言透明白 + 999px 全圆角 + 软阴影。
+- 补修（同日第二笔）：Jam 实测收起动画末端「跳动一下」。根因非圆角过渡，而是几何错位——收起条 CSS 写死 `left:15%; width:70%`（相对含 2×36px 阴影垫的大窗口），比 380ms 后窗口缩到的 peek 矩形（`round(0.7×contentWidth)` 宽）宽 50.4px，窗口缩放 + `is-peek-tight` 交换瞬间两侧边缘各内跳约 25px。修复：抽 `computeContentWidth()`，`buildWindowHtml()` 用 `displayBounds` 按与 `computeIslandBounds(true)` 同源的公式算出精确 `peekLeftPct/peekWidthPct` 注入 CSS（displayBounds 在窗口创建前已就绪），交换误差降到取整级 ≤1px；测试断言锁住同源关系防止回退。
 - 验证：快速。差异审查、`npm run verify` 全绿、部署热重载目检。
 - 处理模型签名：GLM-5.3-Flash（执行）
 
