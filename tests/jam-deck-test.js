@@ -39,6 +39,9 @@ assert(pluginSource.includes('document.activeElement') || pluginSource.includes(
 assert(pluginSource.includes('matches("iframe, webview")'), "Canvas browser recovery must support native iframe and webview surfaces without entering cross-origin content");
 assert(!pluginSource.includes("setActiveLeaf(entry.leaf, { focus: false })"), "detached Canvas leaves must never be activated through the workspace");
 assert(pluginSource.includes('addEventListener("keydown", keydown, true)'), "embedded Canvas must bridge selected image copy shortcuts");
+assert(pluginSource.includes('addEventListener("paste", paste, true)'), "embedded Canvas must capture paste onto the owned board");
+assert(pluginSource.includes("runCanvasHistoryAction"), "embedded Canvas must route Ctrl+Z through native canvas history");
+assert(pluginSource.includes("handleCanvasPaste"), "embedded Canvas must paste clipboard images without relying on the detached leaf keymap");
 assert(pluginSource.includes("copyCanvasImageFile(file)"), "selected Canvas image copy must write the real image to the system clipboard");
 assert(pluginSource.includes("class CanvasInkOverlay"), "embedded Canvas must own a leaf-local vector ink overlay");
 assert(pluginSource.includes("setPointerCapture"), "Canvas ink must keep pointer gestures coherent outside the initial target");
@@ -75,10 +78,11 @@ assert(pluginSource.includes("ISLAND_CONTROL_HEIGHT = 54") && pluginSource.inclu
 assert(pluginSource.includes("ISLAND_END_PAD = 8") && pluginSource.includes("ISLAND_MORPH_MS = 380") && pluginSource.includes("ISLAND_SIDE_SLOT = 100"), "island end pad, morph duration, and 100px side slots must stay explicit");
 assert(pluginSource.includes(".brand {") && pluginSource.includes("justify-content: center"), "brand mark must stay centered inside the side slot");
 assert(pluginSource.includes("cubic-bezier(.22, 1, .36, 1)") && pluginSource.includes("will-change: top, left, width, height, border-radius") && pluginSource.includes("top: 0"), "collapsed↔expanded island must CSS-morph the stadium");
-assert(pluginSource.includes("#app.is-collapsed .surface") && pluginSource.includes("rgba(252, 252, 250, .98)") && pluginSource.includes("0 2px 8px rgba(27, 31, 35, .14)"), "collapsed peek strip must be white with a soft shadow");
+assert(pluginSource.includes("#app.is-collapsed .surface") && pluginSource.includes("rgba(255, 255, 255, .2)") && pluginSource.includes("border-radius: 999px") && pluginSource.includes("0 2px 8px rgba(27, 31, 35, .14)"), "collapsed peek strip must be a translucent full-radius white pill with a soft shadow");
 assert(pluginSource.includes('document.documentElement.addEventListener("mouseleave"') && pluginSource.includes("scheduleLeave"), "island must collapse one second after the pointer leaves");
 assert(pluginSource.includes("startLeaveWatch") && pluginSource.includes("isCursorOverIslandContent") && pluginSource.includes("getCursorScreenPoint"), "expanded island must poll cursor against the visible capsule so shadow pads cannot block collapse");
 assert(pluginSource.includes("ISLAND_PEEK_WIDTH_RATIO") && pluginSource.includes("schedulePeekBounds") && pluginSource.includes("inPeekZone") && pluginSource.includes("is-peek-tight"), "collapsed peek hit target must match the visual 10px × 70% strip");
+assert(pluginSource.includes("computeContentWidth") && pluginSource.includes("peekLeftPct") && pluginSource.includes("peekWidthPct"), "collapsed strip CSS must derive its left/width from the peek window geometry (computeContentWidth) so the bounds swap cannot jump");
 assert(pluginSource.includes("setIgnoreMouseEvents(true, { forward: true })") && pluginSource.includes("setMousePassthrough"), "collapsed island must click-through so windows under the strip stay usable");
 assert(pluginSource.includes("new remote.BrowserWindow") && pluginSource.includes("transparent: true") && pluginSource.includes('backgroundColor: "#00000000"') && pluginSource.includes("frame: false"), "island mode must use a dedicated transparent frameless BrowserWindow");
 assert(pluginSource.includes('island.setAlwaysOnTop(true, "floating")') && pluginSource.includes("island.setBounds(bounds, false)"), "island window must stay on top and move between expanded and peek bounds");
@@ -271,13 +275,13 @@ assert(pluginSource.includes("is-jam-deck-ai-drop-target"), "the AI chat must hi
 assert(pluginSource.includes("findFreeCanvasRect("), "the AI assistant must scan for a free canvas spot instead of stacking onto existing nodes");
 assert(pluginSource.includes("const pos = this.findFreeCanvasRect(canvas, basePos, width, height, canvasContext.nodeId)"), "canvas text placement must run through the free-spot finder");
 assert(pluginSource.includes("zoomToSelection"), "the newly placed canvas node must be selected and the viewport must follow it");
-assert(pluginSource.includes('const providerLabel = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek"'), "the busy indicator must follow the active provider, not the image context");
-assert(!pluginSource.includes('imageCtx ? "千问"'), "the busy indicator must never infer the model from whether an image is attached");
+assert(pluginSource.includes('const providerLabel = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek"'), "the busy indicator must follow the active provider, not the image context");
+assert(!pluginSource.includes('imageCtx ? "GLM"'), "the busy indicator must never infer the model from whether an image is attached");
 assert(styleSource.includes(".jam-deck-ai-image-dock[hidden]") && styleSource.includes("display: none"), "the empty image dock must be hidden even though its base rule uses display:flex");
-assert(pluginSource.includes("看图需要千问（多模态）"), "Canvas image context must require qwen when the provider is not multimodal");
+assert(pluginSource.includes("看图需要 GLM（多模态）"), "Canvas image context must require glm when the provider is not multimodal");
 assert(pluginSource.includes("openAiChatWithCanvasImage"), "Canvas image nodes must open the AI chat with an image context");
-assert(pluginSource.includes("图片上下文已移除"), "switching to DeepSeek must drop the image context so plain text continues without a false qwen guard");
-assert(pluginSource.includes('next === "deepseek" && this.aiCanvasContext && this.aiCanvasContext.kind === "image"'), "provider switch must degrade the image context only when leaving qwen");
+assert(pluginSource.includes("图片上下文已移除"), "switching to DeepSeek must drop the image context so plain text continues without a false glm guard");
+assert(pluginSource.includes('next === "deepseek" && this.aiCanvasContext && this.aiCanvasContext.kind === "image"'), "provider switch must degrade the image context only when leaving glm");
 assert(pluginSource.includes("async archiveAiChat()"), "the AI chat must own an archive action");
 assert(pluginSource.includes("attachments/jam-deck-chatbot/"), "archives must be stored under attachments/jam-deck-chatbot");
 assert(pluginSource.includes("this.aiArchivedCount"), "archives must advance a cursor so already-archived turns are never re-recorded");
@@ -3002,6 +3006,23 @@ assert.strictEqual(migrated.customField, 42, "migration must preserve unknown ta
 assert.deepStrictEqual(migrated.links, []);
 assert.deepStrictEqual(migrated.images, []);
 assert.strictEqual(migrated.journalPath, null);
+plugin.settings = { deckTasks: [
+  { id: "task-dup", text: "GitHub 令牌", status: "archived" },
+  { id: "task-dup", text: "领取储蓄卡", status: "active" },
+  { id: "task-dup", text: "整理视频", status: "active" },
+] };
+assert.strictEqual(plugin.repairDuplicateDeckTaskIds(), 2, "later duplicate task ids must be reassigned");
+assert.strictEqual(plugin.settings.deckTasks[0].id, "task-dup", "first task keeps the original id so archive refs stay valid");
+assert.strictEqual(plugin.settings.deckTasks[0].text, "GitHub 令牌");
+assert.strictEqual(new Set(plugin.settings.deckTasks.map((task) => task.id)).size, 3, "all tasks must have unique ids after repair");
+assert.strictEqual(plugin.getDeckTask(plugin.settings.deckTasks[1].id).text, "领取储蓄卡");
+assert.strictEqual(plugin.getDeckTask(plugin.settings.deckTasks[2].id).text, "整理视频");
+plugin.settings.deckTasks = [];
+const firstId = plugin.nextDeckTaskId();
+plugin.settings.deckTasks = [{ id: firstId, text: "a" }];
+const secondId = plugin.nextDeckTaskId();
+assert.notStrictEqual(firstId, secondId, "nextDeckTaskId must not reuse an existing id");
+assert(pluginSource.includes("this.nextDeckTaskId()") && !pluginSource.includes("makeDeckTask(`task-${Date.now()}`"), "AI and quick-add task creation must allocate unique ids");
 assert.strictEqual(plugin.resolveTaskCategory({ text: "【设计】卡牌" }), "work");
 assert.strictEqual(plugin.resolveTaskCategory({ text: "买牛奶" }), "life");
 assert.strictEqual(plugin.resolveTaskCategory({ text: "【设计】卡牌", category: "life" }), "life", "explicit category must win over title inference");

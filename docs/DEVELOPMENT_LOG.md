@@ -1,5 +1,44 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-10 — 0.31.46 合入 master
+
+- `develop` 上 0.31.43–0.31.46（待办重复 id、Canvas 撤销/贴图、AI 千问改 GLM、灵动岛收起胶囊与末端跳动修复）已 `npm run verify` 全绿后合入 `master` 并推送 GitHub。未打 tag / 未发 GitHub Release。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-09-10 — 0.31.46 灵动岛收起态改半透明全圆角胶囊
+
+- Jam：灵动岛收起条是「顶部平切 + 下半圆角」的半个圆角矩形，近实色白，在 Mac 上观感差；要同高度的真圆角一条、20% 透明白。
+- 改动：`IslandModeController.buildWindowHtml()` 收起态 `.surface`——`border-radius: 0 0 31px 31px` → `999px`（10px 高被 CSS 钳制为胶囊端），背景 `rgba(252,252,250,.98)` → `rgba(255,255,255,.2)`，边框色改透明（半透明填充下描边显脏），软阴影保留保可见性；删除 `body.is-dark` 下强制近实色白的收起覆盖块，明暗主题共用同一收起样式。展开态不变。
+- 测试：`tests/jam-deck-test.js` 第 81 行断言与旧实色绑定，同步改为断言透明白 + 999px 全圆角 + 软阴影。
+- 补修（同日第二笔）：Jam 实测收起动画末端「跳动一下」。根因非圆角过渡，而是几何错位——收起条 CSS 写死 `left:15%; width:70%`（相对含 2×36px 阴影垫的大窗口），比 380ms 后窗口缩到的 peek 矩形（`round(0.7×contentWidth)` 宽）宽 50.4px，窗口缩放 + `is-peek-tight` 交换瞬间两侧边缘各内跳约 25px。修复：抽 `computeContentWidth()`，`buildWindowHtml()` 用 `displayBounds` 按与 `computeIslandBounds(true)` 同源的公式算出精确 `peekLeftPct/peekWidthPct` 注入 CSS（displayBounds 在窗口创建前已就绪），交换误差降到取整级 ≤1px；测试断言锁住同源关系防止回退。
+- 验证：快速。差异审查、`npm run verify` 全绿、部署热重载目检。
+- 处理模型签名：GLM-5.3-Flash（执行）
+
+## 2026-09-09 — 0.31.45 AI 多模态供应商千问 → GLM
+
+- Jam：千问 API 过期，换成智谱 GLM-5.3-Flash（key 在桌面 api.txt）。
+- 改动：`getAiConfig()` 的 qwen 分支整支替换为 glm——端点固定 `open.bigmodel.cn/api/paas/v4`，默认模型 `glm-5.3-flash`；删除 Token Plan `sk-sp-` 前缀路由（过时路径直接删）。设置字段 `qwenApiKey/qwenModel` → `glmApiKey/glmModel`，provider 值 `qwen` → `glm`，UI 文案、系统提示、测试断言、README/INSTALL 同步。
+- 注意：不留兼容层，旧 data.json 里的千问 key 失效，升级后要在设置页重填 GLM key 并切换「当前模型」。
+- 附带：WorkBuddy 的 qwen-coach / qwen-vision-check skill（`~/.workbuddy/skills/`）与 `~/.workbuddy/models.json`、`~/.codebuddy/models.json` 同步换 GLM，文本与视觉调用均实测通过。教训：同一文件的多个 Edit 不能并行批量发——互相覆盖丢改且工具报成功，必须串行。
+- 另：把上一会话遗留未提交的 0.31.43/0.31.44（Grok 4.6）单独 commit 并 push（verify 基线全绿后入库）。
+- 验证：快速。差异审查、`npm run verify`、部署热重载。
+- 处理模型签名：Kimi-K3（执行）
+
+## 2026-09-08 — 0.31.44 嵌入 Canvas 撤销与贴图
+
+- Jam：画布里 Ctrl+Z 无效，也不能 Ctrl+V 贴图。
+- 根因：嵌入 Canvas 的 keymap 挂在未激活的 detached leaf 上；工作台 `setActiveLeaf(host)` 后原生 Ctrl+Z 到不了 `canvas.undo()`。截图往往不在 paste 的 `clipboardData.files` 里，只在 Electron `clipboard.readImage()`。
+- 交互桥接管 Ctrl+Z/Y 调用原生历史；paste 优先贴图（事件文件 / 系统剪贴板图），无图再交给原生文本粘贴。画笔模式仍只撤笔迹。
+- 验证：快速。差异审查、`npm run verify`、部署热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
+## 2026-09-04 — 0.31.43 修复待办重复 id 导致弹窗串单
+
+- Jam：列表标题「领取储蓄卡」，点开弹窗却是「GitHub 令牌」。判断是 AI 批量新建撞上同一毫秒 id。
+- 数据：`task-1787544566497` 被 GitHub 令牌 / 领取储蓄卡 / 整理视频共用；`getDeckTask` 命中第一条。加载时后出现的重复 id 重分配，归档那条保留原 id。新建（含 AI addTask）改走 `nextDeckTaskId()`。
+- 验证：标准。差异审查、`npm run verify`、部署热重载。
+- 处理模型签名：Cursor Grok 4.6（主代理）
+
 ## 2026-08-31 — 0.31.42 合入 master 并发 GitHub Release
 
 - `develop` 上 0.31.37–0.31.42（灵动岛点击穿透、离开折叠修复、折叠延时可配置；移除实验性 AI 第二页）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.42` 并发布 GitHub Release。

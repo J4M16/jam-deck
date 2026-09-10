@@ -1,6 +1,6 @@
 ﻿# Jam Deck
 
-Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴板、快捷方式、音乐播放器与可实时编辑的内嵌 Canvas 工作区，内置 AI 对话助手（DeepSeek / 千问）。
+Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴板、快捷方式、音乐播放器与可实时编辑的内嵌 Canvas 工作区，内置 AI 对话助手（DeepSeek / GLM）。
 
 ## 安装
 
@@ -27,12 +27,12 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 
 设置 → 第三方插件 → Jam Deck → AI 设置：
 
-| Provider | Key 获取 | 端点（插件自动路由，无需填写） |
+| Provider | Key 获取 | 端点（插件内置，无需填写） |
 |---|---|---|
-| 千问 | 阿里云[百炼](https://bailian.console.aliyun.com/)或 Token Plan 申请 | `sk-sp-` 前缀 → Token Plan 专属端点；`sk-` 前缀 → 百炼通用端点 |
+| GLM | [智谱开放平台](https://open.bigmodel.cn/) → API Keys | `open.bigmodel.cn/api/paas/v4`（固定） |
 | DeepSeek | [DeepSeek 开放平台](https://platform.deepseek.com/) | `api.deepseek.com`（固定） |
 
-> 千问 key 前缀决定端点：**`sk-sp-` 开头的 key 必须配套 Token Plan 专属端点**，`sk-` 开头的通用 key 配套百炼端点——插件按前缀自动路由，混用会报 `401 Incorrect API key provided`。
+> GLM 默认模型 `glm-5.3-flash`（原生多模态，可看图）；DeepSeek 仅文本。
 
 ## 本地工作区
 

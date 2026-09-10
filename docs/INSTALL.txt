@@ -36,7 +36,7 @@ zip 解压后应有：
 
 【AI 助手（可选）】
 工作台右上角的 AI 按钮需要 API Key 才能对话：
-设置 → 第三方插件 → Jam Deck → 填入 DeepSeek 或千问的 API Key。
+设置 → 第三方插件 → Jam Deck → 填入 DeepSeek 或 GLM 的 API Key。
 不填不影响其他所有功能。
 
 【卸载】

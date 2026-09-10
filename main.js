@@ -876,8 +876,8 @@ const DEFAULT_SETTINGS = {
   clipboardMaxItems: 60,
   aiApiKey: "",
   aiModel: "deepseek-v4-flash",
-  qwenApiKey: "",
-  qwenModel: "qwen3.8-max",
+  glmApiKey: "",
+  glmModel: "glm-5.3-flash",
   aiProvider: "deepseek",
   aiLocalWorkspacePath: "",
   canvasExportDir: "",
@@ -8737,11 +8737,16 @@ class IslandModeController {
     return bounds;
   }
 
+  computeContentWidth(display) {
+    const bounds = display || this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
+    return Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(bounds.width) - 24));
+  }
+
   computeIslandBounds(collapsed) {
     // Expanded uses the full capsule frame. Collapsed shrinks to the visible
     // 10px × 70% peek strip so transparent side pads no longer cover browser tabs.
     const display = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
-    const contentWidth = Math.max(480, Math.min(ISLAND_WIDTH, Math.floor(display.width) - 24));
+    const contentWidth = this.computeContentWidth(display);
     if (collapsed) {
       const width = Math.max(240, Math.round(contentWidth * ISLAND_PEEK_WIDTH_RATIO));
       const height = ISLAND_COLLAPSED_HEIGHT;
@@ -8889,6 +8894,16 @@ class IslandModeController {
 
   buildWindowHtml() {
     const actionChannel = JSON.stringify(this.actionChannel);
+    // The collapsed strip must land exactly on the peek window rect from
+    // computeIslandBounds(true); hardcoded 15%/70% left both edges jumping
+    // ~25px inward when the window shrinks after the morph (ISLAND_SHADOW_PAD_X
+    // padding makes 70% of the big window wider than the peek window).
+    const htmlDisplay = this.displayBounds || { x: 0, y: 0, width: ISLAND_WIDTH, height: 900 };
+    const htmlContentWidth = this.computeContentWidth(htmlDisplay);
+    const htmlWindowWidth = htmlContentWidth + ISLAND_SHADOW_PAD_X * 2;
+    const htmlPeekWidth = Math.max(240, Math.round(htmlContentWidth * ISLAND_PEEK_WIDTH_RATIO));
+    const peekLeftPct = (((htmlWindowWidth - htmlPeekWidth) / 2 / htmlWindowWidth) * 100).toFixed(3);
+    const peekWidthPct = ((htmlPeekWidth / htmlWindowWidth) * 100).toFixed(3);
     return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -8942,22 +8957,17 @@ class IslandModeController {
     }
     #app.is-collapsed .surface {
       top: 0;
-      left: ${Math.round((1 - ISLAND_PEEK_WIDTH_RATIO) * 50)}%;
-      width: ${Math.round(ISLAND_PEEK_WIDTH_RATIO * 100)}%;
+      left: ${peekLeftPct}%;
+      width: ${peekWidthPct}%;
       height: ${ISLAND_COLLAPSED_HEIGHT}px;
       padding: 0; gap: 0;
-      border-color: rgba(32, 37, 43, .06);
-      border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px;
-      background: rgba(252, 252, 250, .98);
+      border-color: transparent;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .2);
       box-shadow: 0 2px 8px rgba(27, 31, 35, .14), 0 1px 2px rgba(27, 31, 35, .08);
     }
     /* After the window itself shrinks to the peek strip, fill that window. */
     #app.is-collapsed.is-peek-tight .surface { left: 0; width: 100%; }
-    body.is-dark #app.is-collapsed .surface {
-      background: rgba(252, 252, 250, .98);
-      border-color: rgba(32, 37, 43, .06);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, .22), 0 1px 2px rgba(0, 0, 0, .12);
-    }
     #app.is-collapsed .surface > * { opacity: 0; pointer-events: none; }
     body.no-motion .surface,
     body.no-motion .surface > * { transition: none !important; will-change: auto; }
@@ -10207,6 +10217,118 @@ class CanvasRuntimeAdapter {
     return file;
   }
 
+  getOwnedCanvas(entry) {
+    const canvas = entry && entry.leaf && entry.leaf.view && entry.leaf.view.canvas;
+    return canvas && !canvas.readonly ? canvas : null;
+  }
+
+  isInkCapturingKeys(entry) {
+    return !!(entry && entry.inkOverlay && entry.inkOverlay.active);
+  }
+
+  runCanvasHistoryAction(entry, action) {
+    const canvas = this.getOwnedCanvas(entry);
+    if (!canvas) return false;
+    if (action === "redo") {
+      if (typeof canvas.redo !== "function") return false;
+      canvas.redo();
+      return true;
+    }
+    if (typeof canvas.undo !== "function") return false;
+    canvas.undo();
+    return true;
+  }
+
+  canvasPastePosition(canvas) {
+    if (canvas && typeof canvas.posCenter === "function") {
+      try {
+        const pos = canvas.posCenter();
+        if (pos && Number.isFinite(Number(pos.x)) && Number.isFinite(Number(pos.y))) return { x: pos.x, y: pos.y };
+      } catch (error) {}
+    }
+    if (canvas && canvas.pointer && Number.isFinite(Number(canvas.pointer.x)) && Number.isFinite(Number(canvas.pointer.y))) {
+      return { x: canvas.pointer.x, y: canvas.pointer.y };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  getCanvasPasteImageSources(entry, clipboardData) {
+    const external = this.getCanvasExternalImageDrop(entry, clipboardData);
+    if (external && external.length) return { kind: "external", sources: external };
+    const canvas = this.getOwnedCanvas(entry);
+    if (!canvas || !clipboardData) return null;
+    const imageExtensions = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
+    const sources = [];
+    const seen = new Set();
+    for (const candidate of Array.from(clipboardData.files || [])) {
+      if (!candidate) continue;
+      const name = String(candidate.name || "paste.png");
+      const ext = name.toLowerCase().split(".").pop();
+      const isImage = (typeof candidate.type === "string" && candidate.type.startsWith("image/")) || imageExtensions.has(ext);
+      if (!isImage || typeof candidate.arrayBuffer !== "function") continue;
+      const key = name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sources.push({ canvas, file: candidate, path: null, name, size: Number(candidate.size) || 0 });
+    }
+    for (const item of Array.from(clipboardData.items || [])) {
+      if (!item || typeof item.type !== "string" || !item.type.startsWith("image/")) continue;
+      const file = typeof item.getAsFile === "function" ? item.getAsFile() : null;
+      if (!file || typeof file.arrayBuffer !== "function") continue;
+      const name = file.name || `paste-${Date.now()}.png`;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      sources.push({ canvas, file, path: null, name, size: Number(file.size) || 0 });
+    }
+    return sources.length ? { kind: "external", sources } : null;
+  }
+
+  getElectronClipboardImageSource(entry) {
+    const canvas = this.getOwnedCanvas(entry);
+    const plugin = this.deckView && this.deckView.plugin;
+    if (!canvas || !plugin || !plugin.clipboard || typeof plugin.clipboard.readImage !== "function") return null;
+    let image;
+    try { image = plugin.clipboard.readImage(); } catch (error) { return null; }
+    if (!image || (typeof image.isEmpty === "function" && image.isEmpty()) || typeof image.toPNG !== "function") return null;
+    let png;
+    try { png = image.toPNG(); } catch (error) { return null; }
+    if (!png || !png.byteLength) return null;
+    const data = png instanceof Uint8Array
+      ? png
+      : new Uint8Array(png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength));
+    if (!data.byteLength) return null;
+    return { kind: "buffer", sources: [{ canvas, data, name: `paste-${Date.now()}.png` }] };
+  }
+
+  clipboardDataHasText(clipboardData) {
+    if (!clipboardData || typeof clipboardData.getData !== "function") return false;
+    try {
+      if (clipboardData.getData("obsidian/canvas")) return true;
+      if (String(clipboardData.getData("text/plain") || "").trim()) return true;
+    } catch (error) {}
+    return false;
+  }
+
+  handleCanvasPaste(entry, event) {
+    if (!entry || entry.closing || jamDeckIsTypingTarget(event.target) || jamDeckIsModalEvent(event) || this.isInkCapturingKeys(entry)) return false;
+    const stackController = entry.imageStackController;
+    if (stackController && (stackController.imageFocus || stackController.previewWrapper)) return false;
+    const canvas = this.getOwnedCanvas(entry);
+    if (!canvas) return false;
+    const fromEvent = this.getCanvasPasteImageSources(entry, event.clipboardData);
+    const imagePayload = fromEvent || (this.clipboardDataHasText(event.clipboardData) ? null : this.getElectronClipboardImageSource(entry));
+    if (imagePayload) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.queueCanvasImagePlacement(entry, imagePayload.kind, imagePayload.sources, this.canvasPastePosition(canvas));
+      return true;
+    }
+    try { if (canvas.wrapperEl && typeof canvas.wrapperEl.focus === "function") canvas.wrapperEl.focus(); } catch (error) {}
+    if (typeof canvas.handlePaste !== "function") return false;
+    canvas.handlePaste(event);
+    return true;
+  }
+
   installCanvasInteractionBridge(entry) {
     if (!entry || entry.interactionInstalled || !entry.leaf || !entry.leaf.containerEl) return;
     const target = entry.leaf.containerEl;
@@ -10231,8 +10353,29 @@ class CanvasRuntimeAdapter {
         return;
       }
       const key = String(event.key || "").toLowerCase();
-      const editable = event.target && event.target.closest && event.target.closest("input, textarea, [contenteditable='true']");
-      if (editable || key !== "c" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      const editable = jamDeckIsTypingTarget(event.target);
+      const mod = event.ctrlKey || event.metaKey;
+      if (!editable && !this.isInkCapturingKeys(entry) && mod && !event.altKey) {
+        if (key === "z" && event.shiftKey) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          this.runCanvasHistoryAction(entry, "redo");
+          return;
+        }
+        if (key === "z") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          this.runCanvasHistoryAction(entry, "undo");
+          return;
+        }
+        if (key === "y") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          this.runCanvasHistoryAction(entry, "redo");
+          return;
+        }
+      }
+      if (editable || key !== "c" || !mod || event.altKey || event.shiftKey) return;
       const file = this.getSelectedCanvasImage(entry);
       if (!file) return;
       event.preventDefault();
@@ -10242,12 +10385,18 @@ class CanvasRuntimeAdapter {
         new Notice(`Jam Deck：复制 Canvas 图片失败 · ${error.message || "未知错误"}`);
       });
     };
+    const paste = (event) => {
+      activate();
+      this.handleCanvasPaste(entry, event);
+    };
     target.addEventListener("pointerdown", pointerdown, true);
     target.addEventListener("focusin", activate, true);
     target.addEventListener("keydown", keydown, true);
+    target.addEventListener("paste", paste, true);
     entry.dropDisposers.push(() => target.removeEventListener("pointerdown", pointerdown, true));
     entry.dropDisposers.push(() => target.removeEventListener("focusin", activate, true));
     entry.dropDisposers.push(() => target.removeEventListener("keydown", keydown, true));
+    entry.dropDisposers.push(() => target.removeEventListener("paste", paste, true));
     const ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
     if (ownerWindow) {
       let coordinator = this.returnCoordinators.get(ownerWindow);
@@ -10356,36 +10505,43 @@ class CanvasRuntimeAdapter {
         return;
       }
       const items = context.kind === "clipboard" ? (context.items || []) : (context.sources || []);
-      if (!items.length) return;
-      // 本次拖入批次从鼠标位置重新开始排布
-      entry.dropCursorRect = null;
-      const jobs = [];
-      for (let index = 0; index < items.length; index += 1) {
-        const source = items[index];
-        const operation = {
-          id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          entryToken: entry.token,
-          controller: new AbortController(),
-          inserted: false,
-          committed: false,
-          node: null,
-          createdPath: null,
-          createdFile: null,
-          dropIndex: index,
-        };
-        entry.dropOperations.set(operation.id, operation);
-        const commit = context.kind === "clipboard"
-          ? () => this.commitClipboardImageDrop(entry, context.canvas, source, pos, operation)
-          : () => this.commitExternalImageDrop(entry, context.canvas, source, pos, operation);
-        jobs.push({ operation, commit });
-      }
-      this.enqueueCanvasDrop(entry, jobs);
+      this.queueCanvasImagePlacement(entry, context.kind, items, pos);
     };
     target.addEventListener("dragover", dragover, true);
     target.addEventListener("drop", drop, true);
     entry.dropDisposers.push(() => target.removeEventListener("dragover", dragover, true));
     entry.dropDisposers.push(() => target.removeEventListener("drop", drop, true));
     entry.dropInstalled = true;
+  }
+
+  queueCanvasImagePlacement(entry, kind, items, pos) {
+    if (!entry || entry.closing || !Array.isArray(items) || !items.length) return;
+    const canvas = (items[0] && items[0].canvas) || this.getOwnedCanvas(entry);
+    if (!canvas || typeof canvas.createFileNode !== "function") return;
+    entry.dropCursorRect = null;
+    const jobs = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const source = items[index];
+      const operation = {
+        id: `canvas-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        entryToken: entry.token,
+        controller: new AbortController(),
+        inserted: false,
+        committed: false,
+        node: null,
+        createdPath: null,
+        createdFile: null,
+        dropIndex: index,
+      };
+      entry.dropOperations.set(operation.id, operation);
+      const commit = kind === "clipboard"
+        ? () => this.commitClipboardImageDrop(entry, canvas, source, pos, operation)
+        : kind === "buffer"
+          ? () => this.commitBufferImageDrop(entry, canvas, source, pos, operation)
+          : () => this.commitExternalImageDrop(entry, canvas, source, pos, operation);
+      jobs.push({ operation, commit });
+    }
+    this.enqueueCanvasDrop(entry, jobs);
   }
 
   enqueueCanvasDrop(entry, jobs) {
@@ -10567,6 +10723,16 @@ class CanvasRuntimeAdapter {
       entry,
       canvas,
       (signal) => this.deckView.plugin.createCanvasAttachmentFromExternal(source, entry.filePath, signal),
+      pos,
+      operation,
+    );
+  }
+
+  async commitBufferImageDrop(entry, canvas, source, pos, operation) {
+    return this.commitCanvasImageDrop(
+      entry,
+      canvas,
+      (signal) => this.deckView.plugin.writeCanvasAttachmentBuffer(source.data, source.name, entry.filePath, signal),
       pos,
       operation,
     );
@@ -12008,7 +12174,7 @@ class JamDeckView extends ItemView {
 
     const aiFab = root.createDiv({
       cls: "jam-deck-ai-fab",
-      attr: { role: "button", tabindex: "0",  "aria-label": "AI 对话助手 AI 对话助手（DeepSeek / 千问）" },
+      attr: { role: "button", tabindex: "0",  "aria-label": "AI 对话助手（DeepSeek / GLM）" },
     });
     aiFab.createSpan({ text: "AI", cls: "jam-deck-ai-fab-label" });
     let fabDrag = null;
@@ -12092,14 +12258,14 @@ class JamDeckView extends ItemView {
   }
 
   toggleAiProvider() {
-    const next = this.plugin.settings.aiProvider === "qwen" ? "deepseek" : "qwen";
+    const next = this.plugin.settings.aiProvider === "glm" ? "deepseek" : "glm";
     this.plugin.settings.aiProvider = next;
     void this.plugin.saveSettings();
-    const label = next === "qwen" ? "千问（可看图）" : "DeepSeek";
+    const label = next === "glm" ? "GLM（可看图）" : "DeepSeek";
     new Notice(`Jam Deck：AI 已切换到 ${label}`);
     if (next === "deepseek" && this.aiCanvasContext && this.aiCanvasContext.kind === "image") {
-      // 图片上下文只属于千问多模态：切到 DeepSeek 后降级为纯节点上下文，
-      // 纯文本对话可以继续，避免“看图需要千问”误拦截。
+      // 图片上下文只属于 GLM 多模态：切到 DeepSeek 后降级为纯节点上下文，
+      // 纯文本对话可以继续，避免“看图需要 GLM”误拦截。
       const ctx = this.aiCanvasContext;
       this.aiCanvasContext = { canvas: ctx.canvas || null, nodeId: ctx.nodeId || null, rect: ctx.rect || null };
       this.clearAiImageDock();
@@ -12373,8 +12539,8 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "qwen") {
-      this.plugin.settings.aiProvider = "qwen";
+    if (this.plugin.settings.aiProvider !== "glm") {
+      this.plugin.settings.aiProvider = "glm";
       void this.plugin.saveSettings();
     }
     this.aiCanvasContext = {
@@ -12399,7 +12565,7 @@ class JamDeckView extends ItemView {
     });
     this.aiMessages.push({
       role: "assistant",
-      content: "已载入图片（千问 · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。",
+      content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。",
     });
     if (this.aiChat) {
       this.aiChat.hidden = false;
@@ -12431,15 +12597,15 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "qwen") {
-      this.plugin.settings.aiProvider = "qwen";
+    if (this.plugin.settings.aiProvider !== "glm") {
+      this.plugin.settings.aiProvider = "glm";
       void this.plugin.saveSettings();
     }
     this.aiCanvasContext = { canvas: null, nodeId: null, kind: "image", image: { path, mime: sendMime, base64: sendBase64 } };
     this.aiQuickDone = true;
     const displayName = name || String(path || "").split("/").pop() || "图片";
     this.aiMessages.push({ role: "user", image: { src: displaySrc, alt: displayName }, text: "[图片]" });
-    this.aiMessages.push({ role: "assistant", content: "已载入图片（千问 · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
+    this.aiMessages.push({ role: "assistant", content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
     if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 2]);
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 1]);
@@ -12547,11 +12713,11 @@ class JamDeckView extends ItemView {
 
   refreshAiAssistantPage() {
     if (this.aiProviderBtn) {
-      const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+      const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
       this.aiProviderBtn.textContent = provider;
-      this.aiProviderBtn.title = provider === "千问"
-        ? "当前：千问（多模态）· 点击切换到 DeepSeek"
-        : "当前：DeepSeek · 点击切换到千问（可看图）";
+      this.aiProviderBtn.title = provider === "GLM"
+        ? "当前：GLM（多模态）· 点击切换到 DeepSeek"
+        : "当前：DeepSeek · 点击切换到 GLM（可看图）";
     }
     this.renderAiAssistantPage();
   }
@@ -12695,11 +12861,11 @@ class JamDeckView extends ItemView {
   renderAiChatHeader(header, { assistantPageId, localWebPageId }) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
-    const provider = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+    const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
     const providerBtn = titleGroup.createEl("button", {
       text: provider,
       cls: "jam-deck-ai-provider-btn",
-      attr: { type: "button", title: provider === "千问" ? "当前：千问（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到千问（可看图）" },
+      attr: { type: "button", title: provider === "GLM" ? "当前：GLM（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到 GLM（可看图）" },
     });
     this.aiProviderBtn = providerBtn;
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
@@ -13037,17 +13203,17 @@ class JamDeckView extends ItemView {
     if ((!text && !imageCtx) || this.aiBusy) return { ok: false, reason: "idle" };
     const config = this.plugin.getAiConfig();
     if (imageCtx) {
-      if (this.plugin.settings.aiProvider !== "qwen") {
-        this.addAiMessage("assistant", "看图需要千问（多模态）。请点击标题旁的模型按钮切换到千问。");
-        return { ok: false, reason: "need-qwen" };
+      if (this.plugin.settings.aiProvider !== "glm") {
+        this.addAiMessage("assistant", "看图需要 GLM（多模态）。请点击标题旁的模型按钮切换到 GLM。");
+        return { ok: false, reason: "need-glm" };
       }
       if (!config.apiKey) {
-        this.addAiMessage("assistant", "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key");
+        this.addAiMessage("assistant", "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key");
         return { ok: false, reason: "no-key" };
       }
     } else if (!config.apiKey) {
-      const tip = this.plugin.settings.aiProvider === "qwen"
-        ? "还没配置千问 API Key：设置 → 第三方插件 → Jam Deck → 千问 API Key"
+      const tip = this.plugin.settings.aiProvider === "glm"
+        ? "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key"
         : "还没配置 API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
       this.addAiMessage("assistant", tip);
       return { ok: false, reason: "no-key" };
@@ -13058,7 +13224,7 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.disabled = true;
       this.aiSendBtn.textContent = "…";
     }
-    const providerLabel = this.plugin.settings.aiProvider === "qwen" ? "千问" : "DeepSeek";
+    const providerLabel = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
     this.addAiMessage("assistant", `${providerLabel} 处理中…`);
     try {
       if (imageCtx) {
@@ -13078,9 +13244,9 @@ class JamDeckView extends ItemView {
           bubble.empty();
           bubble.createSpan({ text: content, cls: "jam-deck-ai-message-text" });
         }
-        const qwenConfig = this.plugin.getAiConfig();
-        await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, qwenConfig.label);
-        await this.plugin.appendAiLog("assistant", content, qwenConfig.label);
+        const glmConfig = this.plugin.getAiConfig();
+        await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, glmConfig.label);
+        await this.plugin.appendAiLog("assistant", content, glmConfig.label);
         return { ok: true, reply: content };
       }
       const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
@@ -14712,6 +14878,11 @@ class JamDeckPlugin extends Plugin {
     this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
       ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
       : [];
+    if (this.repairDuplicateDeckTaskIds()) {
+      try { await this.saveSettings(); } catch (error) {
+        console.error("jam-deck duplicate task id repair failed to save", error);
+      }
+    }
     this.settings.musicLikes = Array.isArray(this.settings.musicLikes)
       ? this.settings.musicLikes.filter((value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)).slice(0, 500)
       : [];
@@ -14757,6 +14928,37 @@ class JamDeckPlugin extends Plugin {
       this.settings.aiLocalWorkspacePath,
       jamDeckVaultBasePath(this.app),
     );
+  }
+
+  nextDeckTaskId() {
+    const used = new Set((this.settings.deckTasks || []).map((task) => task && task.id).filter(Boolean));
+    return this.allocateDeckTaskId(used);
+  }
+
+  allocateDeckTaskId(existingIds) {
+    const used = existingIds instanceof Set ? existingIds : new Set();
+    let id = "";
+    do {
+      id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    } while (used.has(id));
+    used.add(id);
+    return id;
+  }
+
+  repairDuplicateDeckTaskIds() {
+    const seen = new Set();
+    let changed = 0;
+    for (const task of this.settings.deckTasks || []) {
+      if (!task || typeof task !== "object") continue;
+      const id = typeof task.id === "string" ? task.id : "";
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        continue;
+      }
+      task.id = this.allocateDeckTaskId(seen);
+      changed += 1;
+    }
+    return changed;
   }
 
   applyAnimationSetting() {
@@ -15092,18 +15294,12 @@ class JamDeckPlugin extends Plugin {
   }
 
   getAiConfig() {
-    if (this.settings.aiProvider === "qwen") {
-      const key = this.settings.qwenApiKey || "";
-      // Token Plan 个人版专属 key 以 sk-sp- 开头，必须配套专属 Base URL；
-      // 通用按量付费 key 以 sk- 开头走 dashscope 端点。两者不可混用。
-      const tokenPlan = key.startsWith("sk-sp-");
+    if (this.settings.aiProvider === "glm") {
       return {
-        baseUrl: tokenPlan
-          ? "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-          : "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        apiKey: key,
-        model: this.settings.qwenModel || "qwen3.8-max",
-        label: tokenPlan ? "千问(Token Plan)" : "千问",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        apiKey: this.settings.glmApiKey || "",
+        model: this.settings.glmModel || "glm-5.3-flash",
+        label: "GLM",
       };
     }
     return {
@@ -15218,8 +15414,7 @@ class JamDeckPlugin extends Plugin {
             result.skipped++;
             continue;
           }
-          const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          const task = this.makeDeckTask(id, text, String(op.description || "").trim(), [], {
+          const task = this.makeDeckTask(this.nextDeckTaskId(), text, String(op.description || "").trim(), [], {
             dueDate: this.isValidLocalDate(op.dueDate) ? op.dueDate : null,
             category: ["work", "life"].includes(op.category) ? op.category : null,
           });
@@ -15454,7 +15649,7 @@ class JamDeckPlugin extends Plugin {
 
   async streamChatWithImage(imageBase64, mime, prompt, onChunk) {
     const config = this.getAiConfig();
-    const system = `你是通义千问 ${config.model}（阿里云百炼多模态模型），运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
+    const system = `你是 GLM ${config.model}（智谱多模态模型），运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
     return this.streamChat([
       { role: "system", content: system },
       {
@@ -16031,7 +16226,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     const firstIndex = lines.findIndex((line) => line.trim());
     const title = lines[firstIndex].trim().slice(0, 120);
     const description = lines.slice(firstIndex + 1).join("\n").trim();
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     await this.persistNewDroppedTask(this.makeDeckTask(id, title, description, []), []);
     return true;
   }
@@ -16040,7 +16235,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     const sourcePath = `${CLIPBOARD_DIR}/${item.filename}`;
     const file = this.app.vault.getAbstractFileByPath(sourcePath);
     if (!file) throw new Error("剪贴板图片已经过期");
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     const image = await this.createTaskAssetFromBuffer(await this.app.vault.readBinary(file), item.filename, id, 0);
     const task = this.makeDeckTask(id, `图片待办 · ${item.filename}`, "", [image]);
     await this.persistNewDroppedTask(task, [image.path]);
@@ -16049,7 +16244,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   async createTaskFromExternalImages(files) {
     const imagesOnly = files.filter((file) => file && file.type && file.type.startsWith("image/"));
     if (!imagesOnly.length) throw new Error("拖入待办的文件不是图片");
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     const images = [];
     try {
       for (let index = 0; index < imagesOnly.length; index++) images.push(await this.importTaskImage(imagesOnly[index], id, index));
@@ -16085,7 +16280,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   async addDeckTask(text) {
-    this.settings.deckTasks.unshift(this.makeDeckTask(`task-${Date.now()}`, text, "", []));
+    this.settings.deckTasks.unshift(this.makeDeckTask(this.nextDeckTaskId(), text, "", []));
     await this.saveSettings();
     this.renderAllViews();
   }
@@ -16096,7 +16291,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   async createDeckTaskFromDraft(draft) {
-    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = this.nextDeckTaskId();
     const imported = [];
     try {
       for (let index = 0; index < (draft.pendingFiles || []).length; index++) {
@@ -19154,7 +19349,7 @@ class JamDeckSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Jam Deck" });
-    containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / 千问）", cls: "jam-deck-setting-hint" });
+    containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / GLM）", cls: "jam-deck-setting-hint" });
 
     new Setting(containerEl)
       .setName("动画效果")
@@ -19209,46 +19404,43 @@ class JamDeckSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "千问（多模态，可看图）", cls: "jam-deck-setting-h3" });
+    containerEl.createEl("h3", { text: "GLM（多模态，可看图）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)
-      .setName("千问 API Key")
-      .setDesc("Token Plan 用户：在 Token Plan 控制台「我的订阅」生成专属 key（sk-sp- 开头），插件自动走专属端点。按量付费用户：百炼 API-KEY 管理（sk- 开头）。只存本地 data.json，不上传。")
+      .setName("GLM API Key")
+      .setDesc("智谱开放平台（bigmodel.cn）→ API Keys 创建。只存本地 data.json，不上传。")
       .addText((text) => {
-        text.setPlaceholder("sk-sp-… 或 sk-…").setValue(this.plugin.settings.qwenApiKey).onChange(async (value) => {
-          this.plugin.settings.qwenApiKey = value.trim();
+        text.setPlaceholder("xxxxxxxx.xxxxxxxxxxxxxxxx").setValue(this.plugin.settings.glmApiKey).onChange(async (value) => {
+          this.plugin.settings.glmApiKey = value.trim();
           await this.plugin.saveSettings();
         });
         text.inputEl.type = "password";
       });
 
     new Setting(containerEl)
-      .setName("千问模型")
-      .setDesc("qwen3.8-max 旗舰（2026-08-03 发布，原生多模态，推荐）；qwen3.8-max-preview 预览名；qwen-vl-max 视觉稳定版。")
+      .setName("GLM 模型")
+      .setDesc("glm-5.3-flash 原生多模态（推荐，输入 ¥0.8/M 输出 ¥2.8/M）；glm-5.3 旗舰。")
       .addDropdown((dropdown) => {
-        dropdown.addOption("qwen3.8-max", "qwen3.8-max（推荐）");
-        dropdown.addOption("qwen3.8-max-preview", "qwen3.8-max-preview");
-        dropdown.addOption("qwen-vl-max", "qwen-vl-max");
-        dropdown.addOption("qwen-vl-plus", "qwen-vl-plus");
-        dropdown.addOption("qwen3-vl-plus", "qwen3-vl-plus");
-        dropdown.setValue(this.plugin.settings.qwenModel || "qwen3.8-max");
+        dropdown.addOption("glm-5.3-flash", "glm-5.3-flash（推荐）");
+        dropdown.addOption("glm-5.3", "glm-5.3");
+        dropdown.setValue(this.plugin.settings.glmModel || "glm-5.3-flash");
         dropdown.onChange(async (value) => {
-          this.plugin.settings.qwenModel = value;
+          this.plugin.settings.glmModel = value;
           await this.plugin.saveSettings();
         });
       });
 
     new Setting(containerEl)
       .setName("当前模型")
-      .setDesc("AI 对话窗标题旁的按钮也可随时切换。DeepSeek 处理文本；千问可识别图片。")
+      .setDesc("AI 对话窗标题旁的按钮也可随时切换。DeepSeek 处理文本；GLM 可识别图片。")
       .addDropdown((dropdown) => {
         dropdown.addOption("deepseek", "DeepSeek（文本）");
-        dropdown.addOption("qwen", "千问（多模态）");
+        dropdown.addOption("glm", "GLM（多模态）");
         dropdown.setValue(this.plugin.settings.aiProvider || "deepseek");
         dropdown.onChange(async (value) => {
           this.plugin.settings.aiProvider = value;
           await this.plugin.saveSettings();
-          new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "qwen" ? "千问" : "DeepSeek"}`);
+          new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "glm" ? "GLM" : "DeepSeek"}`);
         });
       });
 
