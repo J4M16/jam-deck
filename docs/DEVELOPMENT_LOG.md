@@ -1,8 +1,8 @@
 ﻿# Jam Deck 开发日志
 
-## 2026-09-10 — 0.31.46 合入 master
+## 2026-09-10 — 0.31.46 合入 master 并发 GitHub Release
 
-- `develop` 上 0.31.43–0.31.46（待办重复 id、Canvas 撤销/贴图、AI 千问改 GLM、灵动岛收起胶囊与末端跳动修复）已 `npm run verify` 全绿后合入 `master` 并推送 GitHub。未打 tag / 未发 GitHub Release。
+- `develop` 上 0.31.43–0.31.46（待办重复 id、Canvas 撤销/贴图、AI 千问改 GLM、灵动岛收起胶囊与末端跳动修复）已 `npm run verify` 全绿后合入 `master`，打 tag `v0.31.46` 并发布 GitHub Release。
 - 处理模型签名：Cursor Grok 4.6（主代理）
 
 ## 2026-09-10 — 0.31.46 灵动岛收起态改半透明全圆角胶囊
