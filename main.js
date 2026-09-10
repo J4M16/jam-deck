@@ -8946,18 +8946,13 @@ class IslandModeController {
       width: ${Math.round(ISLAND_PEEK_WIDTH_RATIO * 100)}%;
       height: ${ISLAND_COLLAPSED_HEIGHT}px;
       padding: 0; gap: 0;
-      border-color: rgba(32, 37, 43, .06);
-      border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px;
-      background: rgba(252, 252, 250, .98);
+      border-color: transparent;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .2);
       box-shadow: 0 2px 8px rgba(27, 31, 35, .14), 0 1px 2px rgba(27, 31, 35, .08);
     }
     /* After the window itself shrinks to the peek strip, fill that window. */
     #app.is-collapsed.is-peek-tight .surface { left: 0; width: 100%; }
-    body.is-dark #app.is-collapsed .surface {
-      background: rgba(252, 252, 250, .98);
-      border-color: rgba(32, 37, 43, .06);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, .22), 0 1px 2px rgba(0, 0, 0, .12);
-    }
     #app.is-collapsed .surface > * { opacity: 0; pointer-events: none; }
     body.no-motion .surface,
     body.no-motion .surface > * { transition: none !important; will-change: auto; }

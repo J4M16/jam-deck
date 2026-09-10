@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.31.46 — 2026-09-10
+
+- **灵动岛收起态改为半透明全圆角胶囊**：折叠条由「顶部平切 + 下半圆角 + 近实色白」改为 999px 全圆角（10px 高自动钳制为胶囊）、`rgba(255,255,255,.2)` 透明白，边框透明，阴影保留；删除暗色主题下强制近实色的覆盖块，明暗主题共用同一收起样式。修 Mac 上半切矩形观感差的问题。
+- 处理模型签名：GLM-5.3-Flash（执行）
+
 ## 0.31.45 — 2026-09-09
 
 - **AI 多模态供应商由千问换成 GLM**：千问 API 过期，`getAiConfig()` 改走智谱开放平台（open.bigmodel.cn），默认模型 glm-5.3-flash（原生多模态，可看图）；DeepSeek 分支不变。设置项 `qwenApiKey/qwenModel` 更名 `glmApiKey/glmModel`，供应商值 `qwen` 更名 `glm`，不留兼容层——升级后需在设置页重填 GLM key 并把「当前模型」切到 GLM。WorkBuddy 侧 qwen-coach / qwen-vision-check 两个 skill 同步换用 GLM。
