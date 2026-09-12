@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.47 — 2026-09-12
+
+- **DeepSeek 也能看图了**：DeepSeek API 已开放图片输入，`streamChatWithImage()` 的图片块（OpenAI 兼容 `image_url` + data URL）现在两个供应商共用，系统提示按当前供应商动态生成。删除三处 GLM 独占逻辑——`sendAiText()` 的「看图需要 GLM」拦截、载入图片时强制把 provider 切到 GLM、切到 DeepSeek 即丢弃图片上下文；图片上下文现在跨供应商保留。
+- **DeepSeek 模型固定为 `deepseek-flash`**：删除设置页「DeepSeek 模型」下拉与 `settings.aiModel`，模型名收敛为常量 `JAM_DECK_DEEPSEEK_MODEL`（`getAiConfig()` 与归档压缩共用）。实测该账号可用模型只有 `deepseek-flash` / `deepseek-v4-pro`，其中仅前者能识别图片（`deepseek-v4-pro` 收到图片回「无法查看这张图片」并把图标为 `[Unsupported Image]`）；旧默认 `deepseek-v4-flash` 是 `deepseek-flash` 的兼容别名，而 `deepseek-v4.1-flash` 会直接 HTTP 400。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 0.31.46 — 2026-09-10
 
 - **灵动岛收起态改为半透明全圆角胶囊**：折叠条由「顶部平切 + 下半圆角 + 近实色白」改为 999px 全圆角（10px 高自动钳制为胶囊）、`rgba(255,255,255,.2)` 透明白，边框透明，阴影保留；删除暗色主题下强制近实色的覆盖块，明暗主题共用同一收起样式。修 Mac 上半切矩形观感差的问题。

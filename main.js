@@ -42,6 +42,10 @@ const MEDIA_ARTWORK_MAX_BYTES = 768 * 1024;
 const MEDIA_REQUEST_TIMEOUT_MS = 5000;
 const MEDIA_READY_TIMEOUT_MS = 6000;
 const AI_LOCAL_WEB_URL = "http://127.0.0.1:3080/";
+// DeepSeek 侧固定使用 deepseek-flash：本账号下唯一支持图片输入的模型。
+// 实测（2026-09-12）：deepseek-v4-pro 收到图片时回「[Unsupported Image]」并声称看不到图；
+// deepseek-v4.1-flash / deepseek-v4-flash 等名字不在支持列表（仅 deepseek-flash / deepseek-v4-pro），传错名会 HTTP 400。
+const JAM_DECK_DEEPSEEK_MODEL = "deepseek-flash";
 const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
@@ -875,7 +879,6 @@ const DEFAULT_SETTINGS = {
   clipboardPollMs: 700,
   clipboardMaxItems: 60,
   aiApiKey: "",
-  aiModel: "deepseek-v4-flash",
   glmApiKey: "",
   glmModel: "glm-5.3-flash",
   aiProvider: "deepseek",
@@ -12257,20 +12260,17 @@ class JamDeckView extends ItemView {
     button.addEventListener("click", handler);
   }
 
+  aiProviderLabel() {
+    return this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+  }
+
   toggleAiProvider() {
     const next = this.plugin.settings.aiProvider === "glm" ? "deepseek" : "glm";
     this.plugin.settings.aiProvider = next;
     void this.plugin.saveSettings();
-    const label = next === "glm" ? "GLM（可看图）" : "DeepSeek";
+    const label = next === "glm" ? "GLM" : `DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}）`;
     new Notice(`Jam Deck：AI 已切换到 ${label}`);
-    if (next === "deepseek" && this.aiCanvasContext && this.aiCanvasContext.kind === "image") {
-      // 图片上下文只属于 GLM 多模态：切到 DeepSeek 后降级为纯节点上下文，
-      // 纯文本对话可以继续，避免“看图需要 GLM”误拦截。
-      const ctx = this.aiCanvasContext;
-      this.aiCanvasContext = { canvas: ctx.canvas || null, nodeId: ctx.nodeId || null, rect: ctx.rect || null };
-      this.clearAiImageDock();
-      this.addAiMessage("assistant", "已切换到 DeepSeek：图片上下文已移除，纯文本对话继续；需要再看图请重新对图片节点打开 AI 助手或把图片拖进对话框。");
-    }
+    // DeepSeek 与 GLM 都支持图片输入：已载入的图片上下文随切换保留，不再降级为纯文本。
     this.refreshAiAssistantPage();
   }
 
@@ -12287,7 +12287,7 @@ class JamDeckView extends ItemView {
       new Notice("Jam Deck：未配置 DeepSeek API Key，无法归档");
       return;
     }
-    const dsModel = this.plugin.settings.aiModel || "deepseek-v4-flash";
+    const dsModel = JAM_DECK_DEEPSEEK_MODEL;
     const lines = [];
     for (const msg of pending) {
       if (msg.role === "user") {
@@ -12539,10 +12539,7 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "glm") {
-      this.plugin.settings.aiProvider = "glm";
-      void this.plugin.saveSettings();
-    }
+    // DeepSeek 与 GLM 都支持图片输入，载入图片时不再把 provider 强制切到 GLM。
     this.aiCanvasContext = {
       canvas: canvas || null,
       nodeId: node && node.id || null,
@@ -12565,7 +12562,7 @@ class JamDeckView extends ItemView {
     });
     this.aiMessages.push({
       role: "assistant",
-      content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。",
+      content: `已载入图片（${this.aiProviderLabel()} · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。`,
     });
     if (this.aiChat) {
       this.aiChat.hidden = false;
@@ -12597,15 +12594,12 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "glm") {
-      this.plugin.settings.aiProvider = "glm";
-      void this.plugin.saveSettings();
-    }
+    // 同上：两边的模型都能看图，无需切换 provider。
     this.aiCanvasContext = { canvas: null, nodeId: null, kind: "image", image: { path, mime: sendMime, base64: sendBase64 } };
     this.aiQuickDone = true;
     const displayName = name || String(path || "").split("/").pop() || "图片";
     this.aiMessages.push({ role: "user", image: { src: displaySrc, alt: displayName }, text: "[图片]" });
-    this.aiMessages.push({ role: "assistant", content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
+    this.aiMessages.push({ role: "assistant", content: `已载入图片（${this.aiProviderLabel()} · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。` });
     if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 2]);
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 1]);
@@ -12713,11 +12707,11 @@ class JamDeckView extends ItemView {
 
   refreshAiAssistantPage() {
     if (this.aiProviderBtn) {
-      const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+      const provider = this.aiProviderLabel();
       this.aiProviderBtn.textContent = provider;
       this.aiProviderBtn.title = provider === "GLM"
-        ? "当前：GLM（多模态）· 点击切换到 DeepSeek"
-        : "当前：DeepSeek · 点击切换到 GLM（可看图）";
+        ? `当前：GLM（可看图）· 点击切换到 DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）`
+        : `当前：DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）· 点击切换到 GLM（可看图）`;
     }
     this.renderAiAssistantPage();
   }
@@ -12861,11 +12855,16 @@ class JamDeckView extends ItemView {
   renderAiChatHeader(header, { assistantPageId, localWebPageId }) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
-    const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+    const provider = this.aiProviderLabel();
     const providerBtn = titleGroup.createEl("button", {
       text: provider,
       cls: "jam-deck-ai-provider-btn",
-      attr: { type: "button", title: provider === "GLM" ? "当前：GLM（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到 GLM（可看图）" },
+      attr: {
+        type: "button",
+        title: provider === "GLM"
+          ? `当前：GLM（可看图）· 点击切换到 DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）`
+          : `当前：DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）· 点击切换到 GLM（可看图）`,
+      },
     });
     this.aiProviderBtn = providerBtn;
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
@@ -13202,19 +13201,11 @@ class JamDeckView extends ItemView {
       : null;
     if ((!text && !imageCtx) || this.aiBusy) return { ok: false, reason: "idle" };
     const config = this.plugin.getAiConfig();
-    if (imageCtx) {
-      if (this.plugin.settings.aiProvider !== "glm") {
-        this.addAiMessage("assistant", "看图需要 GLM（多模态）。请点击标题旁的模型按钮切换到 GLM。");
-        return { ok: false, reason: "need-glm" };
-      }
-      if (!config.apiKey) {
-        this.addAiMessage("assistant", "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key");
-        return { ok: false, reason: "no-key" };
-      }
-    } else if (!config.apiKey) {
-      const tip = this.plugin.settings.aiProvider === "glm"
+    if (!config.apiKey) {
+      // DeepSeek 与 GLM 都支持图片输入，缺 Key 时只按当前 provider 给出对应提示。
+      const tip = config.label === "GLM"
         ? "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key"
-        : "还没配置 API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
+        : "还没配置 DeepSeek API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
       this.addAiMessage("assistant", tip);
       return { ok: false, reason: "no-key" };
     }
@@ -13224,7 +13215,7 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.disabled = true;
       this.aiSendBtn.textContent = "…";
     }
-    const providerLabel = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+    const providerLabel = this.aiProviderLabel();
     this.addAiMessage("assistant", `${providerLabel} 处理中…`);
     try {
       if (imageCtx) {
@@ -15305,7 +15296,7 @@ class JamDeckPlugin extends Plugin {
     return {
       baseUrl: "https://api.deepseek.com",
       apiKey: this.settings.aiApiKey || "",
-      model: this.settings.aiModel || "deepseek-v4-flash",
+      model: JAM_DECK_DEEPSEEK_MODEL,
       label: "DeepSeek",
     };
   }
@@ -15649,7 +15640,9 @@ class JamDeckPlugin extends Plugin {
 
   async streamChatWithImage(imageBase64, mime, prompt, onChunk) {
     const config = this.getAiConfig();
-    const system = `你是 GLM ${config.model}（智谱多模态模型），运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
+    // DeepSeek 与 GLM 都接受 OpenAI 兼容的 image_url + data URL 图片块；
+    // deepseek-flash 已实测可正常识别图片内容（唯一支持图片输入的 DeepSeek 模型）。
+    const system = `你是 ${config.label} 的 ${config.model}，运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
     return this.streamChat([
       { role: "system", content: system },
       {
@@ -19378,11 +19371,11 @@ class JamDeckSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "DeepSeek（文本）", cls: "jam-deck-setting-h3" });
+    containerEl.createEl("h3", { text: "DeepSeek（图文）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)
       .setName("DeepSeek API Key")
-      .setDesc("用于 AI 对话（待办操作、翻译、问答）。在 platform.deepseek.com 创建（sk- 开头）；只保存在本地 data.json，不上传。")
+      .setDesc(`用于 AI 对话（待办操作、翻译、问答、看图）。在 platform.deepseek.com 创建（sk- 开头）；只保存在本地 data.json，不上传。模型固定为 ${JAM_DECK_DEEPSEEK_MODEL} —— DeepSeek 当前唯一支持图片输入的模型（deepseek-v4-pro 无法识别图片）。`)
       .addText((text) => {
         text.setPlaceholder("sk-…").setValue(this.plugin.settings.aiApiKey).onChange(async (value) => {
           this.plugin.settings.aiApiKey = value.trim();
@@ -19391,20 +19384,7 @@ class JamDeckSettingTab extends PluginSettingTab {
         text.inputEl.type = "password";
       });
 
-    new Setting(containerEl)
-      .setName("DeepSeek 模型")
-      .setDesc("deepseek-v4-flash 快速便宜（推荐）；deepseek-v4-pro 推理更强。")
-      .addDropdown((dropdown) => {
-        dropdown.addOption("deepseek-v4-flash", "deepseek-v4-flash（推荐）");
-        dropdown.addOption("deepseek-v4-pro", "deepseek-v4-pro");
-        dropdown.setValue(this.plugin.settings.aiModel || "deepseek-v4-flash");
-        dropdown.onChange(async (value) => {
-          this.plugin.settings.aiModel = value;
-          await this.plugin.saveSettings();
-        });
-      });
-
-    containerEl.createEl("h3", { text: "GLM（多模态，可看图）", cls: "jam-deck-setting-h3" });
+    containerEl.createEl("h3", { text: "GLM（多模态）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)
       .setName("GLM API Key")
@@ -19432,9 +19412,9 @@ class JamDeckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("当前模型")
-      .setDesc("AI 对话窗标题旁的按钮也可随时切换。DeepSeek 处理文本；GLM 可识别图片。")
+      .setDesc(`AI 对话窗标题旁的按钮也可随时切换。DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}）与 GLM 都能识别图片，也都处理待办与问答。`)
       .addDropdown((dropdown) => {
-        dropdown.addOption("deepseek", "DeepSeek（文本）");
+        dropdown.addOption("deepseek", `DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}）`);
         dropdown.addOption("glm", "GLM（多模态）");
         dropdown.setValue(this.plugin.settings.aiProvider || "deepseek");
         dropdown.onChange(async (value) => {
