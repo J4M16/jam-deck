@@ -1,5 +1,18 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-12 — 0.31.50 修复「处理中…」幽灵气泡 + 调查请求转发 WorkBuddy 的可行性
+
+- Jam 反馈（附截图），三件事：① 搜索体验明显不如在 WorkBuddy / DeepSeek Harness 里用同一个模型；② 不只搜错结果，**结果已经返回了界面还在显示「DeepSeek 处理中…」**；③ 问有没有办法把 JamDeck AI 助手的请求转发回 WorkBuddy。
+- 诊断（只读探测 + DOM dump，零 API 成本）：在运行中的 Obsidian 里 dump `aiMessagesEl` 的子元素，拿到决定性证据——消息数组 4 条里**没有**「处理中…」，DOM 却有 5 个孩子：
+  `[3] jam-deck-ai-message is-assistant :: DeepSeek 处理中…` 与 `[4] jam-deck-ai-quick :: 搜索到该短片作者是…`（结果文本被写进了快捷块）。
+- 根因：`applyAiOperations(operations, canvasContext)` 结尾无条件调用 `this.renderAllViews()`，而 AI 聊天面板位于 `view-content jam-deck-root` 内部（ancestors 已确认），因此视图被整体重建。重建时读的是 `this.aiMessages`——此刻最后一条仍是「DeepSeek 处理中…」，重建后的 DOM 于是渲染出这个气泡；又因为 `aiCanvasContext.nodeId` 存在且 `aiQuickDone === false`，列表尾部追加了 `.jam-deck-ai-quick` 快捷块。随后 `sendAiText()` 用 `this.aiMessagesEl.lastElementChild` 取「最后一条消息气泡」，摸到的却是快捷块，summary 被写进了它；真正的「处理中」气泡无人替换，永久残留。**一个根因三个症状**：幽灵气泡、结果样式错位（没有气泡边框）、翻译快捷按钮被 `empty()` 清空。
+- 改动（`main.js`）：抽出 `renderAiMessagesList(list)` 作为消息列表唯一渲染入口（`renderAiChatBody` 复用）；新增 `pushAiMessage(message)`（返回气泡元素）与 `settleAiPendingMessage(pendingMessage, content)`（按 `indexOf` 定位消息对象、更新数组后全量重渲染）；`sendAiText()` 的文本 / 图片 / 错误三条收尾路径统一走 settle；三处 `lastElementChild` 用法全部删除。
+- 顺带修复同源瑕疵：`pushAiMessage()` 落新消息时移除空对话引导块（`.jam-deck-ai-empty`），并把新气泡插到 `.jam-deck-ai-quick` 之前，保持快捷块贴在列表末尾而不是夹在消息中间。
+- 验证：标准。`npm run verify` 全绿（新增 6 条断言，其中一条明令禁止 `this.aiMessagesEl.lastElementChild` 回归）；部署 0.31.50 热重载 + 哈希校验；在运行中的 Obsidian 里**用旧 bug 的等价路径做回归**——设置 `nodeId` + `aiQuickDone=false`、push 占位消息、调用真实 `applyAiOperations([], ctx)` 触发视图重建、再结算，结果 `ghost=-1`（无「处理中」残留）、`[1] message is-assistant=PROBE 结果文本`、`quickBtns=4`（快捷按钮完好）。
+- 环境备注：本次 `plugin:reload` 会把 JamDeck 视图一并卸载（`getLeavesOfType('jam-deck-view').length` 归零），需用工作区里的 `empty` leaf 重新 `setViewState({type:'jam-deck-view'})` 恢复；这一步顺带说明 AI 对话的运行时数组不跨重载保留（对话正文已由 `appendAiLog` 落在 vault 文件里）。
+- 「请求转发回 WorkBuddy」调研结论（**未实现，仅结论**）：WorkBuddy 桌面端不提供对外调用通道——无独立 CLI（`Programs\WorkBuddy` 下只有 `WorkBuddy.exe` 等 Electron 产物）、无本地 HTTP API（监听端口都是 Electron 的随机高位端口），其 MCP 是**出站**（client）而非入站服务。JamDeck 里预留的 `AI_LOCAL_WEB_URL = http://127.0.0.1:3080/` 也已失效（实测「无法连接到远程服务器」）。**但本机存在真正可用的 harness 入口**：`dsh`（DeepSeek 官方 harness，`~/.dsh`，v0.1.5-rc.2）的 `--profile headless` 就是「跑一个任务、推理流到 stderr、打印最终消息后退出」，实测 `dsh --profile headless "搜索一下今天有什么科技新闻，一句话总结"` **23 秒**返回带来源链接的真实新闻。JamDeck 已具备 spawn 子进程的能力（`child_process.spawn` 现用于 PowerShell 调用），技术上接得通，但属架构级改动，待 Jam 拍板。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 2026-09-12 — 0.31.49 搜索后端替换与工具死循环降级
 
 - Jam 反馈（附截图）：「我的AI助手怎么这么脆弱」——一句「进我刚开始的连接里面的作者 搜他的其他作品」直接回 `出错了：模型连续调用工具仍未给出结果，换个说法再试`（0.31.48 刚加的轮次上限文案）。

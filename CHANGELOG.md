@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.50 — 2026-09-12
+
+- **修复「处理中…」幽灵气泡**：回复已经显示出来了，上面那条 `DeepSeek 处理中…` 却永远不消失；同时结果文字被塞进「翻译为」快捷块里（Jam 附截图）。根因不在超时也不在网络：`applyAiOperations()` 结尾无条件 `renderAllViews()`，而 AI 面板就在视图内部——**重建那一刻**消息数组最后一条仍是「处理中…」，重建后结算代码用 `this.aiMessagesEl.lastElementChild` 去猜「最后一条消息气泡」，可列表末尾此时挂着 `.jam-deck-ai-quick` 快捷块，于是结果写进了快捷块，真正的气泡无人替换、永远留在界面上。
+- **结算改为以消息对象为锚点**：新增 `settleAiPendingMessage()`——先按 `indexOf` 定位占位消息、更新数组，再调用 `renderAiMessagesList()` 按数组全量重渲染。DOM 不再承担状态，位置猜测彻底移除（有断言禁止 `aiMessagesEl.lastElementChild` 回归）。
+- 顺带修掉同源的两处：从空对话发第一条消息时「今天想处理什么？」引导块不会让位；新消息会被快捷翻译块夹在中间（现在插到快捷块之前，保持它在列表末尾）。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 0.31.49 — 2026-09-12
 
 - **修复「搜索」整条链路已死**：搜索靠抓结果页 HTML，实际两个后端都早不可用——DuckDuckGo 对连续请求返回 202 反爬页，`cn.bing.com` 只返回 14.6KB 空壳（结果结构 0 条）。现改为 **360 搜索为主**（`www.so.com`，解析 `li.res-list`，优先读 `data-mdurl` 拿真实地址）、`www.bing.com` 兜底。同一条 query 实测：修复前「没有返回可用结果」，修复后 777ms 返回 3 条带真实 bilibili / douyin 地址的结果。

@@ -12935,21 +12935,30 @@ class JamDeckView extends ItemView {
   renderAiChatBody(chat) {
     const messages = chat.createDiv({ cls: "jam-deck-ai-messages" });
     this.aiMessagesEl = messages;
-    if (!this.aiMessages || !this.aiMessages.length) {
-      const empty = messages.createDiv({ cls: "jam-deck-ai-empty" });
-      empty.createDiv({ text: "今天想处理什么？", cls: "jam-deck-ai-empty-title" });
-      empty.createDiv({ text: "直接用自然语言新增、完成或删除待办，也可以指定日期和分类。", cls: "jam-deck-ai-empty-copy" });
-      empty.createDiv({ text: "例如：周一加一条「参考图集归档」，工作分类", cls: "jam-deck-ai-empty-example" });
-    } else {
-      for (const msg of this.aiMessages) this.renderAiMessage(messages, msg);
-    }
-    if (this.aiCanvasContext && this.aiCanvasContext.nodeId && !this.aiQuickDone) {
-      this.renderAiQuickOptions(messages);
-    }
+    this.renderAiMessagesList(messages);
 
     const dock = chat.createDiv({ cls: "jam-deck-ai-image-dock" });
     dock.hidden = true;
     this.aiImageDockEl = dock;
+  }
+
+  // 消息列表的唯一渲染入口：始终以 this.aiMessages 为唯一真源整体重建。
+  // 结算回复也复用这里，不再用 lastElementChild 猜「最后一条消息气泡」——
+  // 列表尾部还会挂 jam-deck-ai-quick 快捷块，猜位置会把结果写进错误的节点，
+  // 真正的「处理中…」气泡反而永远留在界面上。
+  renderAiMessagesList(list) {
+    list.empty();
+    if (!this.aiMessages || !this.aiMessages.length) {
+      const empty = list.createDiv({ cls: "jam-deck-ai-empty" });
+      empty.createDiv({ text: "今天想处理什么？", cls: "jam-deck-ai-empty-title" });
+      empty.createDiv({ text: "直接用自然语言新增、完成或删除待办，也可以指定日期和分类。", cls: "jam-deck-ai-empty-copy" });
+      empty.createDiv({ text: "例如：周一加一条「参考图集归档」，工作分类", cls: "jam-deck-ai-empty-example" });
+    } else {
+      for (const msg of this.aiMessages) this.renderAiMessage(list, msg);
+    }
+    if (this.aiCanvasContext && this.aiCanvasContext.nodeId && !this.aiQuickDone) {
+      this.renderAiQuickOptions(list);
+    }
   }
 
   renderAiChatInputRow(chat) {
@@ -13156,11 +13165,40 @@ class JamDeckView extends ItemView {
     }
   }
 
-  addAiMessage(role, content) {
+  pushAiMessage(message) {
     if (!this.aiMessages) this.aiMessages = [];
-    this.aiMessages.push({ role, content });
+    this.aiMessages.push(message);
     if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-      this.renderAiMessage(this.aiMessagesEl, { role, content });
+      // 空对话的引导块不会自己让位：第一条消息落进来时必须移除，
+      // 否则「今天想处理什么？」会一直顶在真实消息上方。
+      const hint = this.aiMessagesEl.querySelector(":scope > .jam-deck-ai-empty");
+      if (hint) hint.remove();
+      const bubble = this.renderAiMessage(this.aiMessagesEl, message);
+      // 快捷翻译块始终贴在列表末尾；新消息插在它之前，否则会被它夹在中间。
+      const quick = this.aiMessagesEl.querySelector(":scope > .jam-deck-ai-quick");
+      if (quick) this.aiMessagesEl.insertBefore(bubble, quick);
+      this.scrollAiMessages();
+      return bubble;
+    }
+    return null;
+  }
+
+  addAiMessage(role, content) {
+    return this.pushAiMessage({ role, content });
+  }
+
+  // 结算「处理中…」占位消息：先更新数组，再按数组全量重渲染列表。
+  // 不能只改 DOM：applyAiOperations() 结尾的 renderAllViews() 会整体重建视图，
+  // 重建那一刻读到的数组仍是「处理中…」，之前拿到的气泡引用也已经脱离文档。
+  // 消息对象本身是稳定锚点，位置不是。
+  settleAiPendingMessage(pendingMessage, content) {
+    if (this.aiMessages) {
+      const index = this.aiMessages.indexOf(pendingMessage);
+      if (index >= 0) this.aiMessages[index] = { role: "assistant", content };
+      else if (this.aiMessages.length) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content };
+    }
+    if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
+      this.renderAiMessagesList(this.aiMessagesEl);
       this.scrollAiMessages();
     }
   }
@@ -13218,10 +13256,13 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.textContent = "…";
     }
     const providerLabel = this.aiProviderLabel();
-    this.addAiMessage("assistant", `${providerLabel} 处理中…`);
+    // 占位气泡用消息对象本身作为锚点。列表尾部还可能挂着 jam-deck-ai-quick
+    // 快捷块，任何「取列表最后一个元素」的写法都可能摸到它而不是这条消息。
+    const pendingMessage = { role: "assistant", content: `${providerLabel} 处理中…` };
+    const pendingEl = this.pushAiMessage(pendingMessage);
     try {
       if (imageCtx) {
-        const bubble = this.aiChat && !this.aiChat.hidden ? this.aiMessagesEl.lastElementChild : null;
+        const bubble = pendingEl && pendingEl.isConnected ? pendingEl : null;
         let full = "";
         const translated = await this.plugin.streamChatWithImage(imageCtx.image.base64, imageCtx.image.mime, text, (chunk) => {
           full += chunk;
@@ -13232,11 +13273,7 @@ class JamDeckView extends ItemView {
           }
         });
         const content = (translated || "").trim() || "（没有返回内容）";
-        if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content };
-        if (bubble) {
-          bubble.empty();
-          bubble.createSpan({ text: content, cls: "jam-deck-ai-message-text" });
-        }
+        this.settleAiPendingMessage(pendingMessage, content);
         const glmConfig = this.plugin.getAiConfig();
         await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, glmConfig.label);
         await this.plugin.appendAiLog("assistant", content, glmConfig.label);
@@ -13245,29 +13282,15 @@ class JamDeckView extends ItemView {
       const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
       const stats = await this.plugin.applyAiOperations(result.operations, this.aiCanvasContext);
       const summary = this.buildAiSummary(result.reply, stats);
-      if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: summary };
       this.aiLastResult = stats;
-      if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-        const last = this.aiMessagesEl.lastElementChild;
-        if (last) {
-          last.empty();
-          last.createSpan({ text: summary, cls: "jam-deck-ai-message-text" });
-        }
-      }
+      this.settleAiPendingMessage(pendingMessage, summary);
       const dsConfig = this.plugin.getAiConfig();
       await this.plugin.appendAiLog("user", text, dsConfig.label);
       await this.plugin.appendAiLog("assistant", summary, dsConfig.label);
       return { ok: true, reply: summary };
     } catch (error) {
       const message = `出错了：${error.message || "未知错误"}`;
-      if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: message };
-      if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-        const last = this.aiMessagesEl.lastElementChild;
-        if (last) {
-          last.empty();
-          last.createSpan({ text: message, cls: "jam-deck-ai-message-text" });
-        }
-      }
+      this.settleAiPendingMessage(pendingMessage, message);
       return { ok: false, reason: "error", reply: message };
     } finally {
       this.aiBusy = false;

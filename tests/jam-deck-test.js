@@ -303,6 +303,14 @@ assert(pluginSource.includes("async runAiToolCall("), "tool execution must live 
 assert(!pluginSource.includes("payload.messages.push(firstMessage)"), "the raw provider message must not be replayed wholesale; it is rebuilt field by field");
 assert(pluginSource.includes("assistantMessage.reasoning_content = message.reasoning_content"), "DeepSeek thinking mode rejects the request with 400 unless reasoning_content is passed back");
 assert(pluginSource.includes("delete payload.tools"), "an exhausted search budget must drop the tools and force a final answer instead of erroring out");
+assert(pluginSource.includes("renderAiMessagesList(list)"), "the AI message list must render through one function so this.aiMessages stays the single source of truth");
+assert(pluginSource.includes("settleAiPendingMessage(pendingMessage"), "reply settlement must anchor on the pending message object, not on a DOM position");
+assert(!pluginSource.includes("this.aiMessagesEl.lastElementChild"), "settlement must never guess the last bubble by DOM position: the list tail can hold the quick-translate block, which is how the busy bubble used to survive as a ghost");
+assert(pluginSource.includes("const pendingEl = this.pushAiMessage(pendingMessage)"), "the placeholder element must be captured when it is pushed so the image stream can still update in place");
+assert(pluginSource.includes("this.renderAiMessagesList(this.aiMessagesEl)"), "settlement must rebuild the list from the model instead of patching a single node");
+assert(pluginSource.includes('querySelector(":scope > .jam-deck-ai-empty")'), "the empty-state hint must step aside as soon as the first real message arrives");
+assert(pluginSource.includes("this.aiMessagesEl.insertBefore(bubble, quick)"), "new bubbles must land before the quick-translate block so the list tail stays stable");
+assert(pluginSource.includes("async applyAiOperations(") && pluginSource.includes("this.renderAllViews();"), "applyAiOperations must keep rebuilding every view: that is exactly why settlement cannot rely on DOM references captured before it");
 assert(pluginSource.includes("return { reply: content.slice(0, 600), operations: [] }"), "a forced non-JSON answer must still reach the user as reply text");
 assert(pluginSource.includes("https://www.bing.com/search?q="), "the search backend must use www.bing.com, not the 14KB cn.bing.com shell");
 assert(pluginSource.includes("https://www.so.com/s?q="), "360 search must back up Bing when the first engine yields nothing");
