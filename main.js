@@ -46,6 +46,12 @@ const AI_LOCAL_WEB_URL = "http://127.0.0.1:3080/";
 // 实测（2026-09-12）：deepseek-v4-pro 收到图片时回「[Unsupported Image]」并声称看不到图；
 // deepseek-v4.1-flash / deepseek-v4-flash 等名字不在支持列表（仅 deepseek-flash / deepseek-v4-pro），传错名会 HTTP 400。
 const JAM_DECK_DEEPSEEK_MODEL = "deepseek-flash";
+// 本机 DeepSeek Harness（dsh）通道：带搜索/联网意图的提问交给它跑，回答直接显示。
+// 调用方式是 node 直调 dsh 的 bin.js（参数走数组、完全不经过 shell）——实测中文与 & | 等字符
+// 原样传递。刻意不用 `cmd.exe /c dsh.cmd` 包装：那条路要靠 Node 自动加引号才没炸，不能依赖。
+const JAM_DECK_HARNESS_PROFILE = "headless";
+const JAM_DECK_HARNESS_TIMEOUT_MS = 120000;
+const JAM_DECK_HARNESS_PATTERN = /(搜索|搜一下|搜一搜|搜搜|帮我搜|查一下|查一查|查查|帮我查|联网|上网查|最新消息|最新动态|实时|新闻|股价|行情|天气|快递|谁是|什么时候)/i;
 const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
@@ -884,6 +890,8 @@ const DEFAULT_SETTINGS = {
   glmApiKey: "",
   glmModel: "glm-5.3-flash",
   aiProvider: "deepseek",
+  // 搜索/联网类提问交给本机 DeepSeek Harness（dsh）执行；关闭后全部走上方模型。
+  harnessSearch: true,
   aiLocalWorkspacePath: "",
   canvasExportDir: "",
   aiFabPos: null,
@@ -13256,9 +13264,13 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.textContent = "…";
     }
     const providerLabel = this.aiProviderLabel();
+    const useHarness = !imageCtx && this.plugin.shouldUseHarness(text);
     // 占位气泡用消息对象本身作为锚点。列表尾部还可能挂着 jam-deck-ai-quick
     // 快捷块，任何「取列表最后一个元素」的写法都可能摸到它而不是这条消息。
-    const pendingMessage = { role: "assistant", content: `${providerLabel} 处理中…` };
+    const pendingMessage = {
+      role: "assistant",
+      content: useHarness ? "DeepSeek Harness 处理中…（本机 dsh，通常 20–30 秒）" : `${providerLabel} 处理中…`,
+    };
     const pendingEl = this.pushAiMessage(pendingMessage);
     try {
       if (imageCtx) {
@@ -13278,6 +13290,15 @@ class JamDeckView extends ItemView {
         await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, glmConfig.label);
         await this.plugin.appendAiLog("assistant", content, glmConfig.label);
         return { ok: true, reply: content };
+      }
+      if (useHarness) {
+        // Harness 只回自然语言，没有待办操作可解析——不用假装执行了什么。
+        const harnessReply = (await this.plugin.askHarness(text)).trim() || "（DeepSeek Harness 没有返回内容）";
+        this.aiLastResult = { added: 0, completed: 0, removed: 0, skipped: 0 };
+        this.settleAiPendingMessage(pendingMessage, harnessReply);
+        await this.plugin.appendAiLog("user", text, "DeepSeek Harness");
+        await this.plugin.appendAiLog("assistant", harnessReply, "DeepSeek Harness");
+        return { ok: true, reply: harnessReply };
       }
       const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
       const stats = await this.plugin.applyAiOperations(result.operations, this.aiCanvasContext);
@@ -15368,6 +15389,73 @@ class JamDeckPlugin extends Plugin {
       model: JAM_DECK_DEEPSEEK_MODEL,
       label: "DeepSeek",
     };
+  }
+
+  // —— 本机 DeepSeek Harness（dsh）—— 搜索类提问交给它，回答直接显示，不解析成待办操作。
+  harnessNodePath() {
+    const fs = require("fs");
+    const candidates = [
+      nodePath.join(process.env.ProgramFiles || "C:\\Program Files", "nodejs", "node.exe"),
+      nodePath.join(process.env.LOCALAPPDATA || "", "Programs", "nodejs", "node.exe"),
+    ];
+    for (const candidate of candidates) {
+      try { if (fs.existsSync(candidate)) return candidate; } catch (error) {}
+    }
+    // 退回 PATH：npm 的 dsh.cmd 本身也是这么找 node 的。
+    return "node";
+  }
+
+  harnessScriptPath() {
+    const fs = require("fs");
+    const script = nodePath.join(process.env.APPDATA || "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+    try { return fs.existsSync(script) ? script : null; } catch (error) { return null; }
+  }
+
+  harnessAvailable() {
+    return !!this.harnessScriptPath();
+  }
+
+  shouldUseHarness(text) {
+    if (this.settings.harnessSearch === false) return false;
+    if (!this.harnessAvailable()) return false;
+    return JAM_DECK_HARNESS_PATTERN.test(String(text || ""));
+  }
+
+  askHarness(task, options = {}) {
+    const script = this.harnessScriptPath();
+    if (!script) return Promise.reject(new Error("本机未找到 dsh（DeepSeek Harness）"));
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : JAM_DECK_HARNESS_TIMEOUT_MS;
+    return new Promise((resolve, reject) => {
+      let child = null;
+      try {
+        child = spawn(this.harnessNodePath(), [script, "--profile", JAM_DECK_HARNESS_PROFILE, String(task)], { windowsHide: true });
+      } catch (error) {
+        reject(new Error(`无法启动 DeepSeek Harness：${error.message}`));
+        return;
+      }
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      let timer = null;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        fn(value);
+      };
+      timer = setTimeout(() => {
+        try { child.kill(); } catch (error) {}
+        settle(reject, new Error(`DeepSeek Harness 超过 ${Math.round(timeoutMs / 1000)} 秒未返回，已中止`));
+      }, timeoutMs);
+      child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+      child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+      child.on("error", (error) => settle(reject, new Error(`无法启动 DeepSeek Harness：${error.message}`)));
+      child.on("close", (code) => {
+        const text = stdout.trim();
+        if (code === 0 && text) settle(resolve, text);
+        else settle(reject, new Error(text.slice(0, 200) || stderr.trim().slice(-200) || `DeepSeek Harness 退出码 ${code}`));
+      });
+    });
   }
 
   async chatCompletion(payload) {
@@ -19494,6 +19582,17 @@ class JamDeckSettingTab extends PluginSettingTab {
           this.plugin.settings.aiProvider = value;
           await this.plugin.saveSettings();
           new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "glm" ? "GLM" : "DeepSeek"}`);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("搜索类提问交给本机 Harness")
+      .setDesc("开启后，含搜索 / 联网意图的提问（搜索、查一下、最新、新闻、股价…）交给本机 dsh（DeepSeek 官方 harness）执行，通常 20–30 秒；其余提问仍走上方模型。需本机已安装 dsh。")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.harnessSearch !== false);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.harnessSearch = value;
+          await this.plugin.saveSettings();
         });
       });
 

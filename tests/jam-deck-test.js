@@ -310,6 +310,15 @@ assert(pluginSource.includes("const pendingEl = this.pushAiMessage(pendingMessag
 assert(pluginSource.includes("this.renderAiMessagesList(this.aiMessagesEl)"), "settlement must rebuild the list from the model instead of patching a single node");
 assert(pluginSource.includes('querySelector(":scope > .jam-deck-ai-empty")'), "the empty-state hint must step aside as soon as the first real message arrives");
 assert(pluginSource.includes("this.aiMessagesEl.insertBefore(bubble, quick)"), "new bubbles must land before the quick-translate block so the list tail stays stable");
+assert(pluginSource.includes('const JAM_DECK_HARNESS_PROFILE = "headless"'), "the local harness must run the headless profile: the only single-task entry dsh exposes");
+assert(pluginSource.includes("const JAM_DECK_HARNESS_TIMEOUT_MS = 120000"), "the harness call must carry its own timeout so a hung dsh cannot wedge the chat");
+assert(pluginSource.includes("harnessSearch: true"), "routing search intent to the harness must be a real setting, on by default");
+assert(pluginSource.includes("shouldUseHarness(text)"), "search-intent routing must live in one predicate");
+assert(pluginSource.includes('"@deepseek-ai", "dsh", "lib", "bin.js"'), "the harness must be launched by running dsh's bin.js under node");
+assert(pluginSource.includes('spawn(this.harnessNodePath(), [script, "--profile", JAM_DECK_HARNESS_PROFILE, String(task)]'), "the task must travel as an argv element: measured that & and | reach dsh verbatim this way");
+assert(!pluginSource.includes("shell: true"), "the harness call must never enable a shell — that direct node path is the entire reason there is no injection surface");
+assert(pluginSource.includes("DeepSeek Harness 处理中"), "the pending bubble must name the harness so a 25-second wait is not mistaken for a hang");
+assert(pluginSource.includes("没有返回内容"), "an empty harness reply must degrade to visible text instead of an empty bubble");
 assert(pluginSource.includes("async applyAiOperations(") && pluginSource.includes("this.renderAllViews();"), "applyAiOperations must keep rebuilding every view: that is exactly why settlement cannot rely on DOM references captured before it");
 assert(pluginSource.includes("return { reply: content.slice(0, 600), operations: [] }"), "a forced non-JSON answer must still reach the user as reply text");
 assert(pluginSource.includes("https://www.bing.com/search?q="), "the search backend must use www.bing.com, not the 14KB cn.bing.com shell");

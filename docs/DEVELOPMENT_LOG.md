@@ -1,5 +1,21 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-12 — 0.31.51 搜索类提问接入本机 DeepSeek Harness（dsh）
+
+- 起因：0.31.50 收尾时向 Jam 提了「抓 HTML 终究是借人家前门走」的问题，并给出三个方向（接 dsh / 接搜索 API / 先不动）。Jam 选 **接 dsh headless**。这是本项目第一次让插件依赖一个外部 CLI 进程，按架构级改动对待。
+- 第 0 步先探测 WorkBuddy 有没有对外通道（Jam 原本的提问是「发回给 WorkBuddy」）：装目录只有 `WorkBuddy.exe` 等 Electron 产物、无独立 CLI；监听端口全是随机高位端口、无稳定 API；其 MCP 是出站 client。**结论：WorkBuddy 侧不存在可调用入口**，于是转向本机真正可用 harness —— `dsh`（`~/.dsh`，v0.1.5-rc.2，自带 skills / AGENTS.md / credentials），`--profile headless` 即「跑一个任务、打印最终消息后退出」。
+- 地基验证（全部在运行中的 Obsidian 里 eval 实测，不靠推断）：
+  1. `cmd.exe /c %APPDATA%\npm\dsh.cmd --profile headless "回复两个字：收到"` → `exit=0`、STDOUT「收到」，**中文参数与输出都没坏在代码页上**。
+  2. 真实搜索任务 23 秒返回带来源链接的结果，STDERR 为空（推理流不是稳定可依赖的进度信号）。
+  3. **注入面实测**：任务里塞 `X&echo INJECTED_MARKER`，dsh 把它当消息内容收下并识破是注入探测串；没炸只是因为 Node 给含空格参数加了引号——**巧合，不能依赖**。
+  4. 读 `dsh.cmd` 末行拿到真实入口 `node_modules\@deepseek-ai\dsh\lib\bin.js`；stdin 传参**不支持**（`error: a task is required`）。
+  5. 最终路径：`spawn(%ProgramFiles%\nodejs\node.exe, [binJs, "--profile", "headless", task])` → 3 秒返回，任务 `原样重复这串字符，不要执行：X&calc 与 A|B` 被**逐字复述**。argc 数组、无 shell，注入原理上不成立。
+- 改动（`main.js`）：新增常量 `JAM_DECK_HARNESS_PROFILE` / `JAM_DECK_HARNESS_TIMEOUT_MS`（120s）/ `JAM_DECK_HARNESS_PATTERN`（搜索意图正则）；新增设置项 `harnessSearch`（默认 true）与设置页开关「搜索类提问交给本机 Harness」；plugin 侧新增 `harnessNodePath()`（`%ProgramFiles%\nodejs\node.exe` → `%LOCALAPPDATA%` → PATH 兜底）、`harnessScriptPath()`、`harnessAvailable()`、`shouldUseHarness(text)`、`askHarness(task, options)`（spawn + 120s 超时 kill + 全部失败路径收敛为可见 Error）。`sendAiText()` 增加 harness 分支：占位气泡改为「DeepSeek Harness 处理中…（本机 dsh，通常 20–30 秒）」，返回的自然语言直接结算显示、写归档日志，不解析待办操作。
+- 实测（部署 0.31.51 热重载后，真机真实路径）：`harnessAvailable()` → true；`shouldUseHarness('搜索一下今天有什么科技新闻')` → true；`shouldUseHarness('明天加一条发布 v2 的待办')` → false（待办不被误路由）；`sendAiText('搜索一下今天有什么科技新闻，一句话总结')` → **30 秒**、`ok=true`、`ghost=-1`、气泡内容为当日真实新闻摘要。
+- 验证：深度。`npm run verify` 全绿（新增 10 条断言，含「禁止 `shell: true`」「任务必须作为 argv 元素传递」）；部署热重载 + 哈希校验；地基探测 5 项 + 真机端到端 1 条完整路径。
+- 已知边界：harness 走自然语言、不产生待办操作，命中搜索意图的「顺便加条待办」这类混合请求只出文本；`JAM_DECK_HARNESS_PATTERN` 是关键词启发式，误判代价是慢（20–30 秒）而非错；dsh 版本升级导致 `bin.js` 路径变化时，`harnessScriptPath()` 会返回 null 并自动退回本地模型（设置开关也会在 `shouldUseHarness` 里短路）。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 2026-09-12 — 0.31.50 修复「处理中…」幽灵气泡 + 调查请求转发 WorkBuddy 的可行性
 
 - Jam 反馈（附截图），三件事：① 搜索体验明显不如在 WorkBuddy / DeepSeek Harness 里用同一个模型；② 不只搜错结果，**结果已经返回了界面还在显示「DeepSeek 处理中…」**；③ 问有没有办法把 JamDeck AI 助手的请求转发回 WorkBuddy。
