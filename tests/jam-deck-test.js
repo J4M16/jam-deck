@@ -294,6 +294,13 @@ assert(pluginSource.includes("clearAiChat()"), "the AI chat must own a clear act
 assert(pluginSource.includes("已清空对话窗口（已归档记录不受影响）"), "clearing the chat window must not touch archived records");
 assert(pluginSource.includes("api.deepseek.com/chat/completions"), "archive summarization must always use the DeepSeek endpoint regardless of the active provider");
 assert(pluginSource.includes("jam-deck-ai-chat-actions"), "archive/clear/close must group together at the header's right end beside the close button");
+assert(pluginSource.includes("const AI_TOOL_MAX_ROUNDS = 3"), "tool calling must cap its round trips so a looping model cannot run forever");
+assert(pluginSource.includes("insufficient tool messages following tool_calls message"), "the parallel tool_call fix must record the provider error it prevents");
+assert(!pluginSource.includes("firstMessage.tool_calls[0]"), "answering only the first tool_call must be gone: every parallel call needs its own tool message");
+assert(pluginSource.includes("call && call.id"), "tool_calls without an id must be dropped before the assistant message is replayed");
+assert(pluginSource.includes("await this.runAiToolCall(call, userText)"), "every parallel tool_call must execute through one shared runner");
+assert(pluginSource.includes("async runAiToolCall("), "tool execution must live in a shared runner that always returns a string");
+assert(!pluginSource.includes("payload.messages.push(firstMessage)"), "raw provider messages must not be replayed; only role/content/tool_calls are forwarded");
 assert(pluginSource.includes('const threshold = press.pointerType === "touch" ? 10 : 6'), "expanded stack cards must separate click from drag with pointer-specific thresholds");
 assert(pluginSource.includes("this.canvas.posFromEvt(event)"), "expanded stack drag-out must convert pointer endpoints through native Canvas world coordinates");
 assert(pluginSource.includes("this.commitPreviewDrag(press, next)"), "expanded stack cards must commit a real Canvas drag-out after the threshold");

@@ -49,6 +49,8 @@ const JAM_DECK_DEEPSEEK_MODEL = "deepseek-flash";
 const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
+// 一次对话里最多几轮工具往返；模型可能并行发起多个 tool_call，每轮要全部回填。
+const AI_TOOL_MAX_ROUNDS = 3;
 const ISLAND_WIDTH = 1600;
 // Outer transparent window: content capsule + room for soft drop-shadow (not clipped).
 const ISLAND_SHADOW_PAD_X = 36;
@@ -15249,27 +15251,38 @@ class JamDeckPlugin extends Plugin {
       ],
       tool_choice: "auto",
     };
-    let response = await this.chatCompletion(payload);
-    const firstMessage = response && response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message;
-    if (firstMessage && Array.isArray(firstMessage.tool_calls) && firstMessage.tool_calls.length) {
-      const call = firstMessage.tool_calls[0];
-      payload.messages.push(firstMessage);
-      let toolResult = "搜索失败：无可用搜索结果";
-      if (call.function && call.function.name === "web_search") {
-        try {
-          const args = typeof call.function.arguments === "string" ? JSON.parse(call.function.arguments) : {};
-          toolResult = await this.webSearch(String(args.query || userText || "").slice(0, 100));
-        } catch (error) {
-          toolResult = `搜索失败：${error.message || "未知错误"}`;
-        }
+    let content = "";
+    let toolRoundsUsed = 0;
+    for (let round = 0; round <= AI_TOOL_MAX_ROUNDS; round += 1) {
+      const response = await this.chatCompletion(payload);
+      const message = response && response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message;
+      if (!message) break;
+      // 模型可能并行发起多个 tool_call；只回其中一条，服务端就会以
+      // "insufficient tool messages following tool_calls message" 拒绝整轮请求。
+      const calls = (Array.isArray(message.tool_calls) ? message.tool_calls : []).filter((call) => call && call.id);
+      if (!calls.length) {
+        content = String(message.content || "").trim();
+        break;
       }
-      payload.messages.push({ role: "tool", tool_call_id: call.id, content: toolResult });
-      response = await this.chatCompletion(payload);
+      if (round === AI_TOOL_MAX_ROUNDS) break;
+      toolRoundsUsed += 1;
+      // 只回填必要字段：provider 私有字段（如 reasoning_content）不跨供应商转发。
+      payload.messages.push({
+        role: "assistant",
+        content: typeof message.content === "string" ? message.content : "",
+        tool_calls: calls.map((call) => ({
+          id: call.id,
+          type: call.type || "function",
+          function: { name: call.function && call.function.name, arguments: call.function && call.function.arguments },
+        })),
+      });
+      for (const call of calls) {
+        payload.messages.push({ role: "tool", tool_call_id: call.id, content: await this.runAiToolCall(call, userText) });
+      }
     }
-    const content = response && response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message
-      ? response.json.choices[0].message.content
-      : "";
-    if (!content) throw new Error("模型没有返回内容");
+    if (!content) {
+      throw new Error(toolRoundsUsed >= AI_TOOL_MAX_ROUNDS ? "模型连续调用工具仍未给出结果，换个说法再试" : "模型没有返回内容");
+    }
     let parsed;
     try {
       parsed = JSON.parse(content);
@@ -15282,6 +15295,25 @@ class JamDeckPlugin extends Plugin {
       reply: String(parsed && parsed.reply || "").trim(),
       operations: Array.isArray(parsed && parsed.operations) ? parsed.operations : [],
     };
+  }
+
+  // 执行单个 tool_call，返回给模型的 tool 消息内容（必须始终是字符串）。
+  async runAiToolCall(call, fallbackQuery) {
+    const name = call && call.function && call.function.name;
+    if (name !== "web_search") return `未实现的工具：${name || "未命名"}，本轮没有可用结果。`;
+    let query = String(fallbackQuery || "").trim();
+    try {
+      const args = typeof call.function.arguments === "string" ? JSON.parse(call.function.arguments) : call.function.arguments;
+      if (args && args.query) query = String(args.query).trim();
+    } catch (error) {
+      // 参数不是合法 JSON 时退回用户原话，搜索还能继续。
+    }
+    if (!query) return "搜索失败：没有可用的搜索关键词。";
+    try {
+      return await this.webSearch(query.slice(0, 100));
+    } catch (error) {
+      return `搜索失败：${error.message || "未知错误"}`;
+    }
   }
 
   getAiConfig() {

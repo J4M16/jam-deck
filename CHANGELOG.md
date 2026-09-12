@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.48 — 2026-09-12
+
+- **修复 AI 助手搜索必现报错**：模型一次返回多个并行 `tool_call` 时只回填了第一条 tool 响应，API 以 `An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)` 拒绝整轮请求。现在按 id 逐个执行并回填全部 `tool_call`，工具执行收敛到 `runAiToolCall()`，并支持多轮工具往返（上限 `AI_TOOL_MAX_ROUNDS = 3`）——模型拿到搜索结果后还能再补一轮搜索。
+- **回填的 assistant 消息只保留 `role` / `content` / `tool_calls`**：不再整条回填服务端 message，DeepSeek 的 `reasoning_content` 不会被转发给 GLM。无 id 的 `tool_call` 直接过滤，未知工具名返回明确文本而不是空结果。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 0.31.47 — 2026-09-12
 
 - **DeepSeek 也能看图了**：DeepSeek API 已开放图片输入，`streamChatWithImage()` 的图片块（OpenAI 兼容 `image_url` + data URL）现在两个供应商共用，系统提示按当前供应商动态生成。删除三处 GLM 独占逻辑——`sendAiText()` 的「看图需要 GLM」拦截、载入图片时强制把 provider 切到 GLM、切到 DeepSeek 即丢弃图片上下文；图片上下文现在跨供应商保留。

@@ -1,5 +1,16 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-12 — 0.31.48 修复 AI 助手并行工具调用报错
+
+- Jam 报错：在 AI 助手里说「搜索」直接回 `出错了：An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)`。
+- 实测定位（先复现再改）：用账号 key 直接打 `chat/completions`，带 `web_search` 工具 + 「帮我搜索一下今天有什么新闻」——第一轮 `finish_reason=tool_calls`，且**一次返回 2 个并行 tool_call**（两个不同 query）；模拟旧逻辑只回第一条 tool 响应，第二轮请求原样复现 400 与该错误文本；把 2 条 tool 响应按 id 全部回填后，第二轮 `finish_reason=stop`、正文正常返回。根因确认：旧代码 `firstMessage.tool_calls[0]` 只处理首个调用。
+- 改动：`askDeckAi()` 的工具分支改为循环——每轮取回 `choices[0].message`，过滤出带 id 的 `tool_calls`（为空则取 `content` 结束），按 id 逐个执行并回填 tool 消息后再次请求；轮次上限 `AI_TOOL_MAX_ROUNDS = 3`（常量放在 AI_LOCAL_RPC 常量组之后）。工具执行抽成 `runAiToolCall(call, fallbackQuery)`：非 `web_search` 返回明确文本，`arguments` 解析失败退回用户原话，`webSearch` 抛错降级为「搜索失败：…」文本——保证每条 tool 消息都有字符串内容。
+- 回填的 assistant 消息只保留 `role` / `content` / `tool_calls` 三个字段：不再原样 push 服务端返回的 message，避免 DeepSeek 的 `reasoning_content` 被转发给 GLM。
+- 测试：新增 8 条断言——轮次上限常量存在、错误文本留痕、`tool_calls[0]` 旧写法已消失、无 id 的调用被过滤、共用 runner、assistant 消息不再整条回填。
+- 验证：标准。差异审查 + `npm run verify` 全绿 + 部署热重载与哈希校验；另在运行中的 Obsidian 里 eval 实测 `askDeckAi('搜索一下今天有什么科技新闻')` → 3678ms 返回真实新闻摘要（英伟达 / 智谱 / 甲骨文等），`operations` 为空，无 400。
+- 环境备注：本机沙箱下 `deploy.ps1` 仍需进程级 `Bypass`；脚本 finally 清 staging 时报 safe-delete `trash-failed` 并抛错，但随后检查 `plugins` 目录无 `.jam-deck-staging-*` 残留，部署本身哈希校验通过（上一版日志「残留目录用 .NET 清理」与事实不符，此处更正）。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 2026-09-12 — 0.31.47 DeepSeek 接入图片输入
 
 - Jam：DeepSeek 的 API 现在支持图片了，把模型固定到「deepseek v4.1 flash」，让 DeepSeek 跟 GLM 一样能看图。
