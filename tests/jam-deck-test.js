@@ -300,7 +300,16 @@ assert(!pluginSource.includes("firstMessage.tool_calls[0]"), "answering only the
 assert(pluginSource.includes("call && call.id"), "tool_calls without an id must be dropped before the assistant message is replayed");
 assert(pluginSource.includes("await this.runAiToolCall(call, userText)"), "every parallel tool_call must execute through one shared runner");
 assert(pluginSource.includes("async runAiToolCall("), "tool execution must live in a shared runner that always returns a string");
-assert(!pluginSource.includes("payload.messages.push(firstMessage)"), "raw provider messages must not be replayed; only role/content/tool_calls are forwarded");
+assert(!pluginSource.includes("payload.messages.push(firstMessage)"), "the raw provider message must not be replayed wholesale; it is rebuilt field by field");
+assert(pluginSource.includes("assistantMessage.reasoning_content = message.reasoning_content"), "DeepSeek thinking mode rejects the request with 400 unless reasoning_content is passed back");
+assert(pluginSource.includes("delete payload.tools"), "an exhausted search budget must drop the tools and force a final answer instead of erroring out");
+assert(pluginSource.includes("return { reply: content.slice(0, 600), operations: [] }"), "a forced non-JSON answer must still reach the user as reply text");
+assert(pluginSource.includes("https://www.bing.com/search?q="), "the search backend must use www.bing.com, not the 14KB cn.bing.com shell");
+assert(pluginSource.includes("https://www.so.com/s?q="), "360 search must back up Bing when the first engine yields nothing");
+assert(pluginSource.indexOf("so.com/s?q=") < pluginSource.indexOf("www.bing.com/search?q="), "360 must be tried before Bing, which returns unrelated suggestions without cookies");
+assert(!pluginSource.includes("cn.bing.com/search?q=") && !pluginSource.includes("html.duckduckgo.com"), "the dead cn.bing.com and DuckDuckGo endpoints must leave no dead code");
+assert(pluginSource.includes('engine === "so360"') && pluginSource.includes("data-mdurl"), "the 360 parser must read res-list blocks and their real target URLs");
+assert(pluginSource.includes("不要再尝试搜索"), "a failed search must tell the model to stop retrying instead of burning the whole tool budget");
 assert(pluginSource.includes('const threshold = press.pointerType === "touch" ? 10 : 6'), "expanded stack cards must separate click from drag with pointer-specific thresholds");
 assert(pluginSource.includes("this.canvas.posFromEvt(event)"), "expanded stack drag-out must convert pointer endpoints through native Canvas world coordinates");
 assert(pluginSource.includes("this.commitPreviewDrag(press, next)"), "expanded stack cards must commit a real Canvas drag-out after the threshold");

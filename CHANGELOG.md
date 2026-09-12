@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.49 — 2026-09-12
+
+- **修复「搜索」整条链路已死**：搜索靠抓结果页 HTML，实际两个后端都早不可用——DuckDuckGo 对连续请求返回 202 反爬页，`cn.bing.com` 只返回 14.6KB 空壳（结果结构 0 条）。现改为 **360 搜索为主**（`www.so.com`，解析 `li.res-list`，优先读 `data-mdurl` 拿真实地址）、`www.bing.com` 兜底。同一条 query 实测：修复前「没有返回可用结果」，修复后 777ms 返回 3 条带真实 bilibili / douyin 地址的结果。
+- **搜索失败不再变成报错**：失败文案明确告知模型「不要再尝试搜索」——它原先会一路换关键词死磕；工具预算（3 轮）用尽后**撤掉 tools 再请求一次**，逼模型拿已有结果收尾。此前这里直接抛「模型连续调用工具仍未给出结果」，等于把失败甩给用户。
+- **修复 0.31.48 引入的回归**：回填 assistant 消息必须带上 `reasoning_content`，否则 DeepSeek 思考模式以 `The reasoning_content in the thinking mode must be passed back to the API.` 拒绝整轮请求。上一版为「避免跨供应商转发私有字段」把它剥掉，前提就是错的——一次调用内 provider 不会变。
+- 被强制收尾时模型若直接给自然语言，按正文显示，不再抛「模型返回无法解析」。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 0.31.48 — 2026-09-12
 
 - **修复 AI 助手搜索必现报错**：模型一次返回多个并行 `tool_call` 时只回填了第一条 tool 响应，API 以 `An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)` 拒绝整轮请求。现在按 id 逐个执行并回填全部 `tool_call`，工具执行收敛到 `runAiToolCall()`，并支持多轮工具往返（上限 `AI_TOOL_MAX_ROUNDS = 3`）——模型拿到搜索结果后还能再补一轮搜索。

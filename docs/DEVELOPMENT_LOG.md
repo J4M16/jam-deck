@@ -1,5 +1,18 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-12 — 0.31.49 搜索后端替换与工具死循环降级
+
+- Jam 反馈（附截图）：「我的AI助手怎么这么脆弱」——一句「进我刚开始的连接里面的作者 搜他的其他作品」直接回 `出错了：模型连续调用工具仍未给出结果，换个说法再试`（0.31.48 刚加的轮次上限文案）。
+- 诊断一（Obsidian 内模拟完整工具循环，打印每轮 query 与 tool 结果）：R0/R1 搜索正常（1.2k–1.5k 字符），**R2 起全部返回「没有返回可用结果」**，模型仍一路换关键词死磕到预算耗尽。两个独立问题：搜索通道崩了 + 模型不会止损。
+- 诊断二（直连后端看 HTTP 与解析命中）：`html.duckduckgo.com` 返 **202**（反爬页，被 `status !== 200` 直接跳过）；`cn.bing.com` 返 200 但只有 **14.6KB、`b_algo` 命中 0**，是空壳。候选实测：`www.so.com`（355KB，`res-list` 命中 11）、`www.sogou.com`（420KB，但结果 class 已改、抓不到 `vr-title`）、`www.bing.com`（120KB）；Mojeek SSL 协议失败、`lite.duckduckgo.com` 同样 202。
+- 诊断三（发现 0.31.48 的回归）：手工构造「含 tool_calls 的 assistant + tool 消息」请求 DeepSeek，**不带 `reasoning_content` 一律 400**：`The reasoning_content in the thinking mode must be passed back to the API.`；补上后同一载荷 200（三种形态各测一次）。0.31.48 那条「provider 私有字段不跨供应商转发」的注释前提就是错的——一次 `askDeckAi` 调用内 provider 固定，不存在跨供应商转发。
+- 诊断四（收尾方式）：预算用尽后**撤掉 tools** 与 **`tool_choice: "none"`** 都能逼模型出正文（均 200、`finish=stop`）。选撤 tools——模型看不到工具就不会再想调用。
+- 改动：`webSearch()` 后端换为 360（主）+ `www.bing.com`（兜底），删除 DuckDuckGo 与 cn.bing.com 两条死路径；`parseSearchHtml()` 新增 360 分支（`li.res-list` 分块、`class="res-title"` 取标题、优先 `data-mdurl` 真实地址、`res-desc` 取摘要，摘要为空则省略该行）。搜索全失败时的文案加上「不要再尝试搜索，直接基于已有信息回答」。`askDeckAi()` 回填 assistant 时带上 `reasoning_content`；预算用尽后 `delete payload.tools` / `payload.tool_choice` 再请求一次收尾；JSON 解析不出对象时把正文当 reply 显示。
+- 实测（Obsidian eval，真实路径）：`webSearch('GZHhaha 科幻短片')` 777ms 返回 3 条带真实 bilibili / douyin / ixigua 地址的结果（来源字段是 `data-mdurl` 解出的真地址，不再是跳转链接）；复现 Jam 的场景 `askDeckAi('搜索 B站 UP主 GZHhaha 的其他作品')` → 6370ms 返回「多为《DEEP:深海》正片、预告及制作流程拆解，未见其他作品清单，建议直接查看其B站投稿页」，不再报错、不再死循环。
+- 已知边界：`www.bing.com` 无 cookie 时会返回无关的推荐结果（实测出现「File Explorer in Windows」「Yahoo! JAPAN」「Space.com」等），因此只作兜底——它排在 360 之后是刻意的，有测试断言锁住顺序。
+- 验证：标准。`npm run verify` 全绿（新增 9 条断言覆盖后端顺序、reasoning_content 回填、撤工具收尾、正文降级）；部署热重载 + 哈希校验 + 上述真机实测。
+- 处理模型签名：DeepSeek-V4.1-Flash（执行）
+
 ## 2026-09-12 — 0.31.48 修复 AI 助手并行工具调用报错
 
 - Jam 报错：在 AI 助手里说「搜索」直接回 `出错了：An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)`。

@@ -15264,10 +15264,8 @@ class JamDeckPlugin extends Plugin {
         content = String(message.content || "").trim();
         break;
       }
-      if (round === AI_TOOL_MAX_ROUNDS) break;
       toolRoundsUsed += 1;
-      // 只回填必要字段：provider 私有字段（如 reasoning_content）不跨供应商转发。
-      payload.messages.push({
+      const assistantMessage = {
         role: "assistant",
         content: typeof message.content === "string" ? message.content : "",
         tool_calls: calls.map((call) => ({
@@ -15275,25 +15273,41 @@ class JamDeckPlugin extends Plugin {
           type: call.type || "function",
           function: { name: call.function && call.function.name, arguments: call.function && call.function.arguments },
         })),
-      });
+      };
+      // DeepSeek 思考模式要求 reasoning_content 原样回传，漏掉直接 400。
+      if (typeof message.reasoning_content === "string") assistantMessage.reasoning_content = message.reasoning_content;
+      payload.messages.push(assistantMessage);
       for (const call of calls) {
         payload.messages.push({ role: "tool", tool_call_id: call.id, content: await this.runAiToolCall(call, userText) });
       }
+      if (toolRoundsUsed >= AI_TOOL_MAX_ROUNDS) {
+        // 搜索预算用尽：撤掉工具再问一次，让模型拿已有结果收尾。模型会不停换
+        // 关键词重搜，这时候直接报错等于把失败甩给用户。
+        delete payload.tools;
+        delete payload.tool_choice;
+      }
     }
-    if (!content) {
-      throw new Error(toolRoundsUsed >= AI_TOOL_MAX_ROUNDS ? "模型连续调用工具仍未给出结果，换个说法再试" : "模型没有返回内容");
-    }
-    let parsed;
+    if (!content) throw new Error("模型没有返回内容");
+    let parsed = null;
     try {
       parsed = JSON.parse(content);
     } catch (error) {
       const match = String(content).match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("模型返回无法解析");
-      parsed = JSON.parse(match[0]);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch (inner) {
+          parsed = null;
+        }
+      }
+    }
+    if (!parsed || typeof parsed !== "object") {
+      // 被强制收尾时模型常直接给自然语言，照原样显示胜过抛「无法解析」。
+      return { reply: content.slice(0, 600), operations: [] };
     }
     return {
-      reply: String(parsed && parsed.reply || "").trim(),
-      operations: Array.isArray(parsed && parsed.operations) ? parsed.operations : [],
+      reply: String(parsed.reply || "").trim() || content.slice(0, 600),
+      operations: Array.isArray(parsed.operations) ? parsed.operations : [],
     };
   }
 
@@ -15364,9 +15378,13 @@ class JamDeckPlugin extends Plugin {
   }
 
   async webSearch(query) {
+    const encoded = encodeURIComponent(query);
+    // 两个后端都是抓结果页 HTML。360 实测对中文查询最准（返回 data-mdurl 真实地址）；
+    // www.bing.com 在无 cookie 时经常回一堆无关推荐（「File Explorer in Windows」那种），
+    // 只能当兜底；cn.bing.com 与 DuckDuckGo 已废（空壳 / 202 反爬）。
     const attempts = [
-      { url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, bing: false },
-      { url: `https://cn.bing.com/search?q=${encodeURIComponent(query)}`, bing: true },
+      { url: `https://www.so.com/s?q=${encoded}`, engine: "so360" },
+      { url: `https://www.bing.com/search?q=${encoded}`, engine: "bing" },
     ];
     for (const attempt of attempts) {
       try {
@@ -15380,37 +15398,37 @@ class JamDeckPlugin extends Plugin {
           },
         });
         if (!res || res.status !== 200 || typeof res.text !== "string" || !res.text.length) continue;
-        const results = this.parseSearchHtml(res.text, attempt.bing);
+        const results = this.parseSearchHtml(res.text, attempt.engine);
         if (results.length) return results;
       } catch (error) {}
     }
-    return `搜索「${query}」没有返回可用结果。`;
+    // 明确告诉模型别再重试：否则它会一路换关键词死磕到预算用尽。
+    return `搜索「${query}」没有返回可用结果（搜索通道本次不可用）。不要再尝试搜索，直接基于已有信息回答；确实查不到就说明无法获取。`;
   }
 
-  parseSearchHtml(html, bing) {
+  parseSearchHtml(html, engine) {
     const items = [];
+    const clean = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     const add = (title, url, snippet) => {
-      const clean = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
       const t = clean(title).slice(0, 80);
       if (!t) return;
-      items.push(`${items.length + 1}. ${t}\n   来源：${String(url || "").slice(0, 120)}\n   摘要：${clean(snippet).slice(0, 160)}`);
+      const s = clean(snippet).slice(0, 160);
+      items.push(`${items.length + 1}. ${t}\n   来源：${String(url || "").slice(0, 120)}${s ? `\n   摘要：${s}` : ""}`);
     };
     const source = String(html);
-    if (bing) {
-      const blocks = source.split(/<li class="b_algo"/);
-      for (const block of blocks.slice(1)) {
-        const linkMatch = block.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>/);
-        const titleMatch = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
-        const snipMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
-        add(titleMatch ? titleMatch[1] : "", linkMatch ? linkMatch[1] : "", snipMatch ? snipMatch[1] : "");
+    if (engine === "so360") {
+      for (const block of source.split(/<li class="res-list"/).slice(1)) {
+        const titleMatch = block.match(/class="res-title"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/);
+        const urlMatch = block.match(/data-mdurl="(https?:\/\/[^"]+)"/) || block.match(/<a[^>]+href="(https?:\/\/[^"]+)"/);
+        const snipMatch = block.match(/class="res-desc"[^>]*>([\s\S]*?)<\/p>/);
+        add(titleMatch ? titleMatch[1] : "", urlMatch ? urlMatch[1] : "", snipMatch ? snipMatch[1] : "");
         if (items.length >= 5) break;
       }
     } else {
-      const blocks = source.split(/class="result__a"/);
-      for (const block of blocks.slice(1)) {
-        const linkMatch = block.match(/href="([^"]+)"/);
-        const titleMatch = block.match(/>(.*?)<\/a>/s);
-        const snipMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+      for (const block of source.split(/<li class="b_algo"/).slice(1)) {
+        const linkMatch = block.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>/);
+        const titleMatch = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
+        const snipMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
         add(titleMatch ? titleMatch[1] : "", linkMatch ? linkMatch[1] : "", snipMatch ? snipMatch[1] : "");
         if (items.length >= 5) break;
       }
