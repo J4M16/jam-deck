@@ -1,5 +1,17 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-13 — 0.32.0 字幕墙：流式转录与笔记跟读
+
+- 需求：复用前一任务推荐的本地 ONNX 流式路线，新增文本窗组件。模式一转写电脑声音并增量翻译/归档/复制/清空；模式二选择笔记按时间播放，同时监听麦克风标记讲话位置。
+- GitHub 对照：读取 TMSpeech、Storm Teleprompter+、Meeting Teleprompter、Obsidian Teleprompter Plus、PromptMe 源码。选择 Storm 的中文字符锚点机制作为对齐参考，保留 MIT 声明；发现 Obsidian Teleprompter Plus 当前分词未包含汉字，不能直接用于中文跟读。详见 docs/CAPTION_WALL.md。
+- 实现：caption-wall.js 管理会话、草稿、匹配、DOM 和 JSONL 客户端；caption-host.js 适配 Obsidian 笔记、剪贴板和真实 DeepSeek 请求；caption-bridge.py 使用 Sherpa-ONNX CPU 两线程、PyAudioWPatch WASAPI 回环/麦克风。setup:captions 将依赖与模型放在开发源 .cache，部署只传入运行位置与代码，不复制 data.json。
+- 状态：临时字幕原位更新，落句后保存；翻译只处理快照内未翻译的落句，新的句子留待下次操作。清空、更换模式、选稿、关闭与手动定位使对应过期异步结果失效。暂停保留解码器末句刷新；stdin EOF/stop 关闭音频，超时强制退出。
+- 视觉：单纸面、轻工具栏、文字层级、活动小点与当前行细线；手动查看历史停止追尾。最小完整尺寸调整为 10×14，避免工具栏把正文挤没。
+- 验证：npm run verify 全绿；新增解析/中文英文跟读/部分结果重复/吞字/回读/离稿/持久化/增量翻译/清空竞态/选稿竞态/迟到语义定位/归档失败/停止末句回归。官方中英 WAV 能输出逐步 partial 和 final；默认播放设备实机回环转写与退出通过。Obsidian 中真实 DeepSeek 翻译、意译定位、归档、时间滚动通过。
+- 实机纠错：Obsidian 注入的 require 不提供 resolve，改为 Node createRequire 加载可热更新模块；首次部署因此失败，修复后成功热重载。RDP 当前无默认麦克风，录音桥明确报出输入设备/录音重定向问题；未声称真实麦克风跟读已经验收。
+- 最终整链路：0.32.0 已部署并热重载，Obsidian 内直接启动系统回环得到实时字幕；停止后 source=false，正文可视高度约 414px。测试字幕与测试归档已清理，右侧保留可用的空字幕墙。补齐切换模式的临时句可翻译与时间播放同步本地锚点回归。
+- 处理模型签名：具体模型标识不可见（主代理、实现与验证）。
+
 ## 2026-09-12 — 0.31.51 搜索类提问接入本机 DeepSeek Harness（dsh）
 
 - 起因：0.31.50 收尾时向 Jam 提了「抓 HTML 终究是借人家前门走」的问题，并给出三个方向（接 dsh / 接搜索 API / 先不动）。Jam 选 **接 dsh headless**。这是本项目第一次让插件依赖一个外部 CLI 进程，按架构级改动对待。

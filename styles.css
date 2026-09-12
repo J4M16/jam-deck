@@ -3809,3 +3809,38 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
   transition-duration: 0.001s !important;
   transition-delay: 0s !important;
 }
+
+/* Caption wall: one Spatial paper surface, text-first transcript and reading position. */
+.jam-deck-root .jam-deck-caption {
+  display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden;
+  color: var(--jd-ink); padding: 4px 14px 14px;
+}
+.jam-deck-caption-toolbar, .jam-deck-caption-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex-shrink: 0;
+}
+.jam-deck-root .jam-deck-caption-action, .jam-deck-root .jam-deck-caption-mode {
+  min-height: 32px; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+  border: 0; border-radius: var(--jd-radius-sm); box-shadow: none;
+  background: transparent; color: var(--jd-ink); font: inherit; font-size: 12px; padding: 4px 8px;
+}
+.jam-deck-root .jam-deck-caption-action:hover { background: var(--jd-hover); }
+.jam-deck-root .jam-deck-caption [hidden] { display: none !important; }
+.jam-deck-caption-state { font-size: 11px; color: var(--jd-muted); }
+.jam-deck-caption-state::before { content: ''; display: inline-block; width: 4px; height: 4px; margin-right: 6px; border-radius: 50%; background: var(--jd-muted); }
+.jam-deck-caption-state.is-listening::before { background: var(--jd-accent); }
+.jam-deck-caption-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 8px 4px 24px; user-select: text; -webkit-user-select: text; }
+.jam-deck-root .jam-deck-caption-line {
+  display: flex; gap: 12px; width: 100%; margin: 0; padding: 8px 6px; border: 0;
+  border-left: 2px solid transparent; border-radius: 0; box-shadow: none; background: transparent;
+  font: inherit; font-size: 17px; line-height: 1.8; text-align: left; white-space: pre-wrap;
+  color: var(--jd-ink); height: auto; user-select: text; -webkit-user-select: text;
+}
+.jam-deck-root .jam-deck-caption-line.is-current { border-left-color: var(--jd-accent); font-weight: 650; }
+.jam-deck-caption-line.is-partial { opacity: .55; }
+.jam-deck-caption-time { flex: 0 0 auto; font: 10px/3 monospace; color: var(--jd-muted); }
+.jam-deck-caption-time:empty { display: none; }
+.jam-deck-caption-text { min-width: 0; overflow-wrap: anywhere; }
+.jam-deck-caption-spoken { flex-shrink: 0; max-height: 68px; overflow: auto; border-top: 1px solid var(--jd-line); padding-top: 8px; font-size: 12px; color: var(--jd-muted); user-select: text; }
+.jam-deck-caption-error { font-size: 12px; color: var(--text-error); overflow-wrap: anywhere; }
+.jam-deck-caption-empty { color: var(--jd-muted); font-size: 14px; line-height: 1.8; }
+.jam-deck-caption :is(button, select, .jam-deck-caption-content):focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }

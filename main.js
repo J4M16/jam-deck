@@ -1,6 +1,6 @@
 "use strict";
 
-const { ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, normalizePath, requestUrl, setIcon } = require("obsidian");
+const { ItemView, Modal, FuzzySuggestModal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, normalizePath, requestUrl, setIcon } = require("obsidian");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const nodePath = require("path");
@@ -867,6 +867,7 @@ function jamDeckCountdownState(widget, now = Date.now()) {
 }
 
 const WIDGET_DEFS = {
+  captions: { label: "字幕墙", icon: "≋", w: 18, h: 18, minDisplayW: 10, minDisplayH: 14 },
   clock: { label: "时钟", icon: "◷", w: 13, h: 8, minDisplayW: 4, minDisplayH: 4 },
   clipboard: { label: "剪贴板", icon: "▣", w: 13, h: 18, minDisplayW: 4, minDisplayH: 5 },
   tasks: { label: "最近待办", icon: "✓", w: 13, h: 14, minDisplayW: 4, minDisplayH: 4 },
@@ -12065,6 +12066,9 @@ class JamDeckView extends ItemView {
   }
 
   async onClose() {
+    for (const dispose of this.captionDisposers || []) dispose();
+    this.captionDisposers = [];
+    this.plugin.captions?.stopUnused();
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
@@ -12144,6 +12148,8 @@ class JamDeckView extends ItemView {
       return;
     }
     const root = this.contentEl;
+    for (const dispose of this.captionDisposers || []) dispose();
+    this.captionDisposers = [];
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
@@ -13445,6 +13451,9 @@ class JamDeckView extends ItemView {
 
   renderWidgetBody(body, widget) {
     switch (widget.type) {
+      case "captions":
+        (this.captionDisposers ||= []).push(this.plugin.captions.mount(body, widget.id));
+        break;
       case "clock":
         this.renderClock(body, widget);
         break;
@@ -14823,6 +14832,11 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictDisposed = false;
     this.islandMode = new IslandModeController(this);
     await this.loadSettings();
+    const captionDirectory = nodePath.join(jamDeckVaultBasePath(this.app), this.manifest.dir);
+    const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
+    const captionRequire = require("module").createRequire(nodePath.join(captionDirectory, "main.js"));
+    delete captionRequire.cache[captionRequire.resolve(captionHostPath)];
+    this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
     await this.ensureClipboardDir();
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();
@@ -14879,6 +14893,7 @@ class JamDeckPlugin extends Plugin {
   }
 
   onunload() {
+    this.captions?.dispose();
     this.canvasNativeConflictDisposed = true;
     this.canvasNativeConflictReconcileQueued = false;
     if (this.canvasNativeConflictTimer != null) {
@@ -18565,6 +18580,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
 
   async removeWidget(id) {
     const removed = this.settings.widgets.find((widget) => widget.id === id);
+    this.captions?.remove(id);
     this.settings.widgets = this.settings.widgets.filter((widget) => widget.id !== id);
     await this.saveSettings();
     this.renderAllViews();

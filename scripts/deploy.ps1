@@ -10,7 +10,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $requiredFiles = @("main.js", "styles.css", "manifest.json")
-$assetFiles = @("assets/jam-deck-folder-shell.svg")
+$assetFiles = @("assets/jam-deck-folder-shell.svg", "caption-wall.js", "caption-host.js", "scripts/caption-bridge.py", "THIRD_PARTY_NOTICES.md")
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "../.cache/caption-runtime.json")) { $assetFiles += ".cache/caption-runtime.json" }
 $files = @($requiredFiles + $assetFiles)
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..")).TrimEnd([IO.Path]::DirectorySeparatorChar)
 # 参数 → 环境变量 → 中性占位（缺失时给出明确报错而非静默指向错误路径）
