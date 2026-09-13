@@ -1,0 +1,11 @@
+{
+  "name": "sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
+  "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2",
+  "sha256": "2B7C63322B32E5E0F2526043A1103366119CA58DD615CD7105A37C01DB9553D7",
+  "files": {
+    "tokens.txt": "A8E0E4EC53810E433789B54A5C0134A7EAA2FFCA595A6334D54C00DA858841D3",
+    "encoder-epoch-99-avg-1.int8.onnx": "DB6F51551762E40E549166FE041EA3E45464370B595E9AD23F06478EC3794FBB",
+    "decoder-epoch-99-avg-1.onnx": "89BE509A83175261695BDEF5FD1C7B9AB1129A663D1284E7BA9F8507B21E0906",
+    "joiner-epoch-99-avg-1.int8.onnx": "BDDA356D6F9B8C2D7CEE9EE0E26075FA537490F7FD06520BE408D287073667B9"
+  }
+}

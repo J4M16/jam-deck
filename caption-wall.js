@@ -109,8 +109,10 @@ class CaptionSource {
     this.onEvent = onEvent; this.onError = onError; this.onClose = onClose;
   }
   start(source) {
+    if (process.platform !== "win32") throw new Error("语音转录目前仅支持 Windows");
+    if (!fs.existsSync(this.runtime)) throw new Error("语音引擎尚未安装，请按字幕扩展安装说明运行 scripts/setup-captions.ps1");
     const config = JSON.parse(fs.readFileSync(this.runtime, "utf8").replace(/^\uFEFF/, ""));
-    if (!fs.existsSync(config.python) || !fs.existsSync(path.join(config.model, "tokens.txt"))) throw new Error("字幕引擎未准备好，请运行 npm run setup:captions 后部署");
+    if (!fs.existsSync(config.python) || !["tokens.txt", "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx", "joiner-epoch-99-avg-1.int8.onnx"].every(file => fs.existsSync(path.join(config.model, file)))) throw new Error("语音引擎文件不完整，请重新运行 scripts/setup-captions.ps1");
     const child = spawn(config.python, ["-u", path.join(this.directory, "scripts/caption-bridge.py"), "--model", config.model, "--source", source],
       { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;

@@ -6,9 +6,9 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 
 **方式 A —— Release 手动安装**
 
-1. 前往 [Releases](https://github.com/J4M16/jam-deck/releases) 下载最新版的 `main.js`、`styles.css`、`manifest.json` 三个文件
+1. 前往 [Releases](https://github.com/J4M16/jam-deck/releases) 下载基础包 `jam-deck-<版本>.zip`（0.32.2 起的打包格式，含插件文件及图形资源）
 2. 在 vault 目录下创建 `.obsidian/plugins/jam-deck/`（若不存在）
-3. 把三个文件放入该目录
+3. 把基础包内容解压到该目录
 4. Obsidian 设置 → 第三方插件 → 刷新插件列表 → 启用 **Jam Deck**
 
 **方式 B —— BRAT 安装（beta 体验）**
@@ -16,6 +16,12 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 1. 安装社区插件 [BRAT](https://github.com/TfTHacker/obsidian42-brat)
 2. BRAT 设置 → Add Beta plugin → 填入 `J4M16/jam-deck`
 3. 启用后刷新插件列表即可
+
+## 可选字幕扩展
+
+基础包不包含字幕模块、Python 或语音模型。不需要字幕功能的用户无需额外下载。
+
+需要时安装同版本 `jam-deck-captions-<版本>.zip`，按[字幕墙安装说明](docs/CAPTION_WALL.md#首次安装)安装语音引擎。字幕扩展与基础包均由 `npm run package` 生成；CI 保存安装产物，不自动发布 Release。
 
 ## 快速上手
 

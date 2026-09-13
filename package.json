@@ -1,11 +1,12 @@
 {
   "name": "jam-deck",
-  "version": "0.32.1",
+  "version": "0.32.2",
   "private": true,
   "description": "Jam 的 Obsidian 副屏工作台插件：待办、时钟、音乐、剪贴板与画布组件的自适应网格。",
   "scripts": {
     "check": "node --check main.js && node --check caption-wall.js && node --check caption-host.js",
-    "test": "node tests/jam-deck-test.js && node tests/caption-wall-test.js",
+    "test": "node tests/jam-deck-test.js && node tests/caption-wall-test.js && node tests/caption-distribution-test.js && python tests/caption-package-test.py",
+    "package": "python scripts/package-release.py",
     "setup:captions": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-captions.ps1",
     "verify": "npm run check && npm test",
     "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"

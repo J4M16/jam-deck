@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, develop ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, develop ]
 
 jobs:
   ci:
@@ -19,5 +19,19 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Run verify
         run: npm run verify
+
+      - name: Build base and optional caption packages
+        run: npm run package
+
+      - name: Upload installation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jam-deck-installation-packages
+          path: dist/

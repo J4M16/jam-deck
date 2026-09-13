@@ -24,15 +24,31 @@
 
 ## 首次安装
 
-Windows x64 / Python 3.12：
+0.32.2 起采用基础包与可选字幕扩展分发。基础插件没有字幕扩展也可正常启动，不会下载模型。当前支持 Windows x64；安装器需要 Python 3.12 x64，且 `python` 可在终端运行。
+
+1. 从同一版本 GitHub Release 下载 `jam-deck-captions-<版本>.zip`，解压到 `.obsidian/plugins/jam-deck/`。它只包含字幕代码、安装脚本和说明，不含模型或个人路径。
+2. 在该插件目录打开 PowerShell，运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-captions.ps1
+```
+
+3. 安装成功后在 Obsidian 关闭再启用 Jam Deck，添加「字幕墙」并点击播放。已有扩展用户升级时下载与基础插件相同版本的扩展 ZIP；引擎无需重复下载。
+
+引擎默认安装到 `%LOCALAPPDATA%\JamDeck\captions`，放在 Vault 外，同一用户的多个库可复用。插件内仅生成 `.cache/caption-runtime.json` 路径记录；不写入或覆盖 `data.json`。Python 不在 PATH 时用 `-Python <python.exe绝对路径>`；安装目录可通过 `-InstallDir <目录>` 指定。引擎缺失时字幕区提示安装，其余组件继续工作；未安装引擎也能阅读笔记和按时间滚动。
+
+安装器从上游官方 Release 下载约 437 MiB 压缩包，校验固定 SHA-256，只提取实际使用的 tokens、INT8 encoder、浮点 decoder、INT8 joiner 四个文件（约 57.4 MiB），然后删除临时下载包。不会解出 64/96 重复模型或其他精度版本。当前 Python 环境约 109 MiB，完整引擎约 167 MiB；Python 本体若尚未安装需要另外安装。首次下载流量仍约 437 MiB 加 Python 依赖，不把它冒称成 57 MiB 下载。
+
+开发者从源码安装与部署：
 
 ```powershell
 npm run setup:captions
 npm run verify
 npm run deploy -- -TargetPluginDir <Jam Deck 插件目录>
+npm run package
 ```
 
-安装器只在开发源 `.cache` 中创建独立 Python 环境，下载官方中英双语流式 Zipformer 模型；不会把数百 MB 模型装入 Vault。运行位置通过 `.cache/caption-runtime.json` 随部署脚本传入插件。移动开发源后重新运行安装与部署。模型包约 437 MiB（同时含浮点与量化文件）；实际引擎使用 INT8 encoder/joiner、CPU 两线程。
+本机已有引擎可运行 `npm run setup:captions -- -InstallDir <已有引擎父目录>` 重新验证并登记位置。源码目录的运行路径只供本机部署；公开 ZIP 使用严格文件白名单，排除 `.cache`、模型、Python、个人路径记录与 `data.json`。CI 构建产物不等于正式 Release，发布仍需维护者确认。
 
 运行依赖固定为 Sherpa-ONNX 1.12.40、PyAudioWPatch 0.2.12.8、NumPy 2.2.6。音频仅驻留本机内存；手动翻译、开启自动翻译后的定稿段落以及跟读中的语义定位会发送文本到 DeepSeek，复用 Jam Deck 已配置的 Key 和模型。使用 Windows 默认输入/输出设备，切换设备后暂停再启动。
 

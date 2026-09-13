@@ -13452,7 +13452,11 @@ class JamDeckView extends ItemView {
   renderWidgetBody(body, widget) {
     switch (widget.type) {
       case "captions":
-        (this.captionDisposers ||= []).push(this.plugin.captions.mount(body, widget.id));
+        if (this.plugin.captions) (this.captionDisposers ||= []).push(this.plugin.captions.mount(body, widget.id));
+        else {
+          body.createEl("p", { cls: "jam-deck-caption-empty", text: this.plugin.captionLoadError || "字幕墙是可选扩展，请先安装字幕扩展包。" });
+          body.createEl("a", { text: "查看安装说明", href: "https://github.com/J4M16/jam-deck/blob/develop/docs/CAPTION_WALL.md", attr: { target: "_blank", rel: "noopener" } });
+        }
         break;
       case "clock":
         this.renderClock(body, widget);
@@ -14834,9 +14838,13 @@ class JamDeckPlugin extends Plugin {
     await this.loadSettings();
     const captionDirectory = nodePath.join(jamDeckVaultBasePath(this.app), this.manifest.dir);
     const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
-    const captionRequire = require("module").createRequire(nodePath.join(captionDirectory, "main.js"));
-    delete captionRequire.cache[captionRequire.resolve(captionHostPath)];
-    this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, setIcon, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
+    if (require("fs").existsSync(captionHostPath)) {
+      try {
+        const captionRequire = require("module").createRequire(nodePath.join(captionDirectory, "main.js"));
+        delete captionRequire.cache[captionRequire.resolve(captionHostPath)];
+        this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, setIcon, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
+      } catch (error) { this.captionLoadError = `字幕扩展加载失败，请重新安装：${error.message}`; }
+    }
     await this.ensureClipboardDir();
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();

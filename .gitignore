@@ -11,3 +11,4 @@ backups/
 *.js.map
 .workbuddy/
 debug-backups/
+__pycache__/
