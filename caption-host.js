@@ -2,7 +2,7 @@
 const path = require("path");
 const crypto = require("crypto");
 
-module.exports = function createCaptionHost(plugin, { FuzzySuggestModal, Notice, model, directory }) {
+module.exports = function createCaptionHost(plugin, { FuzzySuggestModal, Notice, setIcon, model, directory }) {
   const modulePath = path.join(directory, "caption-wall.js");
   delete require.cache[require.resolve(modulePath)];
   const { CaptionSession, CaptionSource, mountCaption } = require(modulePath);
@@ -34,6 +34,7 @@ module.exports = function createCaptionHost(plugin, { FuzzySuggestModal, Notice,
   const host = {
     exists: id => plugin.settings.widgets.some(widget => widget.id === id),
     config: id => { const widget = plugin.settings.widgets.find(item => item.id === id); return widget.config ||= {}; },
+    icon: (element, name) => setIcon(element, name),
     save: () => plugin.saveSettings(), hasKey: () => !!plugin.settings.aiApiKey, ai,
     source: (onEvent, onError, onClose) => new CaptionSource(directory, path.join(directory, ".cache/caption-runtime.json"), onEvent, onError, onClose),
     copy: async text => { require("electron").clipboard.writeText(text); new Notice("字幕墙：已复制"); },

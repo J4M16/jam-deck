@@ -1,6 +1,6 @@
 "use strict";
 const assert = require("assert/strict");
-const { CaptionSession, CaptionMatcher, parseNote, parseTime, timeLabel } = require("../caption-wall");
+const { CaptionSession, CaptionMatcher, parseNote, parseTime, timeLabel, formatTranscript } = require("../caption-wall");
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
 function fixture(options = {}) {
@@ -24,6 +24,12 @@ function fixture(options = {}) {
 function emit(source, text, final = false, id = 0) { source.onEvent({ type: final ? "final" : "partial", text, id, start: id * 3, end: id * 3 + 2 }); }
 
 async function main() {
+  assert.equal(formatTranscript("CLOTHES I HADNT WARN FOR TWO YEARS"), "Clothes I hadnt warn for two years");
+  assert.equal(formatTranscript("I USE AI AND GPU. THIS IS AN API."), "I use AI and GPU. This is an API.");
+  assert.equal(formatTranscript("I'M HERE! ARE YOU READY? YES."), "I'm here! Are you ready? Yes.");
+  assert.equal(formatTranscript("使用 GPU RENDERING 和 AI"), "使用 GPU rendering 和 AI");
+  assert.equal(formatTranscript("Read Blender and DeepSeek as written."), "Read Blender and DeepSeek as written.");
+  assert.equal(formatTranscript("已经翻译好的中文。"), "已经翻译好的中文。");
   assert.equal(parseTime("01:02:03.500"), 3723.5);
   assert.equal(parseTime("12:34"), 754);
   assert.equal(parseTime("01:70:00"), null);
@@ -141,6 +147,58 @@ async function main() {
 
   f = fixture({ config: { captionDraft: [{ id: "saved", text: "未完成的句子", original: "未完成的句子", final: false, start: 0, end: 1 }] } });
   try { assert.equal(f.session.entries[0].final, true); assert.equal(f.session.source, null, "restoring a draft must never start recording"); }
+  finally { f.session.dispose(); }
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const requests = [];
+  f = fixture({ host: { ai: (instruction, data) => { const d = deferred(); requests.push({ ...d, data }); return d.promise; } } });
+  try {
+    f.session.setAutoTranslate(true); f.session.start();
+    emit(f.sources[0], "FIRST PARTIAL");
+    assert.equal(requests.length, 0, "partials stay live without triggering translation");
+    emit(f.sources[0], "FIRST SENTENCE", true);
+    emit(f.sources[0], "SECOND SENTENCE", true, 1);
+    emit(f.sources[0], "STILL SPEAKING", false, 2);
+    assert.equal(requests.length, 1, "only one AI request may run at once");
+    assert.equal(f.session.entries[2].text, "Still speaking", "transcription continues during translation");
+    requests[0].resolve({ translations: [{ id: requests[0].data[0].id, text: "第一句" }] }); await flush();
+    assert.equal(requests.length, 2, "newly finalized segments drain automatically");
+    assert.equal(requests[1].data.length, 1, "neither translated nor partial text is requeued");
+    f.session.setAutoTranslate(false);
+    emit(f.sources[0], "THIRD SENTENCE", true, 2);
+    requests[1].resolve({ translations: [{ id: requests[1].data[0].id, text: "第二句" }] }); await flush();
+    assert.equal(requests.length, 2, "turning auto off finishes current request but stops queue");
+    f.session.setAutoTranslate(true);
+    assert.equal(requests.length, 3, "reenabling processes untranslated final text");
+    f.session.clear();
+    requests[2].resolve({ translations: [{ id: requests[2].data[0].id, text: "过期第三句" }] }); await flush();
+    assert.equal(f.session.entries.length, 0, "cleared automatic results cannot refill content");
+    assert.equal(f.config.captionAutoTranslate, true, "auto preference persists");
+  } finally { f.session.dispose(); }
+
+  f = fixture({ host: { ai: async () => { throw new Error("network offline"); } } });
+  try {
+    f.session.setAutoTranslate(true); f.session.start(); emit(f.sources[0], "KEEP ME", true); await flush();
+    assert.equal(f.session.autoTranslate, false, "failure pauses automatic requests instead of retrying forever");
+    assert.equal(f.session.entries[0].text, "Keep me"); assert.match(f.session.error, /自动翻译已暂停/);
+    assert(f.session.source, "translation failure must not stop transcription");
+  } finally { f.session.dispose(); }
+
+  f = fixture();
+  try {
+    f.session.setAutoTranslate(true); f.session.start(); emit(f.sources[0], "LAST PARTIAL");
+    f.session.stop(); emit(f.sources[0], "LAST SENTENCE", true); f.sources[0].onClose(); await flush();
+    assert.equal(f.session.entries[0].translated, true, "pause flush is translated automatically");
+    assert.equal(f.calls.length, 1);
+  } finally { f.session.dispose(); }
+
+  f = fixture({ config: { captionAutoTranslate: true, captionDraft: [{ id: "restored", text: "SAVED SENTENCE", final: true }] } });
+  try {
+    assert.equal(f.calls.length, 0, "restoring alone does not make network requests");
+    assert.equal(f.session.entries[0].text, "Saved sentence");
+    f.session.start(); await flush(); assert.equal(f.calls.length, 1);
+  } finally { f.session.dispose(); }
+  f = fixture({ host: { hasKey: () => false } });
+  try { assert.throws(() => f.session.setAutoTranslate(true), /DeepSeek Key/); assert.equal(f.session.autoTranslate, false); }
   finally { f.session.dispose(); }
   console.log("caption-wall: parser, Chinese/English following, lifecycle, persistence, translation races and archive tests passed");
 }

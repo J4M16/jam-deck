@@ -14836,7 +14836,7 @@ class JamDeckPlugin extends Plugin {
     const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
     const captionRequire = require("module").createRequire(nodePath.join(captionDirectory, "main.js"));
     delete captionRequire.cache[captionRequire.resolve(captionHostPath)];
-    this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
+    this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, setIcon, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
     await this.ensureClipboardDir();
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();
