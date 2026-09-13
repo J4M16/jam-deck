@@ -48,7 +48,7 @@ npm run deploy -- -TargetPluginDir <Jam Deck 插件目录>
 npm run package
 ```
 
-本机已有引擎可运行 `npm run setup:captions -- -InstallDir <已有引擎父目录>` 重新验证并登记位置。源码目录的运行路径只供本机部署；公开 ZIP 使用严格文件白名单，排除 `.cache`、模型、Python、个人路径记录与 `data.json`。CI 构建产物不等于正式 Release，发布仍需维护者确认。
+本机已有引擎可运行 `npm run setup:captions -- -InstallDir <已有引擎父目录>` 重新验证并登记位置。源码目录的运行路径只供本机部署；公开 ZIP 使用严格文件白名单，排除 `.cache`、模型、Python、个人路径记录与 `data.json`。本地打包产物不等于正式 Release，发布仍需维护者确认。
 
 运行依赖固定为 Sherpa-ONNX 1.12.40、PyAudioWPatch 0.2.12.8、NumPy 2.2.6。音频仅驻留本机内存；手动翻译、开启自动翻译后的定稿段落以及跟读中的语义定位会发送文本到 DeepSeek，复用 Jam Deck 已配置的 Key 和模型。使用 Windows 默认输入/输出设备，切换设备后暂停再启动。
 

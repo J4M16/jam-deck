@@ -21,7 +21,7 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 
 基础包不包含字幕模块、Python 或语音模型。不需要字幕功能的用户无需额外下载。
 
-需要时安装同版本 `jam-deck-captions-<版本>.zip`，按[字幕墙安装说明](docs/CAPTION_WALL.md#首次安装)安装语音引擎。字幕扩展与基础包均由 `npm run package` 生成；CI 保存安装产物，不自动发布 Release。
+需要时安装同版本 `jam-deck-captions-<版本>.zip`，按[字幕墙安装说明](docs/CAPTION_WALL.md#首次安装)安装语音引擎。字幕扩展与基础包均由 `npm run package` 生成；维护者确认发布后，将两个 ZIP 上传至对应 Release。
 
 ## 快速上手
 
