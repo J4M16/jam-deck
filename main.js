@@ -15,6 +15,7 @@ const JAM_DECK_LEGACY_GRID_COLS = 12;
 const CLIPBOARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CLIPBOARD_DIR = "attachments/jam-deck-clipboard";
 const CANVAS_ASSET_DIR = "attachments/jam-deck-canvas-assets";
+const CANVAS_DOWNLOAD_DIR = "attachments/jam-deck-canvas-downloads";
 const ICON_DIR = "attachments/jam-deck-icons";
 const SHORTCUT_LINK_DIR = "attachments/jam-deck-shortcuts";
 const TASK_ASSET_DIR = "attachments/jam-deck-task-assets";
@@ -4830,6 +4831,236 @@ function jamDeckCanvasLinkBridgeScript(action = "install") {
   })()`;
 }
 
+// Runs in Electron's main process: setSavePath must happen synchronously in
+// will-download, before Electron opens its default save dialog. Only explicit
+// Jam Deck webContents IDs are owned; other tabs keep their normal downloads.
+function jamDeckCreateCanvasDownloadService(require, options, notify) {
+  const fs = require("fs"), path = require("path"), crypto = require("crypto");
+  const { webContents } = require("electron");
+  const bindings = new Map(), sessions = new Map(), jobs = new Map();
+  const root = path.resolve(options.root);
+  const directory = path.resolve(root, options.directory);
+  const temporary = path.resolve(root, options.temporary);
+  for (const target of [directory, temporary]) {
+    const relative = path.relative(root, target);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Invalid Canvas download directory");
+  }
+  let disposed = false;
+  const send = (event) => { if (!disposed) { try { notify(JSON.stringify(event)); } catch (error) {} } };
+  const cleanTemporary = (file) => { try { fs.unlinkSync(file); } catch (error) { if (error.code !== "ENOENT") console.error("Jam Deck download cleanup", error); } };
+  const filename = (value) => {
+    let name = String(value || "download").replace(/[\\/<>:"|?*\x00-\x1f]/g, "_").replace(/^\.+|[. ]+$/g, "");
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = "_" + name;
+    return name.slice(-180) || "download";
+  };
+  function download(event, item, contents) {
+    const binding = contents && bindings.get(contents.id);
+    if (!binding || disposed) return;
+    const id = crypto.randomUUID();
+    const owner = { ...binding.owner };
+    const name = `${id.slice(0, 8)}-${filename(item.getFilename())}`;
+    const part = path.join(temporary, `${id}.part`);
+    const destination = path.join(directory, name);
+    const relativePath = path.relative(root, destination).split(path.sep).join("/");
+    try {
+      fs.mkdirSync(temporary, { recursive: true });
+      fs.mkdirSync(directory, { recursive: true });
+      item.setSavePath(part);
+      const job = { item, part, done: null };
+      job.done = (_event, state) => {
+        jobs.delete(id);
+        if (state !== "completed" || disposed) {
+          cleanTemporary(part);
+          send({ type: "failed", id, owner, message: state === "cancelled" ? "下载已取消" : "下载中断" });
+          return;
+        }
+        try {
+          // UUID destinations never overwrite an existing Vault attachment.
+          fs.linkSync(part, destination);
+          cleanTemporary(part);
+          send({ type: "completed", id, owner, path: relativePath });
+        } catch (error) {
+          cleanTemporary(part);
+          send({ type: "failed", id, owner, message: `下载保存失败：${error.message}` });
+        }
+      };
+      jobs.set(id, job);
+      item.once("done", job.done);
+      send({ type: "started", id, owner });
+    } catch (error) {
+      // The download belongs to this feature; do not silently redirect it elsewhere.
+      try { item.cancel(); } catch (ignored) {}
+      cleanTemporary(part);
+      send({ type: "failed", id, owner, message: `无法开始下载：${error.message}` });
+    }
+  }
+  function unregister(id) {
+    const binding = bindings.get(id);
+    if (!binding) return;
+    bindings.delete(id);
+    const record = sessions.get(binding.session);
+    if (record && --record.count === 0) {
+      binding.session.removeListener("will-download", download);
+      sessions.delete(binding.session);
+    }
+  }
+  return {
+    register(id, serializedOwner) {
+      if (disposed) return false;
+      const contents = webContents.fromId(id);
+      if (!contents || contents.isDestroyed() || contents.getType() !== "webview") return false;
+      const owner = JSON.parse(serializedOwner);
+      const current = bindings.get(id);
+      if (current) { current.owner = owner; return true; }
+      const session = contents.session;
+      if (!sessions.has(session)) { session.on("will-download", download); sessions.set(session, { count: 0 }); }
+      sessions.get(session).count++;
+      bindings.set(id, { session, owner });
+      return true;
+    },
+    unregister,
+    stats() { return JSON.stringify({ bindings: bindings.size, sessions: sessions.size, jobs: jobs.size }); },
+    dispose() {
+      disposed = true;
+      for (const id of [...bindings.keys()]) unregister(id);
+      for (const job of jobs.values()) {
+        job.item.removeListener("done", job.done);
+        try { job.item.cancel(); } catch (error) {}
+        cleanTemporary(job.part);
+      }
+      jobs.clear();
+    },
+  };
+}
+
+function jamDeckCanvasDownloadNode(owner, nodes, file, id) {
+  const source = nodes.find(node => node.id === owner.nodeId) || owner.rect;
+  const result = { id, type: "file", file, x: source.x + source.width + 32, y: source.y, width: 400, height: 300 };
+  for (let attempt = 0; attempt <= nodes.length; attempt++) {
+    const collisions = nodes.filter(node => node.type !== "group" && result.x < node.x + node.width && result.x + result.width > node.x && result.y < node.y + node.height && result.y + result.height > node.y);
+    if (!collisions.length) break;
+    result.y = Math.max(...collisions.map(node => node.y + node.height)) + 24;
+  }
+  return result;
+}
+
+class CanvasDownloadCoordinator {
+  constructor(adapter) {
+    this.adapter = adapter;
+    this.app = adapter.app;
+    this.bindings = new Map();
+    this.contexts = new Map();
+    this.service = null;
+    this.pending = Promise.resolve();
+    this.disposed = false;
+    this.warned = false;
+  }
+
+  ensureService() {
+    if (this.service) return this.service;
+    const remote = require("@electron/remote");
+    const factory = remote.require("vm").runInThisContext(
+      `(function(options, notify) { return (${jamDeckCreateCanvasDownloadService.toString()})(process.getBuiltinModule("module").createRequire(process.execPath), options, notify); })`,
+      { filename: "jam-deck-canvas-downloads.js" },
+    );
+    this.service = factory({
+      root: jamDeckVaultBasePath(this.app), directory: CANVAS_DOWNLOAD_DIR,
+      temporary: `${this.adapter.deckView.plugin.manifest.dir}/.cache/canvas-downloads`,
+    }, (message) => this.receive(JSON.parse(message)));
+    return this.service;
+  }
+
+  bind(entry, surface) {
+    if (this.disposed || entry.closing || String(surface.tagName).toLowerCase() !== "webview") return;
+    try {
+      const canvas = entry.leaf.view.canvas;
+      if (canvas.readonly) return;
+      const node = [...canvas.nodes.values()].find(candidate => candidate.nodeEl && candidate.nodeEl.contains(surface));
+      const data = node && node.getData();
+      if (!data || data.type !== "link") return;
+      const id = surface.getWebContentsId();
+      const previous = this.bindings.get(surface);
+      if (previous && previous.id !== id) this.unbind(surface);
+      const owner = { canvasPath: entry.leaf.view.file.path, nodeId: data.id, rect: { x: data.x, y: data.y, width: data.width, height: data.height } };
+      if (this.ensureService().register(id, JSON.stringify(owner))) this.bindings.set(surface, { id, entry, node });
+    } catch (error) {
+      // getWebContentsId is unavailable until dom-ready; that event retries binding.
+      if (/dom-ready|not ready|must be attached/i.test(error.message)) return;
+      if (!this.warned) { this.warned = true; new Notice(`Jam Deck：网页下载自动贴回未启用 · ${error.message}`); }
+    }
+  }
+
+  unbind(surface) {
+    const binding = this.bindings.get(surface);
+    if (!binding) return;
+    this.bindings.delete(surface);
+    try { this.service.unregister(binding.id); } catch (error) {}
+  }
+
+  receive(event) {
+    if (this.disposed) return;
+    if (event.type === "started") {
+      this.contexts.set(event.id, this.app.vault.getAbstractFileByPath(event.owner.canvasPath));
+      return;
+    }
+    const file = this.contexts.get(event.id);
+    this.contexts.delete(event.id);
+    if (event.type === "failed") { new Notice(`Jam Deck：${event.message}`); return; }
+    if (event.type !== "completed") return;
+    this.pending = this.pending.then(() => this.place(event, file)).catch(error => {
+      new Notice(`Jam Deck：文件已保存到 ${event.path}，贴回失败 · ${error.message}`);
+      console.error("jam-deck Canvas download placement", error);
+    });
+  }
+
+  async place(event, originalFile) {
+    if (this.disposed) return;
+    // Electron streams to disk; reconcile avoids reading large videos into JS memory.
+    await this.app.vault.adapter.reconcileInternalFile(CANVAS_DOWNLOAD_DIR);
+    await this.app.vault.adapter.reconcileInternalFile(event.path);
+    if (this.disposed) return;
+    const attachment = this.app.vault.getAbstractFileByPath(event.path);
+    const canvasFile = originalFile || this.app.vault.getAbstractFileByPath(event.owner.canvasPath);
+    if (!attachment || !canvasFile || this.app.vault.getAbstractFileByPath(canvasFile.path) !== canvasFile) throw new Error("来源画布或附件已不存在");
+    const views = [];
+    for (const entry of this.adapter.entries.values()) if (!entry.closing) views.push(entry.leaf.view);
+    this.app.workspace.iterateAllLeaves(leaf => views.push(leaf.view));
+    const view = views.find(candidate => candidate && candidate.file === canvasFile && candidate.canvas);
+    const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    if (view) {
+      const canvas = view.canvas;
+      if (canvas.readonly) throw new Error("来源画布为只读");
+      const nodes = [...canvas.nodes.values()].map(node => node.getData());
+      const data = jamDeckCanvasDownloadNode(event.owner, nodes, event.path, id);
+      const node = canvas.createFileNode({ file: attachment, pos: { x: data.x + 200, y: data.y + 150 }, position: "center" });
+      if (!node) throw new Error("无法创建文件节点");
+      node.setData({ ...node.getData(), x: data.x, y: data.y, width: data.width, height: data.height });
+      canvas.requestSave();
+      await view.saveImmediately();
+    } else {
+      // A download can finish after switching widgets. Atomically append to its
+      // original .canvas file instead of stealing the currently active board.
+      await this.app.vault.process(canvasFile, text => {
+        if (this.disposed) return text;
+        const data = JSON.parse(text);
+        if (!Array.isArray(data.nodes)) throw new Error("来源 Canvas 格式无效");
+        data.nodes.push(jamDeckCanvasDownloadNode(event.owner, data.nodes, event.path, id));
+        return JSON.stringify(data, null, "\t");
+      });
+    }
+    if (!this.disposed) new Notice(`Jam Deck：下载已贴回 ${canvasFile.basename || canvasFile.path}`);
+  }
+
+  async destroy() {
+    this.disposed = true;
+    if (this.service) this.service.dispose();
+    this.service = null;
+    this.bindings.clear();
+    this.contexts.clear();
+    await this.pending;
+  }
+}
+
 class CanvasLinkNavigationBridge {
   constructor(adapter, entry) {
     this.adapter = adapter;
@@ -4881,12 +5112,13 @@ class CanvasLinkNavigationBridge {
     if (this.destroyed) return;
     const current = this.linkSurfaces();
     for (const surface of current) {
+      this.adapter.downloads?.bind(this.entry, surface);
       if (this.surfaces.has(surface)) continue;
       const state = {
         token: `jd-link-${Date.now()}-${++this.sequence}`,
         pending: false,
         load: () => this.inject(surface, true),
-        domReady: () => this.inject(surface, true),
+        domReady: () => { this.adapter.downloads?.bind(this.entry, surface); return this.inject(surface, true); },
         fail: () => {},
       };
       this.surfaces.set(surface, state);
@@ -4937,6 +5169,7 @@ class CanvasLinkNavigationBridge {
     const state = this.surfaces.get(surface);
     if (!state) return;
     this.surfaces.delete(surface);
+    this.adapter.downloads?.unbind(surface);
     try { surface.removeEventListener("load", state.load, true); } catch (error) {}
     try { surface.removeEventListener("dom-ready", state.domReady); } catch (error) {}
     try { surface.removeEventListener("did-fail-load", state.fail); } catch (error) {}
@@ -10052,6 +10285,7 @@ class CanvasRuntimeAdapter {
     this.destroyPromises = new Map();
     this.nativeConflictSuspendedIds = new Set();
     this.returnCoordinators = new Map();
+    this.downloads = new CanvasDownloadCoordinator(this);
     this.generation = 0;
     this.activeStage = null;
   }
@@ -10966,6 +11200,7 @@ class CanvasRuntimeAdapter {
   }
 
   async destroyAll() {
+    await this.downloads.destroy();
     await Promise.all(Array.from(this.entries.keys()).map((id) => this.destroy(id)));
     this.nativeConflictSuspendedIds.clear();
     for (const coordinator of this.returnCoordinators.values()) coordinator.destroy();
@@ -19427,6 +19662,9 @@ JamDeckPlugin.isNativeCanvasFocusButton = jamDeckIsNativeCanvasFocusButton;
 JamDeckPlugin.CanvasRuntimeAdapter = CanvasRuntimeAdapter;
 JamDeckPlugin.CanvasReturnCoordinator = CanvasReturnCoordinator;
 JamDeckPlugin.CanvasLinkNavigationBridge = CanvasLinkNavigationBridge;
+JamDeckPlugin.CanvasDownloadCoordinator = CanvasDownloadCoordinator;
+JamDeckPlugin.createCanvasDownloadService = jamDeckCreateCanvasDownloadService;
+JamDeckPlugin.canvasDownloadNode = jamDeckCanvasDownloadNode;
 JamDeckPlugin.canvasLinkBridgeScript = jamDeckCanvasLinkBridgeScript;
 JamDeckPlugin.canvasReturnIframeArmTtlMs = CANVAS_RETURN_IFRAME_ARM_TTL_MS;
 JamDeckPlugin.countdownHelpers = {
