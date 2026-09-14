@@ -36,7 +36,7 @@ module.exports = function createCaptionHost(plugin, { FuzzySuggestModal, Notice,
     config: id => { const widget = plugin.settings.widgets.find(item => item.id === id); return widget.config ||= {}; },
     icon: (element, name) => setIcon(element, name),
     save: () => plugin.saveSettings(), hasKey: () => !!plugin.settings.aiApiKey, ai,
-    source: (onEvent, onError, onClose) => new CaptionSource(directory, path.join(directory, ".cache/caption-runtime.json"), onEvent, onError, onClose),
+    source: (onEvent, onError, onClose) => new CaptionSource(directory, path.join(directory, `.cache/caption-runtime-${process.platform}.json`), onEvent, onError, onClose),
     copy: async text => { require("electron").clipboard.writeText(text); new Notice("字幕墙：已复制"); },
     readNote: async filePath => {
       const file = plugin.app.vault.getAbstractFileByPath(filePath);

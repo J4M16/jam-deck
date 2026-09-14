@@ -36,6 +36,8 @@ class Distribution(unittest.TestCase):
         self.assertNotIn("caption-host.js", packager.BASE)
         self.assertIn("caption-host.js", packager.CAPTIONS)
         self.assertIn("scripts/setup-captions.ps1", packager.CAPTIONS)
+        for name in ["scripts/setup-captions.sh", "scripts/setup-captions-macos.py", "scripts/caption_audio_macos.py", "scripts/caption-audiotee.json"]:
+            self.assertIn(name, packager.CAPTIONS)
         for name in packager.BASE + packager.CAPTIONS:
             self.assertTrue((ROOT / name).is_file())
             self.assertNotIn(".cache", name)

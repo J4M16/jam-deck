@@ -1,6 +1,12 @@
 param([string]$Python = "python", [string]$InstallDir = "", [string]$ModelArchive = "")
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+function Get-CaptionHash([string]$File) {
+  $stream = [IO.File]::OpenRead($File)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "") }
+  finally { $sha.Dispose(); $stream.Dispose() }
+}
 $captionRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA "JamDeck/captions" }
 $captionCache = [IO.Path]::GetFullPath($InstallDir)
@@ -20,7 +26,7 @@ if (-not (Test-Path -LiteralPath $captionPython)) {
 if ($LASTEXITCODE -ne 0) { throw "Caption dependency installation failed." }
 $captionMissing = @($captionSpec.files.PSObject.Properties | Where-Object {
   $file = Join-Path $captionModel $_.Name
-  -not (Test-Path -LiteralPath $file) -or (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash -ne $_.Value
+  -not (Test-Path -LiteralPath $file) -or (Get-CaptionHash $file) -ne $_.Value
 })
 if ($captionMissing.Count -gt 0) {
   $captionDownload = Join-Path $captionCache "$captionModelName.download"
@@ -31,7 +37,7 @@ if ($captionMissing.Count -gt 0) {
       & curl.exe -fL --retry 2 --output $captionArchive $captionSpec.url
       if ($LASTEXITCODE -ne 0) { throw "Caption model download failed. Run this installer again to retry." }
     }
-    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $captionArchive).Hash -ne $captionSpec.sha256) { throw "Caption archive checksum mismatch." }
+    if ((Get-CaptionHash $captionArchive) -ne $captionSpec.sha256) { throw "Caption archive checksum mismatch." }
     & $captionPython (Join-Path $PSScriptRoot "extract-caption-model.py") $captionArchive $captionCache
     if ($LASTEXITCODE -ne 0) { throw "Caption model extraction failed." }
   } finally {
@@ -41,11 +47,11 @@ if ($captionMissing.Count -gt 0) {
 }
 foreach ($captionFile in $captionSpec.files.PSObject.Properties) {
   $file = Join-Path $captionModel $captionFile.Name
-  if (-not (Test-Path -LiteralPath $file) -or (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash -ne $captionFile.Value) { throw "Invalid model file: $($captionFile.Name)" }
+  if (-not (Test-Path -LiteralPath $file) -or (Get-CaptionHash $file) -ne $captionFile.Value) { throw "Invalid model file: $($captionFile.Name)" }
 }
 & $captionPython -c "import sherpa_onnx, pyaudiowpatch, numpy"
 if ($LASTEXITCODE -ne 0) { throw "Caption runtime validation failed." }
 $captionConfigDirectory = Join-Path $captionRoot ".cache"
 New-Item -ItemType Directory -Force -Path $captionConfigDirectory | Out-Null
-@{python=$captionPython; model=$captionModel} | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $captionConfigDirectory "caption-runtime.json")
+@{python=$captionPython; model=$captionModel} | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $captionConfigDirectory "caption-runtime-win32.json")
 Write-Host "Caption runtime ready: $captionCache. Reload Jam Deck. Source developers: deploy to your plugin directory first."

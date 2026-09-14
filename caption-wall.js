@@ -109,12 +109,20 @@ class CaptionSource {
     this.onEvent = onEvent; this.onError = onError; this.onClose = onClose;
   }
   start(source) {
-    if (process.platform !== "win32") throw new Error("语音转录目前仅支持 Windows");
-    if (!fs.existsSync(this.runtime)) throw new Error("语音引擎尚未安装，请按字幕扩展安装说明运行 scripts/setup-captions.ps1");
+    const mac = process.platform === "darwin";
+    if (!mac && process.platform !== "win32") throw new Error("语音转录支持 Windows 和 macOS 14.2+");
+    const installer = mac ? "bash scripts/setup-captions.sh" : "scripts/setup-captions.ps1";
+    if (!fs.existsSync(this.runtime)) throw new Error(`语音引擎尚未在本机安装，请运行 ${installer}`);
     const config = JSON.parse(fs.readFileSync(this.runtime, "utf8").replace(/^\uFEFF/, ""));
-    if (!fs.existsSync(config.python) || !["tokens.txt", "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx", "joiner-epoch-99-avg-1.int8.onnx"].every(file => fs.existsSync(path.join(config.model, file)))) throw new Error("语音引擎文件不完整，请重新运行 scripts/setup-captions.ps1");
-    const child = spawn(config.python, ["-u", path.join(this.directory, "scripts/caption-bridge.py"), "--model", config.model, "--source", source],
-      { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+    if (typeof config.python !== "string" || typeof config.model !== "string" || !fs.existsSync(config.python) || !["tokens.txt", "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx", "joiner-epoch-99-avg-1.int8.onnx"].every(file => fs.existsSync(path.join(config.model, file)))) throw new Error(`本机语音引擎文件不完整，请运行 ${installer}`);
+    const args = ["-u", path.join(this.directory, "scripts/caption-bridge.py"), "--model", config.model, "--source", source];
+    if (mac && source === "system") {
+      if (typeof config.audiotee !== "string" || !fs.existsSync(config.audiotee)) throw new Error(`Mac 系统声音采集器未安装，请运行 ${installer}`);
+      args.push("--audiotee", config.audiotee);
+    }
+    // A separate POSIX process group lets stop also reap a stuck native capture child.
+    const child = spawn(config.python, args,
+      { windowsHide: true, shell: false, detached: mac, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     let stderr = "", failed = false;
     const fail = error => { if (!failed) { failed = true; this.onError(error); } };
@@ -132,10 +140,16 @@ class CaptionSource {
     child.on("error", fail);
     child.on("close", code => {
       clearTimeout(this.readyTimer); clearTimeout(this.killTimer); this.lines.close(); this.child = null;
+      if (mac && child.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") fail(error); }
+      }
       if (code && !this.stopping) fail(new Error(stderr || `字幕引擎退出：${code}`));
       this.onClose();
     });
-    this.readyTimer = setTimeout(() => { fail(new Error("字幕引擎启动超时")); this.stop(); }, 30000);
+    this.readyTimer = setTimeout(() => {
+      fail(new Error(mac ? "字幕引擎启动超时，请检查 macOS 隐私与安全性中的 Obsidian 音频权限" : "字幕引擎启动超时"));
+      this.stop();
+    }, mac ? 120000 : 30000);
   }
   stop() {
     if (this.stopping || !this.child) return;
@@ -143,7 +157,11 @@ class CaptionSource {
     clearTimeout(this.readyTimer);
     const child = this.child;
     child.stdin.end("stop\n");
-    this.killTimer = setTimeout(() => child.kill(), 2500);
+    this.killTimer = setTimeout(() => {
+      if (process.platform === "darwin") {
+        try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") this.onError(error); }
+      } else child.kill();
+    }, 2500);
   }
 }
 

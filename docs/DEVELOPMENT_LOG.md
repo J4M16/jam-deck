@@ -1,5 +1,15 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-14 — 0.32.3 字幕墙 Mac 适配与双平台约定
+
+- Jam 确认目标机为 M5、最新 macOS；新增长期项目约定：后续功能同时考虑 Windows 与 Mac M 系列，涉及系统接口、路径、权限、进程及录音分别实现与验证；无实机环境时不得写成已经验证。
+- Mac 系统声音采用 AudioTee 0.0.7（Core Audio Taps，最低 macOS 14.2）；核对作者 npm 包固定哈希、universal arm64 / x86_64 架构及最低 OS。麦克风采用 sounddevice 0.5.5 / PortAudio；Sherpa-ONNX、NumPy 和 DeepSeek 逻辑共用，M 系列安装器拒绝 Rosetta Python。未引入虚拟声卡、Swift 编译或 GPU 依赖。
+- 新增 Mac 安装器，运行环境放在用户 Library/Application Support/JamDeck/captions；Windows / Mac 本机路径文件分离。模型与 AudioTee 下载均固定 SHA-256，只提取所需文件并删除临时下载。基础包保持轻量，字幕扩展约 30 KB，采集二进制另下载约 193 KB 压缩包、安装约 591 KiB；模型仍为先前四文件。Mac 完整运行环境体积与性能未实测。
+- Mac 采集校验 16 kHz 单声道 PCM16 元数据和分帧，队列有上限；权限等待可取消，EOF/stop 释放音频，Python 异常退出与关闭超时清理整个独立采集进程组。新增跨平台 argv、权限错误、录音溢出、末块数据、停止/异常清理、安装哈希及路径登记回归。测试/打包 Python 与安装入口按系统选择；Windows 安装复测发现 Get-FileHash 在当前子 shell 不可用，改用项目既有 .NET SHA-256 方法后通过。
+- 验证：npm run verify 全绿（包含 9 项 Mac 协议/安装测试）；Windows 真实模型 WAV 产生 14 次 partial、3 段 final；真实 WASAPI 的 stop 与 stdin EOF 均 ready → stopped、退出码 0。0.32.3 部署、热重载成功，扩展加载无错误，部署脚本确认个人 data.json 未改变。打包白名单排除模型、Python、个人路径与数据。
+- 未验证项：当前只有可执行的 Windows 环境，M5 上首次系统声音/麦克风权限、耳机实际采集、连续识别翻译及暂停/热重载释放仍需实机验收。可移植协议测试不能替代 macOS 硬件测试；已在安装说明中列明。
+- 处理模型签名：具体模型标识不可见（主代理、实现与验证）。
+
 ## 2026-09-13 — 0.32.2 可选字幕扩展与引擎精简
 
 - 将字幕模块启动改为可选加载：基础三文件安装不再因缺少 caption-host.js 而崩溃；损坏模块只在字幕区报告。扩展尚未安装时提供安装说明入口。

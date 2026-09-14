@@ -5,6 +5,8 @@ stdout is JSONL only; no audio is written to disk or sent to a server.
 import argparse
 import json
 import queue
+import platform
+import signal
 import sys
 import threading
 import time
@@ -21,6 +23,7 @@ def run():
     parser.add_argument("--model", required=True)
     parser.add_argument("--source", choices=["system", "mic"], default="system")
     parser.add_argument("--wav", help="Offline fixture using the same streaming decoder")
+    parser.add_argument("--audiotee", help="Native macOS system-audio capture executable")
     args = parser.parse_args()
     import numpy as np
     import sherpa_onnx
@@ -70,8 +73,9 @@ def run():
         emit("stopped")
         return
 
-    import pyaudiowpatch as pa
     stop = threading.Event()
+    if sys.platform == "darwin":
+        signal.signal(signal.SIGTERM, lambda *_: stop.set())
     frames = queue.Queue(maxsize=100)
     overflow = threading.Event()
 
@@ -82,6 +86,33 @@ def run():
         stop.set()  # also stops when Obsidian exits / closes the pipe
 
     threading.Thread(target=commands, daemon=True).start()
+
+    if sys.platform == "darwin":
+        if tuple(map(int, platform.mac_ver()[0].split(".")[:2])) < (14, 2):
+            raise RuntimeError("字幕墙的原生系统声音采集需要 macOS 14.2 或更新版本")
+        from caption_audio_macos import SystemAudio, Microphone
+        if args.source == "system" and not args.audiotee:
+            raise RuntimeError("未安装 Mac 系统声音采集器，请运行 bash scripts/setup-captions.sh")
+        with (SystemAudio(args.audiotee) if args.source == "system" else Microphone()) as audio:
+            if audio.wait_ready(stop):
+                rate = audio.sample_rate
+                emit("ready", device=audio.device, source=args.source)
+
+                def decode(raw):
+                    samples = np.frombuffer(raw, dtype=audio.dtype).astype(np.float32)
+                    return samples / 32768 if audio.dtype == "<i2" else samples
+
+                while not stop.is_set():
+                    raw = audio.read()
+                    feed(decode(raw) if raw else np.zeros(int(rate * 0.1), dtype=np.float32), rate)
+                # Only drain the snapshot: callbacks may still enqueue until context exit.
+                for _ in range(audio.frames.qsize()):
+                    feed(decode(audio.frames.get_nowait()), rate)
+                feed(np.zeros(int(rate * 0.4), dtype=np.float32), rate, finish=True)
+        emit("stopped")
+        return
+
+    import pyaudiowpatch as pa
 
     def capture(data, count, timing, status):
         if status:

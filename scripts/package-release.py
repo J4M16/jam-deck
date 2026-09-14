@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE = ["main.js", "styles.css", "manifest.json", "assets/jam-deck-folder-shell.svg"]
 CAPTIONS = ["caption-host.js", "caption-wall.js", "THIRD_PARTY_NOTICES.md", "docs/CAPTION_WALL.md",
             "scripts/caption-bridge.py", "scripts/caption-requirements.txt", "scripts/setup-captions.ps1",
-            "scripts/extract-caption-model.py", "scripts/caption-model.json"]
+            "scripts/extract-caption-model.py", "scripts/caption-model.json",
+            "scripts/caption_audio_macos.py", "scripts/caption-audiotee.json", "scripts/setup-captions.sh", "scripts/setup-captions-macos.py"]
 
 def build():
     version = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))["version"]
