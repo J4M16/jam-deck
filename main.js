@@ -8725,7 +8725,6 @@ class IslandModeController {
     const svgIcon = (enabled) => enabled
       ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>'
       : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
-    const escapeHtml = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
     function renderClipboard() {
       rail.replaceChildren();
@@ -8776,23 +8775,21 @@ class IslandModeController {
           activity();
         });
         chip.addEventListener("dragstart", (event) => {
-          chip.classList.add("is-dragging");
+          if (item.type === "image") {
+            // Native file drag owns its preview and completion. Cancel Chromium's
+            // capsule drag first; it may never emit a DOM dragend after handoff.
+            event.preventDefault();
+            activity();
+            send({ type: "drag-image", ts: item.ts });
+            return;
+          }
           const transfer = event.dataTransfer;
           if (!transfer) return;
+          dragging = true;
+          chip.classList.add("is-dragging");
           transfer.effectAllowed = "copy";
           try { transfer.setData(CLIP_MIME, JSON.stringify({ ts: item.ts, type: item.type })); } catch (error) {}
-          if (item.type === "text") {
-            transfer.setData("text/plain", item.content || "");
-          } else {
-            const url = item.fileUrl || item.resourceUrl || "";
-            if (url) {
-              try { transfer.setData("text/uri-list", url); } catch (error) {}
-              try { transfer.setData("DownloadURL", (item.mime || "image/png") + ":" + item.filename + ":" + url); } catch (error) {}
-              try { transfer.setData("text/plain", url); } catch (error) {}
-              try { transfer.setData("text/html", '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(item.filename) + '">'); } catch (error) {}
-            }
-            send({ type: "drag-image", ts: item.ts });
-          }
+          transfer.setData("text/plain", item.content || "");
           activity();
         });
         chip.addEventListener("dragend", () => chip.classList.remove("is-dragging"));
@@ -8885,7 +8882,6 @@ class IslandModeController {
       if (state.collapsed && !inPeekZone(event)) return;
       activity(state.collapsed);
     }, { capture: true, passive: true });
-    document.addEventListener("dragstart", () => { dragging = true; clearLeave(); }, true);
     document.addEventListener("dragend", () => { dragging = false; }, true);
     document.documentElement.addEventListener("mouseenter", (event) => {
       clearLeave();

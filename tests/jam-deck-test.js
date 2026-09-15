@@ -454,6 +454,119 @@ Module._load = function(request, parent, isMain) {
 
 const JamDeckPlugin = require(mainPath);
 
+function makeIslandDragHarness() {
+  const sent = [];
+  const timers = new Map();
+  let timerId = 0;
+  function element() {
+    const listeners = new Map();
+    const classes = new Set();
+    return {
+      children: [],
+      classList: {
+        add: (name) => classes.add(name),
+        remove: (name) => classes.delete(name),
+        contains: (name) => classes.has(name),
+        toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
+      },
+      addEventListener(type, listener, options) {
+        const entries = listeners.get(type) || [];
+        entries.push({ listener, capture: options === true || !!(options && options.capture) });
+        listeners.set(type, entries);
+      },
+      emit(type, event = {}, capture = false) {
+        for (const entry of listeners.get(type) || []) {
+          if (entry.capture === capture) entry.listener(event);
+        }
+      },
+      appendChild(child) { this.children.push(child); },
+      replaceChildren() { this.children = []; },
+      setAttribute() {},
+    };
+  }
+  const nodes = Object.fromEntries(["app", "rail", "timerHost", "restore", "toast"].map((id) => [id, element()]));
+  const document = Object.assign(element(), {
+    body: element(), documentElement: element(), createElement: element,
+    getElementById: (id) => nodes[id],
+  });
+  const window = Object.assign(element(), {
+    setTimeout(callback) { timers.set(++timerId, callback); return timerId; },
+    clearTimeout(id) { timers.delete(id); },
+  });
+  const controller = new JamDeckPlugin.IslandModeController({ app: {} });
+  controller.actionChannel = "island-drag-test";
+  const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1];
+  vm.runInNewContext(script, {
+    document, window, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
+    require: () => ({ ipcRenderer: { send: (_channel, payload) => sent.push(payload), on() {} } }),
+  });
+  return {
+    sent,
+    render(items) { window.jamDeckIslandSetState({ items, collapsed: false, leaveMs: 1000 }); },
+    chip(index = 0) { return nodes.rail.children[index]; },
+    drag(chip, type, transfer = true) {
+      const data = new Map();
+      const event = {
+        target: chip, defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        dataTransfer: transfer ? { setData: (key, value) => data.set(key, value) } : null,
+      };
+      document.emit(type, event, true);
+      chip.emit(type, event);
+      document.emit(type, event);
+      return { event, data };
+    },
+    leave() { document.documentElement.emit("mouseleave"); },
+    flushTimers() {
+      const pending = [...timers.values()];
+      timers.clear();
+      for (const callback of pending) callback();
+    },
+  };
+}
+
+{
+  const harness = makeIslandDragHarness();
+  // Native completion, cancellation and rejected drops need not emit DOM dragend.
+  for (const [index, filePath] of ["C:\\Vault\\图片.png", "/Users/jam/Vault/图片.png"].entries()) {
+    harness.render([{ type: "image", ts: index + 1, filename: "图片.png", filePath, fileUrl: "file:///image.png" }]);
+    const chip = harness.chip();
+    const { event, data } = harness.drag(chip, "dragstart");
+    assert(event.defaultPrevented, "image drag must cancel the HTML capsule ghost before native drag starts");
+    assert.strictEqual(data.size, 0, "native image drag must not start a second HTML data-transfer session");
+    assert(!chip.classList.contains("is-dragging"), "native image drag must not await DOM dragend to clear its class");
+    assert.strictEqual(harness.sent.filter((payload) => payload.type === "drag-image").length, index + 1);
+    assert.strictEqual(harness.sent.at(-1).ts, index + 1, "each image must dispatch its own native drag exactly once");
+    harness.leave();
+    harness.flushTimers();
+    assert.strictEqual(harness.sent.at(-1).type, "collapse", "image drag without dragend must not latch the island open");
+  }
+  harness.render([{ type: "text", ts: 3, content: "拖拽文字", summary: "文字" }]);
+  const chip = harness.chip();
+  const { event, data } = harness.drag(chip, "dragstart");
+  assert(!event.defaultPrevented, "text must retain standard HTML drag and drop");
+  assert.strictEqual(event.dataTransfer.effectAllowed, "copy");
+  assert.strictEqual(data.get("text/plain"), "拖拽文字");
+  assert.deepStrictEqual(JSON.parse(data.get("application/x-jam-deck-clipboard+json")), { ts: 3, type: "text" });
+  assert(chip.classList.contains("is-dragging"));
+  const beforeLeave = harness.sent.length;
+  harness.leave();
+  harness.flushTimers();
+  assert.strictEqual(harness.sent.length, beforeLeave, "active text drag must defer renderer collapse");
+  harness.drag(chip, "dragend");
+  assert(!chip.classList.contains("is-dragging"), "text drop or cancellation must clear its visual state");
+  harness.flushTimers();
+  assert.strictEqual(harness.sent.length, beforeLeave, "cancelling text drag while still over the island must not collapse it");
+  harness.leave();
+  harness.flushTimers();
+  assert.strictEqual(harness.sent.at(-1).type, "collapse", "leaving after text dragend must resume collapse");
+  harness.drag(chip, "dragstart", false);
+  assert(!chip.classList.contains("is-dragging"), "a drag without DataTransfer must not mark a chip as dragging");
+  harness.leave();
+  harness.flushTimers();
+  assert.strictEqual(harness.sent.at(-1).type, "collapse");
+}
+
 function makeIslandLifecycleHarness() {
   const body = { classList: { contains: () => false }, ownerDocument: { documentElement: { classList: { contains: () => false } } } };
   const view = {

@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-15 — 0.32.6 灵动岛图片拖影残留
+
+- 原因：图片 dragstart 同时写入 HTML DataTransfer 并发送 IPC 启动 Electron startDrag，网页默认胶囊拖影与系统文件拖拽重叠。按 Electron 官方原生拖拽模式先 preventDefault，再发送 drag-image；移除图片 HTML 数据分支及闲置转义函数，将 dragging 标志和 is-dragging 类限定到文字分支，不等待原生拖拽可能缺失的 DOM dragend。工具：Codex；处理模型签名：GPT-6（主代理、实现与验证）；工具：Codex；处理模型签名：具体模型标识不可见（子代理、只读审查）。
+- 标准验证：新增 VM 执行真实灵动岛脚本的回归，旧代码在取消默认拖影断言失败，修复后 npm run verify 全绿；覆盖连续图片、无 dragend、文字 MIME、取消后仍停在岛内及离开后的收起。Windows 0.32.6 已部署热重载，data.json 部署前后哈希一致；真实鼠标触发得到 cancelled=true、types=[]、dragging=false、ends=0、remaining=0，松手截图无胶囊拖影。本地接收区未收到 drop，因此不宣称外部聊天框接收已验证；macOS M5 未实测。临时检查区和运行时覆盖已清理。工具：Codex；处理模型签名：GPT-6（主代理、实现与验证）；工具：Codex；处理模型签名：具体模型标识不可见（子代理、只读审查）。
+
 ## 2026-09-15 — 0.32.5 原生 Canvas 章节与 Jam Deck 文件夹共存
 
 - 普通 Group 保留原生框；折叠时只对当前文件夹拥有的分组、成员和关联连线加展示类。文件夹增加「原位展开」，原生分组选中工具条增加「收起为文件夹」；点击壳体仍走现有散开预览，图片/文本仍可放映，其他附件点击展开后编辑。外层章节可保留框并包含多个内层文件夹。
