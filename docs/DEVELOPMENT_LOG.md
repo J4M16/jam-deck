@@ -1,5 +1,9 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-15 — v0.32.6 发布
+
+- v0.32.6 发布范围：整合 develop 自 v0.31.46 以来的 AI 图片与搜索修复、可选字幕墙及 Mac 安装入口、Canvas 网页下载与原生章节/文件夹共存、灵动岛图片拖拽修复。npm run verify 全绿；发行文件为基础 ZIP、字幕扩展 ZIP 与标准三件套。Windows 已有功能实测；macOS M5 与外部聊天框收图仍待实测。工具：Codex；处理模型签名：GPT-6（发布执行与验证）。
+
 ## 2026-09-15 — 0.32.6 灵动岛图片拖影残留
 
 - 原因：图片 dragstart 同时写入 HTML DataTransfer 并发送 IPC 启动 Electron startDrag，网页默认胶囊拖影与系统文件拖拽重叠。按 Electron 官方原生拖拽模式先 preventDefault，再发送 drag-image；移除图片 HTML 数据分支及闲置转义函数，将 dragging 标志和 is-dragging 类限定到文字分支，不等待原生拖拽可能缺失的 DOM dragend。工具：Codex；处理模型签名：GPT-6（主代理、实现与验证）；工具：Codex；处理模型签名：具体模型标识不可见（子代理、只读审查）。
