@@ -1,0 +1,4 @@
+sherpa-onnx==1.12.40
+PyAudioWPatch==0.2.12.8; sys_platform == "win32"
+sounddevice==0.5.5; sys_platform == "darwin"
+numpy==2.2.6

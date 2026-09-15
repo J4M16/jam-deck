@@ -6,9 +6,9 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 
 **方式 A —— Release 手动安装**
 
-1. 前往 [Releases](https://github.com/J4M16/jam-deck/releases) 下载最新版的 `main.js`、`styles.css`、`manifest.json` 三个文件
+1. 前往 [Releases](https://github.com/J4M16/jam-deck/releases) 下载基础包 `jam-deck-<版本>.zip`（0.32.2 起的打包格式，含插件文件及图形资源）
 2. 在 vault 目录下创建 `.obsidian/plugins/jam-deck/`（若不存在）
-3. 把三个文件放入该目录
+3. 把基础包内容解压到该目录
 4. Obsidian 设置 → 第三方插件 → 刷新插件列表 → 启用 **Jam Deck**
 
 **方式 B —— BRAT 安装（beta 体验）**
@@ -16,6 +16,12 @@ Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴�
 1. 安装社区插件 [BRAT](https://github.com/TfTHacker/obsidian42-brat)
 2. BRAT 设置 → Add Beta plugin → 填入 `J4M16/jam-deck`
 3. 启用后刷新插件列表即可
+
+## 可选字幕扩展
+
+基础包不包含字幕模块、Python 或语音模型。不需要字幕功能的用户无需额外下载。
+
+需要时安装同版本 `jam-deck-captions-<版本>.zip`，按[字幕墙安装说明](docs/CAPTION_WALL.md#首次安装)安装语音引擎。字幕扩展与基础包均由 `npm run package` 生成；维护者确认发布后，将两个 ZIP 上传至对应 Release。
 
 ## 快速上手
 
@@ -42,7 +48,8 @@ AI 弹窗第二页嵌入本机 DeepSeek Harness（`127.0.0.1:3080`）。工作�
 
 - 仅桌面端（`isDesktopOnly: true`），移动端不可用。
 - Windows 为完整支持平台（音乐组件依赖系统媒体会话）。
-- macOS / Linux 未完整验证：音乐组件不可用，其余功能预期可用。
+- macOS Apple Silicon（M 系列）是后续功能的共同目标平台；字幕扩展已接入 macOS 14.2+ 原生系统声音与麦克风，M5 首次权限及真实采音仍待实机验收，详见 [字幕墙安装说明](docs/CAPTION_WALL.md)。音乐组件仍不可用，其余功能未完整验证。
+- Linux 未完整验证，音乐与字幕录音不可用。
 
 ## 音乐播放器
 
@@ -126,6 +133,13 @@ AI 弹窗第二页嵌入本机 DeepSeek Harness（`127.0.0.1:3080`）。工作�
 - 0.9.0 不访问网页、不抓取网页标题或 favicon，因此离线也能创建，且不会产生网站图标附件。
 - 快捷方式可在同一个组件内直接拖拽重排；键盘聚焦卡片后可用 `Alt + 方向键` 前后移动，`Alt + Home / End` 移到首尾。
 - 原有外部文件、应用和文件夹拖入继续保留。网页仅接受完整的 `http / https` 地址，普通说明文字不会被拆取成链接。
+
+## Canvas 网页下载
+
+- 在 Jam Deck 内嵌 Canvas 的网页节点点击下载，文件会自动保存到 Vault 的 `attachments/jam-deck-canvas-downloads/`，完成后作为文件节点贴在来源网页右侧；连续下载向下避让现有节点。
+- 支持浏览器普通下载和网页生成的 Blob 下载；保留原文件名并添加短标识，避免同名覆盖。图片、PDF 等使用 Canvas 原生预览，其他格式作为文件附件。
+- 下载中切换或关闭来源画布，完成后仍写回原 `.canvas`；关闭 Jam Deck / 卸载插件会取消进行中的下载并清理临时文件。已保存但无法贴回的文件保留在下载目录，并提示原因。
+- 仅接管 Jam Deck 内嵌 Canvas 的网页下载；外部浏览器、独立浏览器组件和网站自定义文件保存接口不在此范围内。采用 Electron 共用接口，Windows 已实测；macOS Apple Silicon 仍待实机验证。
 
 ## Canvas 混合素材堆叠
 

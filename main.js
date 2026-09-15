@@ -1,6 +1,6 @@
 "use strict";
 
-const { ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, normalizePath, requestUrl, setIcon } = require("obsidian");
+const { ItemView, Modal, FuzzySuggestModal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, normalizePath, requestUrl, setIcon } = require("obsidian");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const nodePath = require("path");
@@ -15,6 +15,7 @@ const JAM_DECK_LEGACY_GRID_COLS = 12;
 const CLIPBOARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CLIPBOARD_DIR = "attachments/jam-deck-clipboard";
 const CANVAS_ASSET_DIR = "attachments/jam-deck-canvas-assets";
+const CANVAS_DOWNLOAD_DIR = "attachments/jam-deck-canvas-downloads";
 const ICON_DIR = "attachments/jam-deck-icons";
 const SHORTCUT_LINK_DIR = "attachments/jam-deck-shortcuts";
 const TASK_ASSET_DIR = "attachments/jam-deck-task-assets";
@@ -42,9 +43,21 @@ const MEDIA_ARTWORK_MAX_BYTES = 768 * 1024;
 const MEDIA_REQUEST_TIMEOUT_MS = 5000;
 const MEDIA_READY_TIMEOUT_MS = 6000;
 const AI_LOCAL_WEB_URL = "http://127.0.0.1:3080/";
+// DeepSeek 侧固定使用 deepseek-flash：本账号下唯一支持图片输入的模型。
+// 实测（2026-09-12）：deepseek-v4-pro 收到图片时回「[Unsupported Image]」并声称看不到图；
+// deepseek-v4.1-flash / deepseek-v4-flash 等名字不在支持列表（仅 deepseek-flash / deepseek-v4-pro），传错名会 HTTP 400。
+const JAM_DECK_DEEPSEEK_MODEL = "deepseek-flash";
+// 本机 DeepSeek Harness（dsh）通道：带搜索/联网意图的提问交给它跑，回答直接显示。
+// 调用方式是 node 直调 dsh 的 bin.js（参数走数组、完全不经过 shell）——实测中文与 & | 等字符
+// 原样传递。刻意不用 `cmd.exe /c dsh.cmd` 包装：那条路要靠 Node 自动加引号才没炸，不能依赖。
+const JAM_DECK_HARNESS_PROFILE = "headless";
+const JAM_DECK_HARNESS_TIMEOUT_MS = 120000;
+const JAM_DECK_HARNESS_PATTERN = /(搜索|搜一下|搜一搜|搜搜|帮我搜|查一下|查一查|查查|帮我查|联网|上网查|最新消息|最新动态|实时|新闻|股价|行情|天气|快递|谁是|什么时候)/i;
 const AI_LOCAL_RPC_BASE = "http://127.0.0.1:3080/api/";
 const AI_LOCAL_RPC_TIMEOUT_MS = 6000;
 const AI_LOCAL_RPC_METHODS = new Set(["workspace.create", "workspace.list", "session.list", "session.create"]);
+// 一次对话里最多几轮工具往返；模型可能并行发起多个 tool_call，每轮要全部回填。
+const AI_TOOL_MAX_ROUNDS = 3;
 const ISLAND_WIDTH = 1600;
 // Outer transparent window: content capsule + room for soft drop-shadow (not clipped).
 const ISLAND_SHADOW_PAD_X = 36;
@@ -855,6 +868,7 @@ function jamDeckCountdownState(widget, now = Date.now()) {
 }
 
 const WIDGET_DEFS = {
+  captions: { label: "字幕墙", icon: "≋", w: 18, h: 18, minDisplayW: 10, minDisplayH: 14 },
   clock: { label: "时钟", icon: "◷", w: 13, h: 8, minDisplayW: 4, minDisplayH: 4 },
   clipboard: { label: "剪贴板", icon: "▣", w: 13, h: 18, minDisplayW: 4, minDisplayH: 5 },
   tasks: { label: "最近待办", icon: "✓", w: 13, h: 14, minDisplayW: 4, minDisplayH: 4 },
@@ -875,10 +889,11 @@ const DEFAULT_SETTINGS = {
   clipboardPollMs: 700,
   clipboardMaxItems: 60,
   aiApiKey: "",
-  aiModel: "deepseek-v4-flash",
   glmApiKey: "",
   glmModel: "glm-5.3-flash",
   aiProvider: "deepseek",
+  // 搜索/联网类提问交给本机 DeepSeek Harness（dsh）执行；关闭后全部走上方模型。
+  harnessSearch: true,
   aiLocalWorkspacePath: "",
   canvasExportDir: "",
   aiFabPos: null,
@@ -2829,7 +2844,7 @@ function jamDeckCanvasStackBystanderShift(rect, focus, viewport, gap = 20, influ
 // Canvas folders intentionally live in the Canvas node's `jamdeck` payload.
 // Keep this schema small and deterministic so reopening a Canvas (or undoing a
 // mutation) never depends on a runtime-only registry or a screenshot cache.
-const JAM_DECK_CANVAS_FOLDER_SCHEMA_VERSION = 1;
+const JAM_DECK_CANVAS_FOLDER_SCHEMA_VERSION = 2;
 // NZS4 Figma "文件夹样式" (134:143) board solids: 纸灰/浅红/樱粉/月黄/草绿/天蓝.
 const JAM_DECK_CANVAS_FOLDER_COLORS = ["#C1C1C1", "#F7BDB1", "#F0C5DA", "#EDD0AE", "#BBE0AF", "#AFD0E0"];
 // Older presets persisted in Canvas metadata map onto the closest NZS4 Figma
@@ -2980,63 +2995,18 @@ function jamDeckCanvasFolderNormalizeColor(value) {
   return JAM_DECK_CANVAS_FOLDER_COLORS[0];
 }
 
-// Native folders (schema additions, v1 kept): each member keeps its authored
-// rectangle in `positions` (expanded) and its stacked rectangle in `stacked`
-// (collapsed), so collapse/expand are plain coordinate transactions.  `label`
-// feeds the native Canvas group node name; `nativeGroupId` maps the persisted
-// group node (a node with type "group" in Obsidian 1.13) back to the folder.
-function jamDeckCanvasFolderRects(value) {
-  if (!value || typeof value !== "object") return null;
-  const out = {};
-  for (const [id, rect] of Object.entries(value)) {
-    if (!id || !rect || typeof rect !== "object") continue;
-    const x = Number(rect.x);
-    const y = Number(rect.y);
-    const width = Number(rect.width);
-    const height = Number(rect.height);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) continue;
-    out[String(id)] = { x, y, width, height };
-  }
-  return Object.keys(out).length ? out : null;
-}
-
 function jamDeckCanvasFolderSchema(data) {
-  if (!data || typeof data !== "object") return null;
-  const jamdeck = data.jamdeck && typeof data.jamdeck === "object" ? data.jamdeck : null;
-  const raw = jamdeck && jamdeck.folder && typeof jamdeck.folder === "object" ? jamdeck.folder : null;
-  const id = String((raw && raw.id) || (jamdeck && jamdeck.folderId) || "").trim();
+  if (!data || !data.jamdeck) return null;
+  const raw = data.type === "group" && data.jamdeck.folder;
+  const id = String(raw ? data.id : data.jamdeck.folderId || "");
   if (!id) return null;
-  const memberIds = [...new Set((raw && Array.isArray(raw.memberIds) ? raw.memberIds : [data.id])
-    .map((value) => String(value || "").trim())
-    .filter(Boolean))].sort();
-  // Only the anchor (the node carrying the full folder record) owns an
-  // anchorId.  Plain members only carry folderId, so defaulting anchorId to
-  // data.id here would make every member claim anchor and poison
-  // collectGroups/validateFolderGroup with "嵌套或重复文件夹锚点".
-  const anchorId = String((raw && raw.anchorId) || "").trim();
   return {
-    version: Number(raw && raw.version) || JAM_DECK_CANVAS_FOLDER_SCHEMA_VERSION,
-    id,
-    anchorId,
-    memberIds,
-    collapsed: raw && Object.prototype.hasOwnProperty.call(raw, "collapsed") ? !!raw.collapsed : true,
+    version: 2, id,
+    memberIds: raw && Array.isArray(raw.memberIds) ? [...new Set(raw.memberIds.map(String).filter(Boolean))] : [String(data.id)],
+    collapsed: raw ? raw.collapsed !== false : true,
     color: jamDeckCanvasFolderNormalizeColor(raw && raw.color),
     layoutMode: raw && raw.layoutMode === "grid" ? "grid" : "stack",
-    native: !!(raw && raw.native),
-    label: String((raw && raw.label) || "文件夹").trim() || "文件夹",
-    nativeGroupId: String((raw && raw.nativeGroupId) || "").trim(),
-    positions: jamDeckCanvasFolderRects(raw && raw.positions),
-    stacked: jamDeckCanvasFolderRects(raw && raw.stacked),
-    hiddenEdges: raw && Array.isArray(raw.hiddenEdges)
-      ? raw.hiddenEdges.filter((edge) => edge && typeof edge === "object" && edge.id)
-      : null,
-    representativeIds: jamDeckCanvasFolderMemberSort(
-      [...new Set((raw && Array.isArray(raw.representativeIds) ? raw.representativeIds : memberIds.slice(0, JAM_DECK_CANVAS_FOLDER_MAX_REPRESENTATIVES))
-        .map((value) => String(value || "").trim())
-        .filter(Boolean))],
-      anchorId,
-    ).slice(0, JAM_DECK_CANVAS_FOLDER_MAX_REPRESENTATIVES),
-    representativeColumns: jamDeckCanvasFolderRepresentativeColumns(memberIds),
+    shellOffset: { x: Number(raw && raw.shellOffset && raw.shellOffset.x) || 0, y: Number(raw && raw.shellOffset && raw.shellOffset.y) || 0 },
   };
 }
 
@@ -3049,6 +3019,15 @@ function jamDeckCanvasFolderMemberSort(members, anchorId = "") {
     if (rightId === String(anchorId || "")) return 1;
     return leftId.localeCompare(rightId);
   });
+}
+
+function jamDeckActiveCanvasFolderId(data, canvas) {
+  const id = data && data.jamdeck && data.jamdeck.folderId;
+  const node = id && canvas && canvas.nodes && canvas.nodes.get(String(id));
+  if (!node || typeof node.getData !== "function") return null;
+  const group = node.getData();
+  const record = group.type === "group" && group.jamdeck && group.jamdeck.folder;
+  return record && Array.isArray(record.memberIds) && record.memberIds.includes(String(data.id)) ? String(id) : null;
 }
 
 function jamDeckCanvasFolderRepresentatives(members, anchorId = "", max = JAM_DECK_CANVAS_FOLDER_MAX_REPRESENTATIVES) {
@@ -3248,9 +3227,10 @@ class CanvasImageStackController {
     if (!node || typeof node.getData !== "function") return null;
     let data;
     try { data = node.getData(); } catch (error) { return null; }
-    const kind = jamDeckCanvasStackKind(data);
+    const folderMember = jamDeckActiveCanvasFolderId(data, this.canvas);
+    const kind = jamDeckCanvasStackKind(data) || (folderMember && (data.type === "link" || data.type === "file") ? "attachment" : null);
     if (!kind) return null;
-    if (data.type === "file") {
+    if (data.type === "file" && !folderMember) {
       const app = this.runtime && this.runtime.deckView && this.runtime.deckView.app;
       const file = app && app.vault && typeof app.vault.getAbstractFileByPath === "function"
         ? app.vault.getAbstractFileByPath(data.file)
@@ -3266,7 +3246,7 @@ class CanvasImageStackController {
     const items = [];
     for (const node of this.canvas.nodes.values()) {
       const item = this.nodeItem(node);
-      const explicitFolder = item && item.data && item.data.jamdeck && (item.data.jamdeck.folderId || item.data.jamdeck.folder);
+      const explicitFolder = item && jamDeckActiveCanvasFolderId(item.data, this.canvas);
       if (item && (includeExplicitFolders || !explicitFolder)) items.push(item);
     }
     return items;
@@ -3451,6 +3431,10 @@ class CanvasImageStackController {
       startClientX: event.clientX,
       startClientY: event.clientY,
       startWorld,
+      grabRatio: (() => {
+        const rect = card.getBoundingClientRect();
+        return { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height))) };
+      })(),
       baseRect: { ...live.rect },
       baseIdentity: {
         type: live.data.type,
@@ -3605,12 +3589,24 @@ class CanvasImageStackController {
       width: press.baseRect.width,
       height: press.baseRect.height,
     };
+    if (press.previewCluster && press.previewCluster.folderId) {
+      const grab = press.grabRatio || { x: 0.5, y: 0.5 };
+      translated.x = jamDeckRoundCanvasStackValue(endWorld.x - translated.width * grab.x);
+      translated.y = jamDeckRoundCanvasStackValue(endWorld.y - translated.height * grab.y);
+    }
     const others = this.getStackItems().filter((item) => item.id !== press.nodeId);
     const normalization = press.kind === "image" || press.kind === "text"
       ? jamDeckCanvasStackNormalization(live.data, press.kind)
       : null;
+    let restoreCandidate = translated;
+    if (normalization && press.previewCluster && press.previewCluster.folderId) {
+      const size = normalization.originalCanvasSize;
+      const grab = press.grabRatio || { x: 0.5, y: 0.5 };
+      // Restore around the pointer's actual grab point before checking overlap.
+      restoreCandidate = { x: endWorld.x - size.width * grab.x, y: endWorld.y - size.height * grab.y, width: size.width, height: size.height };
+    }
     const restored = normalization
-      ? jamDeckRestoreCanvasStackImage(translated, normalization.originalCanvasSize, others)
+      ? jamDeckRestoreCanvasStackImage(restoreCandidate, normalization.originalCanvasSize, others)
       : null;
     const finalRect = restored || translated;
     try {
@@ -3639,6 +3635,17 @@ class CanvasImageStackController {
 
   handlePreviewCardClick(press) {
     if (!press || !press.member) return;
+    if (press.member.kind === "attachment") {
+      const controller = this.entry && this.entry.folderController;
+      const group = controller && press.previewCluster && controller.groupFromId(press.previewCluster.folderId);
+      if (group) {
+        try {
+          controller.updateFolder(group, { collapsed: false });
+          if (this.canvas.selectOnly) this.canvas.selectOnly(press.member.node);
+        } catch (error) { new Notice(`Jam Deck：${error.message}`); }
+      }
+      return;
+    }
     this.openNodeFocus(press.member.node, press.visual && press.visual.card);
   }
 
@@ -4138,7 +4145,7 @@ class CanvasImageStackController {
       currentItem && currentItem.node && currentItem.node.nodeEl
       && currentItem.node.nodeEl.hasClass && currentItem.node.nodeEl.hasClass("is-jam-deck-folder-member")
     ) return false;
-    if (currentItem && currentItem.data && currentItem.data.jamdeck && (currentItem.data.jamdeck.folderId || currentItem.data.jamdeck.folder)) return false;
+    if (currentItem && jamDeckActiveCanvasFolderId(currentItem.data, this.canvas)) return false;
     // Folder members are buried at the anchor and mutually overlap, so they
     // look exactly like a legacy stack cluster.  Folders own grouping now —
     // the legacy auto-snap must never normalize/snap onto folder-owned nodes.
@@ -4196,7 +4203,7 @@ class CanvasImageStackController {
       currentItem.node && currentItem.node.nodeEl && currentItem.node.nodeEl.hasClass
       && currentItem.node.nodeEl.hasClass("is-jam-deck-folder-member")
     ) return false;
-    if (currentItem.data && currentItem.data.jamdeck && (currentItem.data.jamdeck.folderId || currentItem.data.jamdeck.folder)) return false;
+    if (jamDeckActiveCanvasFolderId(currentItem.data, this.canvas)) return false;
     const normalization = jamDeckCanvasStackNormalization(currentItem.data, currentItem.kind);
     if (!normalization) return false;
     const restored = jamDeckRestoreCanvasStackImage(currentItem, normalization.originalCanvasSize, candidates);
@@ -4335,7 +4342,7 @@ class CanvasImageStackController {
   }
 
   togglePreview(cluster) {
-    if (!cluster || cluster.members.length < 2) {
+    if (!cluster || cluster.members.length < (cluster.folderId ? 1 : 2)) {
       this.collapsePreview();
       return;
     }
@@ -4375,6 +4382,12 @@ class CanvasImageStackController {
   }
 
   createPreviewSurface(member) {
+    if (member && member.kind === "attachment") {
+      const surface = this.entry.ownerDocument.createElement("div");
+      surface.className = "jam-deck-canvas-stack-preview-surface is-placeholder is-attachment";
+      surface.textContent = `${member.data.url || String(member.data.file || "附件").split("/").pop()}\n点击原位查看`;
+      return surface;
+    }
     // Folder members are hidden while collapsed, so Obsidian may never hydrate
     // their native <img> DOM before the folder asks for a thumbnail.  Resolve
     // image nodes from the canonical Canvas file path instead of cloning that
@@ -4484,12 +4497,12 @@ class CanvasImageStackController {
 
   showPreview(cluster) {
     this.collapsePreview(true);
-    if (!this.overlay || !cluster || cluster.members.length < 2) return;
+    if (!this.overlay || !cluster || cluster.members.length < (cluster.folderId ? 1 : 2)) return;
     const isExternal = !this.clusters.some((candidate) => candidate.id === cluster.id);
     if (isExternal) this.externalPreviewClusters.set(cluster.id, cluster);
     const rootRect = this.root.getBoundingClientRect();
     const visuals = this.buildPreviewVisuals(cluster, rootRect);
-    if (visuals.length < 2) {
+    if (visuals.length < (cluster.folderId ? 1 : 2)) {
       this.externalPreviewClusters.delete(cluster.id);
       return;
     }
@@ -4518,7 +4531,7 @@ class CanvasImageStackController {
       wrapper.appendChild(built.card);
       previewCards.push(built);
     });
-    if (previewCards.length < 2) {
+    if (previewCards.length < (cluster.folderId ? 1 : 2)) {
       for (const visual of previewCards) visual.member.node.nodeEl.removeClass("is-jam-deck-stack-source-ghost");
       this.externalPreviewClusters.delete(cluster.id);
       return;
@@ -4620,6 +4633,8 @@ class CanvasImageStackController {
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", visual.member.kind === "image"
       ? "图片：单击放大，拖动移出堆叠"
+      : visual.member.kind === "attachment"
+        ? "附件：单击原位展开，拖动移出文件夹"
       : visual.member.kind === "text"
         ? "文本：单击放大，拖动移出堆叠"
         : "笔记：单击放大，拖动移出堆叠");
@@ -4816,6 +4831,236 @@ function jamDeckCanvasLinkBridgeScript(action = "install") {
   })()`;
 }
 
+// Runs in Electron's main process: setSavePath must happen synchronously in
+// will-download, before Electron opens its default save dialog. Only explicit
+// Jam Deck webContents IDs are owned; other tabs keep their normal downloads.
+function jamDeckCreateCanvasDownloadService(require, options, notify) {
+  const fs = require("fs"), path = require("path"), crypto = require("crypto");
+  const { webContents } = require("electron");
+  const bindings = new Map(), sessions = new Map(), jobs = new Map();
+  const root = path.resolve(options.root);
+  const directory = path.resolve(root, options.directory);
+  const temporary = path.resolve(root, options.temporary);
+  for (const target of [directory, temporary]) {
+    const relative = path.relative(root, target);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Invalid Canvas download directory");
+  }
+  let disposed = false;
+  const send = (event) => { if (!disposed) { try { notify(JSON.stringify(event)); } catch (error) {} } };
+  const cleanTemporary = (file) => { try { fs.unlinkSync(file); } catch (error) { if (error.code !== "ENOENT") console.error("Jam Deck download cleanup", error); } };
+  const filename = (value) => {
+    let name = String(value || "download").replace(/[\\/<>:"|?*\x00-\x1f]/g, "_").replace(/^\.+|[. ]+$/g, "");
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = "_" + name;
+    return name.slice(-180) || "download";
+  };
+  function download(event, item, contents) {
+    const binding = contents && bindings.get(contents.id);
+    if (!binding || disposed) return;
+    const id = crypto.randomUUID();
+    const owner = { ...binding.owner };
+    const name = `${id.slice(0, 8)}-${filename(item.getFilename())}`;
+    const part = path.join(temporary, `${id}.part`);
+    const destination = path.join(directory, name);
+    const relativePath = path.relative(root, destination).split(path.sep).join("/");
+    try {
+      fs.mkdirSync(temporary, { recursive: true });
+      fs.mkdirSync(directory, { recursive: true });
+      item.setSavePath(part);
+      const job = { item, part, done: null };
+      job.done = (_event, state) => {
+        jobs.delete(id);
+        if (state !== "completed" || disposed) {
+          cleanTemporary(part);
+          send({ type: "failed", id, owner, message: state === "cancelled" ? "下载已取消" : "下载中断" });
+          return;
+        }
+        try {
+          // UUID destinations never overwrite an existing Vault attachment.
+          fs.linkSync(part, destination);
+          cleanTemporary(part);
+          send({ type: "completed", id, owner, path: relativePath });
+        } catch (error) {
+          cleanTemporary(part);
+          send({ type: "failed", id, owner, message: `下载保存失败：${error.message}` });
+        }
+      };
+      jobs.set(id, job);
+      item.once("done", job.done);
+      send({ type: "started", id, owner });
+    } catch (error) {
+      // The download belongs to this feature; do not silently redirect it elsewhere.
+      try { item.cancel(); } catch (ignored) {}
+      cleanTemporary(part);
+      send({ type: "failed", id, owner, message: `无法开始下载：${error.message}` });
+    }
+  }
+  function unregister(id) {
+    const binding = bindings.get(id);
+    if (!binding) return;
+    bindings.delete(id);
+    const record = sessions.get(binding.session);
+    if (record && --record.count === 0) {
+      binding.session.removeListener("will-download", download);
+      sessions.delete(binding.session);
+    }
+  }
+  return {
+    register(id, serializedOwner) {
+      if (disposed) return false;
+      const contents = webContents.fromId(id);
+      if (!contents || contents.isDestroyed() || contents.getType() !== "webview") return false;
+      const owner = JSON.parse(serializedOwner);
+      const current = bindings.get(id);
+      if (current) { current.owner = owner; return true; }
+      const session = contents.session;
+      if (!sessions.has(session)) { session.on("will-download", download); sessions.set(session, { count: 0 }); }
+      sessions.get(session).count++;
+      bindings.set(id, { session, owner });
+      return true;
+    },
+    unregister,
+    stats() { return JSON.stringify({ bindings: bindings.size, sessions: sessions.size, jobs: jobs.size }); },
+    dispose() {
+      disposed = true;
+      for (const id of [...bindings.keys()]) unregister(id);
+      for (const job of jobs.values()) {
+        job.item.removeListener("done", job.done);
+        try { job.item.cancel(); } catch (error) {}
+        cleanTemporary(job.part);
+      }
+      jobs.clear();
+    },
+  };
+}
+
+function jamDeckCanvasDownloadNode(owner, nodes, file, id) {
+  const source = nodes.find(node => node.id === owner.nodeId) || owner.rect;
+  const result = { id, type: "file", file, x: source.x + source.width + 32, y: source.y, width: 400, height: 300 };
+  for (let attempt = 0; attempt <= nodes.length; attempt++) {
+    const collisions = nodes.filter(node => node.type !== "group" && result.x < node.x + node.width && result.x + result.width > node.x && result.y < node.y + node.height && result.y + result.height > node.y);
+    if (!collisions.length) break;
+    result.y = Math.max(...collisions.map(node => node.y + node.height)) + 24;
+  }
+  return result;
+}
+
+class CanvasDownloadCoordinator {
+  constructor(adapter) {
+    this.adapter = adapter;
+    this.app = adapter.app;
+    this.bindings = new Map();
+    this.contexts = new Map();
+    this.service = null;
+    this.pending = Promise.resolve();
+    this.disposed = false;
+    this.warned = false;
+  }
+
+  ensureService() {
+    if (this.service) return this.service;
+    const remote = require("@electron/remote");
+    const factory = remote.require("vm").runInThisContext(
+      `(function(options, notify) { return (${jamDeckCreateCanvasDownloadService.toString()})(process.getBuiltinModule("module").createRequire(process.execPath), options, notify); })`,
+      { filename: "jam-deck-canvas-downloads.js" },
+    );
+    this.service = factory({
+      root: jamDeckVaultBasePath(this.app), directory: CANVAS_DOWNLOAD_DIR,
+      temporary: `${this.adapter.deckView.plugin.manifest.dir}/.cache/canvas-downloads`,
+    }, (message) => this.receive(JSON.parse(message)));
+    return this.service;
+  }
+
+  bind(entry, surface) {
+    if (this.disposed || entry.closing || String(surface.tagName).toLowerCase() !== "webview") return;
+    try {
+      const canvas = entry.leaf.view.canvas;
+      if (canvas.readonly) return;
+      const node = [...canvas.nodes.values()].find(candidate => candidate.nodeEl && candidate.nodeEl.contains(surface));
+      const data = node && node.getData();
+      if (!data || data.type !== "link") return;
+      const id = surface.getWebContentsId();
+      const previous = this.bindings.get(surface);
+      if (previous && previous.id !== id) this.unbind(surface);
+      const owner = { canvasPath: entry.leaf.view.file.path, nodeId: data.id, rect: { x: data.x, y: data.y, width: data.width, height: data.height } };
+      if (this.ensureService().register(id, JSON.stringify(owner))) this.bindings.set(surface, { id, entry, node });
+    } catch (error) {
+      // getWebContentsId is unavailable until dom-ready; that event retries binding.
+      if (/dom-ready|not ready|must be attached/i.test(error.message)) return;
+      if (!this.warned) { this.warned = true; new Notice(`Jam Deck：网页下载自动贴回未启用 · ${error.message}`); }
+    }
+  }
+
+  unbind(surface) {
+    const binding = this.bindings.get(surface);
+    if (!binding) return;
+    this.bindings.delete(surface);
+    try { this.service.unregister(binding.id); } catch (error) {}
+  }
+
+  receive(event) {
+    if (this.disposed) return;
+    if (event.type === "started") {
+      this.contexts.set(event.id, this.app.vault.getAbstractFileByPath(event.owner.canvasPath));
+      return;
+    }
+    const file = this.contexts.get(event.id);
+    this.contexts.delete(event.id);
+    if (event.type === "failed") { new Notice(`Jam Deck：${event.message}`); return; }
+    if (event.type !== "completed") return;
+    this.pending = this.pending.then(() => this.place(event, file)).catch(error => {
+      new Notice(`Jam Deck：文件已保存到 ${event.path}，贴回失败 · ${error.message}`);
+      console.error("jam-deck Canvas download placement", error);
+    });
+  }
+
+  async place(event, originalFile) {
+    if (this.disposed) return;
+    // Electron streams to disk; reconcile avoids reading large videos into JS memory.
+    await this.app.vault.adapter.reconcileInternalFile(CANVAS_DOWNLOAD_DIR);
+    await this.app.vault.adapter.reconcileInternalFile(event.path);
+    if (this.disposed) return;
+    const attachment = this.app.vault.getAbstractFileByPath(event.path);
+    const canvasFile = originalFile || this.app.vault.getAbstractFileByPath(event.owner.canvasPath);
+    if (!attachment || !canvasFile || this.app.vault.getAbstractFileByPath(canvasFile.path) !== canvasFile) throw new Error("来源画布或附件已不存在");
+    const views = [];
+    for (const entry of this.adapter.entries.values()) if (!entry.closing) views.push(entry.leaf.view);
+    this.app.workspace.iterateAllLeaves(leaf => views.push(leaf.view));
+    const view = views.find(candidate => candidate && candidate.file === canvasFile && candidate.canvas);
+    const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    if (view) {
+      const canvas = view.canvas;
+      if (canvas.readonly) throw new Error("来源画布为只读");
+      const nodes = [...canvas.nodes.values()].map(node => node.getData());
+      const data = jamDeckCanvasDownloadNode(event.owner, nodes, event.path, id);
+      const node = canvas.createFileNode({ file: attachment, pos: { x: data.x + 200, y: data.y + 150 }, position: "center" });
+      if (!node) throw new Error("无法创建文件节点");
+      node.setData({ ...node.getData(), x: data.x, y: data.y, width: data.width, height: data.height });
+      canvas.requestSave();
+      await view.saveImmediately();
+    } else {
+      // A download can finish after switching widgets. Atomically append to its
+      // original .canvas file instead of stealing the currently active board.
+      await this.app.vault.process(canvasFile, text => {
+        if (this.disposed) return text;
+        const data = JSON.parse(text);
+        if (!Array.isArray(data.nodes)) throw new Error("来源 Canvas 格式无效");
+        data.nodes.push(jamDeckCanvasDownloadNode(event.owner, data.nodes, event.path, id));
+        return JSON.stringify(data, null, "\t");
+      });
+    }
+    if (!this.disposed) new Notice(`Jam Deck：下载已贴回 ${canvasFile.basename || canvasFile.path}`);
+  }
+
+  async destroy() {
+    this.disposed = true;
+    if (this.service) this.service.dispose();
+    this.service = null;
+    this.bindings.clear();
+    this.contexts.clear();
+    await this.pending;
+  }
+}
+
 class CanvasLinkNavigationBridge {
   constructor(adapter, entry) {
     this.adapter = adapter;
@@ -4867,12 +5112,13 @@ class CanvasLinkNavigationBridge {
     if (this.destroyed) return;
     const current = this.linkSurfaces();
     for (const surface of current) {
+      this.adapter.downloads?.bind(this.entry, surface);
       if (this.surfaces.has(surface)) continue;
       const state = {
         token: `jd-link-${Date.now()}-${++this.sequence}`,
         pending: false,
         load: () => this.inject(surface, true),
-        domReady: () => this.inject(surface, true),
+        domReady: () => { this.adapter.downloads?.bind(this.entry, surface); return this.inject(surface, true); },
         fail: () => {},
       };
       this.surfaces.set(surface, state);
@@ -4923,6 +5169,7 @@ class CanvasLinkNavigationBridge {
     const state = this.surfaces.get(surface);
     if (!state) return;
     this.surfaces.delete(surface);
+    this.adapter.downloads?.unbind(surface);
     try { surface.removeEventListener("load", state.load, true); } catch (error) {}
     try { surface.removeEventListener("dom-ready", state.domReady); } catch (error) {}
     try { surface.removeEventListener("did-fail-load", state.fail); } catch (error) {}
@@ -5314,13 +5561,7 @@ class CanvasFolderController {
   isFolderOwnedNode(node) {
     if (!node) return false;
     const id = String(node.id || "");
-    let data = null;
-    try { data = typeof node.getData === "function" ? node.getData() : node.data || null; } catch (error) { data = null; }
-    if (data && data.jamdeck && (data.jamdeck.folderId || data.jamdeck.folder || data.jamdeck.folderGroupId)) return true;
-    for (const group of this.groups.values()) {
-      if (this.isNativeFolder(group) && String(group.nativeGroupId) === id) return true;
-    }
-    return false;
+    return this.collectGroups().some(group => group.collapsed && (group.nativeGroupId === id || group.memberIds.includes(id)));
   }
 
   install() {
@@ -5333,7 +5574,6 @@ class CanvasFolderController {
       return false;
     }
     this.root.addClass("has-jam-deck-canvas-folders");
-    this.purgeStaleNativeGroupNodes();
     this.patchNodeInteractionLayer();
     this.layer = this.ownerDocument.createElement("div");
     this.layer.className = "jam-deck-canvas-folder-layer";
@@ -5406,19 +5646,14 @@ class CanvasFolderController {
   }
 
   getItems() {
-    if (this.stack && typeof this.stack.getStackItems === "function") {
-      return this.stack.getStackItems().filter((item) => item && item.node && item.rect);
-    }
     if (!this.canvas || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return [];
     const items = [];
     for (const node of this.canvas.nodes.values()) {
-      if (!node || typeof node.getData !== "function") continue;
       let data;
       try { data = node.getData(); } catch (error) { continue; }
-      const kind = jamDeckCanvasStackKind(data);
       const rect = jamDeckCanvasStackRect(data);
-      if (!kind || !rect) continue;
-      items.push({ id: String(data.id || node.id), node, data, rect, kind });
+      if (!data || data.type === "group" || !rect) continue;
+      items.push({ id: String(data.id || node.id), node, data, rect, kind: jamDeckCanvasStackKind(data) || "attachment" });
     }
     return items;
   }
@@ -5501,68 +5736,24 @@ class CanvasFolderController {
   }
 
   collectGroups() {
-    const items = this.getItems();
-    const byId = new Map(items.map((item) => [item.id, item]));
-    const groups = new Map();
-    for (const item of items) {
-      const schema = jamDeckCanvasFolderSchema(item.data);
-      if (!schema) continue;
-      const group = groups.get(schema.id) || {
-        id: schema.id,
-        anchorId: schema.anchorId,
-        anchorNodeId: schema.anchorId,
-        memberIds: new Set(),
-        collapsed: schema.collapsed,
-        color: schema.color,
-        layoutMode: schema.layoutMode,
-        native: schema.native,
-        label: schema.label,
-        nativeGroupId: schema.nativeGroupId,
-        positions: schema.positions,
-        stacked: schema.stacked,
-        hiddenEdges: schema.hiddenEdges,
-        representativeIds: schema.representativeIds,
-        representativeColumns: schema.representativeColumns,
-      };
-      group.memberIds.add(item.id);
-      if (schema.anchorId === item.id || item.data.jamdeck && item.data.jamdeck.folder) {
-        group.anchorId = item.id;
-        group.anchorNodeId = item.id;
-        group.collapsed = schema.collapsed;
-        group.color = schema.color;
-        group.layoutMode = schema.layoutMode;
-        group.native = schema.native;
-        group.label = schema.label;
-        group.nativeGroupId = schema.nativeGroupId;
-        group.positions = schema.positions;
-        group.stacked = schema.stacked;
-        group.hiddenEdges = schema.hiddenEdges;
-        group.representativeIds = schema.representativeIds;
-        group.representativeColumns = schema.representativeColumns;
-      }
-      for (const memberId of schema.memberIds) if (byId.has(memberId)) group.memberIds.add(memberId);
-      groups.set(schema.id, group);
-    }
-    const result = [];
-    for (const group of groups.values()) {
-      const members = [...group.memberIds].map((id) => byId.get(id)).filter(Boolean);
-      if (members.length < 2) continue;
-      const anchor = byId.get(group.anchorId)
-        || members.slice().sort((left, right) => String(left.id).localeCompare(String(right.id)))[0]
-        || members[0];
-      const memberIds = jamDeckCanvasFolderMemberSort(members, anchor.id).map((item) => String(item.id));
-      result.push({
-        ...group,
-        anchor,
-        members: jamDeckCanvasFolderMemberSort(members, anchor.id),
-        memberIds,
-        bounds: jamDeckCanvasFolderBounds(members),
-        representativeIds: jamDeckCanvasFolderRepresentatives(members, anchor.id).map((item) => String(item.id)),
-        anchorNodeId: String(anchor.id || group.anchorNodeId || group.anchorId || ""),
+    const byId = new Map(this.getItems().map(item => [item.id, item]));
+    const groups = [];
+    for (const node of this.canvas && this.canvas.nodes && this.canvas.nodes.values() || []) {
+      const data = node.getData();
+      if (data.type !== "group" || !data.jamdeck || !data.jamdeck.folder) continue;
+      const record = jamDeckCanvasFolderSchema(data);
+      if (!record) continue;
+      const members = record.memberIds.map(id => byId.get(id)).filter(Boolean);
+      if (!members.length) continue;
+      const anchor = members[0];
+      groups.push({ ...record, native: true, nativeGroupId: String(data.id), groupNode: node,
+        label: data.label || "文件夹", anchor, anchorId: anchor.id, anchorNodeId: anchor.id,
+        members, memberIds: members.map(item => item.id), bounds: jamDeckCanvasStackRect(data),
+        representativeIds: members.slice(0, JAM_DECK_CANVAS_FOLDER_MAX_REPRESENTATIVES).map(item => item.id),
         representativeColumns: jamDeckCanvasFolderRepresentativeColumns(members),
       });
     }
-    return result.sort((left, right) => left.id.localeCompare(right.id));
+    return groups;
   }
 
   scheduleReconcile() {
@@ -6000,79 +6191,7 @@ class CanvasFolderController {
     }
   }
 
-  reconcile() {
-    if (this.destroyed) return;
-    this.currentFrame += 1;
-    this.reconcileGeneration += 1;
-    const nextGroups = new Map(this.collectGroups().map((group) => [group.id, group]));
-    for (const [id, runtime] of this.folderRuntimes.entries()) {
-      const group = nextGroups.get(id);
-      if (!group) {
-        this.cancelFolderTransition(runtime);
-        this.restoreFolderPresentation(runtime);
-        this.folderRuntimes.delete(id);
-        if (this.focusRequestToken && this.focusRequestToken.id === id) this.focusRequestToken = null;
-      }
-    }
-    this.groups = nextGroups;
-    this.nodeToGroup.clear();
-    const seenNodes = new Set();
-    for (const group of nextGroups.values()) {
-      const runtime = this.getFolderRuntime(group.id, group);
-      const stableState = group.collapsed ? "collapsed" : "expanded";
-      const memberSignature = (group.memberIds || []).map(String).sort().join("|");
-      if (
-        runtime.state === "opening" || runtime.state === "closing"
-      ) {
-        const expected = runtime.expectedCollapsed;
-        if ((expected !== undefined && expected !== !!group.collapsed) || (runtime.memberSignature && runtime.memberSignature !== memberSignature)) {
-          this.cancelFolderTransition(runtime);
-          runtime.state = stableState;
-          runtime.pendingFocus = false;
-          if (this.focusRequestToken && this.focusRequestToken.id === group.id) this.focusRequestToken = null;
-        }
-      }
-      if (runtime.state !== "opening" && runtime.state !== "closing") runtime.state = stableState;
-      runtime.expectedCollapsed = !!group.collapsed;
-      runtime.memberSignature = memberSignature;
-      if (runtime.state === "collapsed") this.captureFolderPresentation(runtime, group);
-      this.applyFolderRuntimeNodes(group, runtime);
-      for (const member of group.members || []) {
-        this.nodeToGroup.set(String(member.id), group);
-        seenNodes.add(String(member.id));
-        const nodeEl = member.node && member.node.nodeEl;
-        if (!nodeEl) continue;
-        const index = group.representativeIds.indexOf(String(member.id));
-        nodeEl.style.setProperty("--jd-folder-representative-columns", String(group.representativeColumns || 1));
-        nodeEl.style.setProperty("--jd-folder-representative-index", String(Math.max(0, index)));
-        nodeEl.style.setProperty("--jd-folder-member-visibility", index >= 0 ? "visible" : "hidden");
-      }
-    }
-    for (const item of this.getItems()) {
-      if (seenNodes.has(String(item.id))) continue;
-      const nodeEl = item.node && item.node.nodeEl;
-      if (!nodeEl || !nodeEl.style) continue;
-      nodeEl.removeClass("is-jam-deck-folder-member");
-      nodeEl.removeClass("is-jam-deck-folder-anchor");
-      nodeEl.removeClass("is-jam-deck-folder-collapsed");
-      nodeEl.removeClass("is-jam-deck-folder-expanded");
-      nodeEl.removeClass("is-jam-deck-folder-representative");
-      nodeEl.removeClass("is-jam-deck-folder-hidden-member");
-      nodeEl.removeClass("is-opening");
-      nodeEl.removeClass("is-closing");
-      nodeEl.removeClass("is-transitioning");
-      nodeEl.removeClass("is-jam-deck-folder-transitioning");
-      nodeEl.style.removeProperty("--jd-folder-color");
-      nodeEl.style.removeProperty("--jd-folder-id");
-      nodeEl.style.removeProperty("--jd-folder-representative-index");
-      nodeEl.style.removeProperty("--jd-folder-representative-columns");
-      nodeEl.style.removeProperty("--jd-folder-member-visibility");
-      nodeEl.style.removeProperty("visibility");
-      nodeEl.style.removeProperty("pointer-events");
-    }
-    this.renderFolderLayer();
-    this.syncToolbar();
-  }
+
 
   getToolbarMenu() {
     const candidates = [
@@ -6132,6 +6251,12 @@ class CanvasFolderController {
       return;
     }
     const selected = this.getSelectedItems();
+    const nativeSelection = this.canvas && this.canvas.selection ? [...this.canvas.selection] : [];
+    const selectedGroup = nativeSelection.length === 1 && nativeSelection[0].getData().type === "group" ? nativeSelection[0] : null;
+    const sectionButton = this.ensureToolbarButton(menu, "folder", "收起为文件夹", "folder-closed", () => {
+      try { const node = [...this.canvas.selection][0]; if (node) this.foldNativeGroup(node); } catch (error) { new Notice(`Jam Deck：${error.message}`); }
+    });
+    if (sectionButton) { sectionButton.hidden = !selectedGroup; sectionButton.disabled = !!this.canvas.readonly; }
     const stackBlocked = !!(this.stack && (this.stack.previewWrapper || this.stack.imageFocus || this.stack.drag));
     const available = !stackBlocked && selected.length >= 2 && selected.every((item) => item && item.kind);
     const stackButton = this.ensureToolbarButton(menu, "stack", "堆叠编组", "layers", () => this.performToolbarAction("stack"));
@@ -6158,7 +6283,7 @@ class CanvasFolderController {
   folderStackCluster(group) {
     if (!group) return null;
     const sourceMembers = Array.isArray(group.members) ? group.members : [];
-    if (sourceMembers.length < 2) return null;
+    if (!sourceMembers.length) return null;
     const liveById = new Map();
     try {
       for (const item of this.getItems()) if (item && item.id) liveById.set(String(item.id), item);
@@ -6166,7 +6291,7 @@ class CanvasFolderController {
     const members = sourceMembers
       .map((member) => liveById.get(String(member && member.id || "")) || member)
       .filter((member) => member && member.id && member.node && member.data && jamDeckCanvasStackRect(member.rect));
-    if (members.length < 2) return null;
+    if (!members.length) return null;
     const anchorId = String(group.anchor && group.anchor.id || group.anchorId || members[0].id);
     const anchor = members.find((member) => String(member.id) === anchorId) || members[0];
     return {
@@ -6181,9 +6306,7 @@ class CanvasFolderController {
   toggleFolderPreview(group) {
     const latest = group && group.id ? (this.groupFromId(group.id) || group) : group;
     if (!latest) return false;
-    // Native folders stay packed (members buried at the anchor); the preview
-    // is the same read-only card fan-out as legacy folders, so expansion
-    // never un-buries real nodes and never re-enables their interactions.
+    // Preview is transient; in-place expansion is a separate explicit action.
     const cluster = this.folderStackCluster(latest);
     if (!cluster || !this.stack || typeof this.stack.togglePreview !== "function") return false;
     this.stack.togglePreview(cluster);
@@ -6392,9 +6515,10 @@ class CanvasFolderController {
     return { canvas, history, debounce, view };
   }
 
-  mutateNodes(changes, edgeChanges = null) {
+  mutateNodes(changes, edgeChanges = null, topology = {}) {
+    if (this.destroyed || this.canvas && this.canvas.readonly) throw new Error("当前画布为只读或已关闭");
     const entries = [...(changes instanceof Map ? changes.entries() : [])].filter(([, data]) => data && typeof data === "object");
-    if (!entries.length && !edgeChanges) throw new Error("Canvas 节点变更为空");
+    if (!entries.length && !edgeChanges && !(topology.addNodes || []).length && !(topology.removeNodes || []).length) throw new Error("Canvas 节点变更为空");
     const capability = this.getAtomicFolderCapability();
     if (!capability) throw new Error("当前 Obsidian 版本不具备安全的 Canvas 整图事务能力");
     const { canvas, history, debounce, view } = capability;
@@ -6416,8 +6540,16 @@ class CanvasFolderController {
       return requested.get(id);
     });
     if (seen.size !== requested.size) throw new Error("Canvas 节点在事务提交前已发生变化");
-    // Edge mutations ride the same atomic transaction: native folders remove
-    // member edges on collapse (hiddenEdges) and restore them on expand.
+    const removed = new Set((topology.removeNodes || []).map(String));
+    next.nodes = next.nodes.filter(node => !removed.has(String(node.id)));
+    const added = topology.addNodes || [];
+    const existingIds = new Set(next.nodes.map(node => String(node.id)));
+    for (const node of added) {
+      if (!node || !node.id || existingIds.has(String(node.id))) throw new Error("Canvas 新节点 ID 重复");
+      existingIds.add(String(node.id));
+    }
+    next.nodes = [...this.cloneCanvasData(added), ...next.nodes];
+    next.edges = (next.edges || []).filter(edge => !removed.has(String(edge.fromNode)) && !removed.has(String(edge.toNode)));
     if (edgeChanges) {
       const removeIds = new Set((edgeChanges.remove || []).map(String));
       next.edges = (Array.isArray(next.edges) ? next.edges : []).filter((edge) => !removeIds.has(String(edge && edge.id || "")));
@@ -6458,53 +6590,34 @@ class CanvasFolderController {
   }
 
   folderRecord(group, members, overrides = {}) {
-    const ids = jamDeckCanvasFolderMemberSort(members, group && group.anchor ? group.anchor.id : overrides.anchorId).map((item) => String(item.id));
-    const anchorId = String(overrides.anchorId || (group && group.anchor && group.anchor.id) || ids[0] || "");
     return {
-      version: JAM_DECK_CANVAS_FOLDER_SCHEMA_VERSION,
-      id: String((group && group.id) || overrides.id || jamDeckCanvasFolderStableId(ids)),
-      anchorId,
-      memberIds: ids,
-      collapsed: overrides.collapsed !== undefined ? !!overrides.collapsed : group ? !!group.collapsed : true,
-      color: jamDeckCanvasFolderNormalizeColor(overrides.color || (group && group.color)),
-      layoutMode: overrides.layoutMode === "grid" || (group && group.layoutMode === "grid") ? "grid" : "stack",
-      native: !!overrides.native || !!(group && group.native),
-      label: String(overrides.label || (group && group.label) || "文件夹").trim() || "文件夹",
-      nativeGroupId: String(overrides.nativeGroupId || (group && group.nativeGroupId) || "").trim(),
-      positions: overrides.positions !== undefined ? overrides.positions : (group && group.positions) || null,
-      stacked: overrides.stacked !== undefined ? overrides.stacked : (group && group.stacked) || null,
-      hiddenEdges: overrides.hiddenEdges !== undefined ? overrides.hiddenEdges : (group && group.hiddenEdges) || null,
-      representativeIds: jamDeckCanvasFolderRepresentatives(members, anchorId).map((item) => String(item.id)),
-      representativeColumns: Math.max(1, Math.min(2, overrides.representativeColumns !== undefined ? Number(overrides.representativeColumns) : jamDeckCanvasFolderRepresentativeColumns(members))),
+      version: 2,
+      id: String(overrides.id || group.id),
+      memberIds: members.map(item => String(item.id)),
+      collapsed: overrides.collapsed !== undefined ? !!overrides.collapsed : group.collapsed !== false,
+      color: jamDeckCanvasFolderNormalizeColor(overrides.color || group.color),
+      layoutMode: overrides.layoutMode || group.layoutMode || "stack",
+      shellOffset: { ...(overrides.shellOffset || group.shellOffset || { x: 0, y: 0 }) },
     };
   }
 
-  // Native folder frames default to the label 文件夹.  Repeated grouping
-  // tests can leave orphan group nodes behind when a folder is dissolved
-  // without an ungroup round-trip; purge those on install.
-  purgeStaleNativeGroupNodes() {
-    if (!this.canvas || typeof this.canvas.removeNode !== "function" || !this.canvas.nodes || typeof this.canvas.nodes.values !== "function") return 0;
-    const activeIds = new Set();
-    for (const group of this.collectGroups()) {
-      if (this.isNativeFolder(group) && group.nativeGroupId) activeIds.add(String(group.nativeGroupId));
-    }
-    let removed = 0;
-    for (const node of [...this.canvas.nodes.values()]) {
-      if (!node) continue;
-      let data = null;
-      try { data = node.getData(); } catch (error) {}
-      if (!data || data.type !== "group") continue;
-      if (String(data.label || "") !== "文件夹") continue;
-      if (activeIds.has(String(node.id))) continue;
-      try {
-        this.canvas.removeNode(node);
-        removed += 1;
-      } catch (error) {}
-    }
-    if (removed && this.canvas.view && typeof this.canvas.view.requestSave === "function") {
-      try { this.canvas.view.requestSave(); } catch (error) {}
-    }
-    return removed;
+  folderGroupData(group, record) {
+    const node = this.nativeGroupNode(group);
+    if (!node) throw new Error("原生分组已不存在");
+    const data = node.getData();
+    return { ...data, jamdeck: { ...(data.jamdeck || {}), folder: record } };
+  }
+
+  expandGroupBounds(group, record, members) {
+    const data = this.folderGroupData(group, record);
+    const content = jamDeckCanvasFolderBounds(members);
+    if (!content) return data;
+    const left = Math.min(data.x, content.x - 24);
+    const top = Math.min(data.y, content.y - 24);
+    const right = Math.max(data.x + data.width, content.x + content.width + 24);
+    const bottom = Math.max(data.y + data.height, content.y + content.height + 24);
+    data.jamdeck.folder.shellOffset = { x: record.shellOffset.x + data.x - left, y: record.shellOffset.y + data.y - top };
+    return { ...data, x: left, y: top, width: right - left, height: bottom - top };
   }
 
   getNativeGroupCapability() {
@@ -6542,356 +6655,86 @@ class CanvasFolderController {
     return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
   }
 
-  // The collapsed native group must hug the authored shell, not the union of
-  // stacked member rectangles (members can keep large authored sizes and
-  // would otherwise make the group frame dwarf the folder visual).  The frame
-  // is slightly taller (200×180) and stays invisible in Jam Deck.
+  // Shell geometry is presentation only; the native group keeps expanded bounds.
   nativeFolderShellBounds(group) {
-    const anchor = group && group.anchor;
-    const stacked = group && group.stacked;
-    const anchorStacked = anchor && stacked && stacked[String(anchor.id)];
-    let centerX = 0;
-    let centerY = 0;
-    if (anchorStacked) {
-      centerX = anchorStacked.x + anchorStacked.width / 2;
-      centerY = anchorStacked.y + anchorStacked.height / 2;
-    } else if (anchor && anchor.data) {
-      centerX = Number(anchor.data.x) + Number(anchor.data.width) / 2;
-      centerY = Number(anchor.data.y) + Number(anchor.data.height) / 2;
-    } else {
-      return null;
-    }
-    return {
-      x: jamDeckRoundCanvasStackValue(centerX - JAM_DECK_CANVAS_FOLDER_BASE_WIDTH / 2),
-      y: jamDeckRoundCanvasStackValue(centerY - JAM_DECK_NATIVE_GROUP_BASE_HEIGHT / 2),
-      width: JAM_DECK_CANVAS_FOLDER_BASE_WIDTH,
-      height: JAM_DECK_NATIVE_GROUP_BASE_HEIGHT,
-    };
+    return this.folderWorldShellRect(group);
   }
 
-  // The native group is a node with type "group" in Obsidian 1.13+.
-  nativeFolderGroupNodeData(group, bounds) {
-    if (!bounds) return null;
-    return {
-      id: String(group.nativeGroupId || ""),
-      x: jamDeckRoundCanvasStackValue(bounds.x),
-      y: jamDeckRoundCanvasStackValue(bounds.y),
-      width: jamDeckRoundCanvasStackValue(bounds.width),
-      height: jamDeckRoundCanvasStackValue(bounds.height),
-      type: "group",
-      label: group.label || "文件夹",
-      // Self-describing marker so folder-owned detection (interaction-layer
-      // patch, purge sweep) works without waiting for a reconcile pass.
-      jamdeck: { folderGroupId: String(group.id || "") },
-    };
-  }
 
-  nativeFolderRecord(group, collapsed, positions, stacked) {
-    return this.folderRecord(group, group.members, {
-      collapsed,
-      native: true,
-      label: group.label,
-      nativeGroupId: group.nativeGroupId,
-      positions,
-      stacked,
-    });
-  }
 
-  captureNativeMemberScreenRects(group) {
-    const out = new Map();
-    for (const member of group.members || []) {
-      const nodeEl = member.node && member.node.nodeEl;
-      if (!nodeEl || typeof nodeEl.getBoundingClientRect !== "function") continue;
-      try {
-        const rect = nodeEl.getBoundingClientRect();
-        if (rect && rect.width > 0 && rect.height > 0) out.set(String(member.id), { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
-      } catch (error) {}
-    }
-    return out.size ? out : null;
-  }
 
-  // FLIP transition on the real Canvas nodes: mutateNodes lands the target
-  // geometry, then a WAAPI pass animates from the previous screen pose to the
-  // landed CSS transform (fill defaults to none so the element returns to the
-  // Obsidian-owned transform when the animation finishes).
-  animateNativeFolderTransition(group, oldRects) {
-    const runtime = this.getFolderRuntime(group.id, group);
-    if (!runtime || !this.ownerWindow) return;
-    const scale = Math.max(0.04, Number(this.canvas && this.canvas.scale) || 1);
-    const animations = new Set();
-    const raf = jamDeckRequestFrame(this.ownerWindow);
-    runtime.raf = raf(() => {
-      runtime.raf = 0;
-      for (const member of group.members || []) {
-        const nodeEl = member.node && member.node.nodeEl;
-        const container = this.nodeContainer(member.node);
-        const old = oldRects.get(String(member.id));
-        if (!nodeEl || !container || !old || typeof container.animate !== "function") continue;
-        nodeEl.addClass("is-jam-deck-folder-transitioning");
-        let rect = null;
-        try { rect = nodeEl.getBoundingClientRect(); } catch (error) {}
-        if (!rect || rect.width < 1 || rect.height < 1) continue;
-        const dx = (old.left + old.width / 2 - (rect.left + rect.width / 2)) / scale;
-        const dy = (old.top + old.height / 2 - (rect.top + rect.height / 2)) / scale;
-        const sx = old.width / Math.max(1, rect.width);
-        const sy = old.height / Math.max(1, rect.height);
-        const from = this.transformWithDelta(container, dx, dy, sx, sy);
-        const to = this.transformWithDelta(container, 0, 0, 1, 1);
-        try {
-          const animation = container.animate(
-            [{ transform: from, opacity: 1 }, { transform: to, opacity: 1 }],
-            { duration: 300, easing: "cubic-bezier(.22,1,.36,1)" },
-          );
-          animations.add(animation);
-          Promise.resolve(animation.finished).catch(() => {}).then(() => {
-            animations.delete(animation);
-            if (!animations.size) for (const item of group.members) {
-              const el = item.node && item.node.nodeEl;
-              if (el) el.removeClass("is-jam-deck-folder-transitioning");
-            }
-          });
-        } catch (error) {
-          nodeEl.removeClass("is-jam-deck-folder-transitioning");
-        }
-      }
-    });
-  }
+
+
+
+
 
   renameNativeFolder(group, label) {
     const latest = this.groupFromId(group && group.id) || group;
-    if (!this.isNativeFolder(latest)) return false;
+    const node = this.nativeGroupNode(latest);
+    if (!node) return false;
+    const data = node.getData();
     const nextLabel = String(label || "").trim() || "文件夹";
-    if (nextLabel === latest.label) return false;
-    const record = this.nativeFolderRecord(latest, latest.collapsed, latest.positions, latest.stacked);
-    record.label = nextLabel;
-    const g = this.nativeGroupNode(latest);
-    const changes = new Map();
-    changes.set(String(latest.anchor.id), this.withFolderPayload(latest.anchor.data, latest.id, record));
-    if (g) {
-      const bounds = latest.collapsed
-        ? (this.nativeFolderShellBounds(latest) || this.nativeFolderBounds(latest, latest.stacked ? Object.values(latest.stacked) : []))
-        : this.nativeFolderBounds(latest, (latest.positions ? Object.values(latest.positions) : []));
-      const groupData = this.nativeFolderGroupNodeData({ ...latest, label: nextLabel }, bounds);
-      if (groupData) changes.set(String(latest.nativeGroupId), groupData);
-    }
-    try {
-      this.mutateNodes(changes);
-    } catch (error) {
-      console.error("jam-deck native folder rename failed", error);
-      new Notice(`Jam Deck：${error.message || "文件夹重命名失败"}`);
-      return false;
-    }
-    this.scheduleReconcile();
-    return true;
+    if (data.label === nextLabel) return false;
+    return this.mutateNodes(new Map([[String(data.id), { ...data, label: nextLabel }]]));
   }
 
-  createFolder(items) {
-    const selected = (Array.isArray(items) ? items : []).filter((item) => item && item.node && item.data);
-    if (selected.length < 2) throw new Error("至少选择两个支持的节点");
-    const existing = new Set(selected.map((item) => {
-      const schema = jamDeckCanvasFolderSchema(item.data);
-      return schema && schema.id;
-    }).filter(Boolean));
-    if (existing.size > 1) throw new Error("不会自动合并两个文件夹");
-    if (existing.size === 1) return false;
-    const anchor = jamDeckCanvasStackAnchor(selected) || selected[0];
-    const id = jamDeckCanvasFolderStableId(selected.map((item) => item.id));
-    // Native folders record each member's authored rectangle as the expanded
-    // destination before any stack geometry is applied.
-    const native = !!this.getNativeGroupCapability();
-    const positions = {};
-    for (const item of selected) positions[String(item.id)] = { x: item.data.x, y: item.data.y, width: item.data.width, height: item.data.height };
-    const changes = new Map();
-    // Use the same normalization/snap path as a hand-drag stack.  The anchor
-    // is centered on the selected bounds, then each member receives a
-    // distinct overlapping slot (>50% of the smaller node area).
-    const selectedBounds = jamDeckCanvasFolderBounds(selected);
-    const selectedCenter = selectedBounds
-      ? { x: selectedBounds.x + selectedBounds.width / 2, y: selectedBounds.y + selectedBounds.height / 2 }
-      : { x: anchor.rect.x + anchor.rect.width / 2, y: anchor.rect.y + anchor.rect.height / 2 };
-    const anchorRect = {
-      x: jamDeckRoundCanvasStackValue(selectedCenter.x - anchor.rect.width / 2),
-      y: jamDeckRoundCanvasStackValue(selectedCenter.y - anchor.rect.height / 2),
-      width: anchor.rect.width,
-      height: anchor.rect.height,
+  createFolder(items, existingNode = null) {
+    const selected = (Array.isArray(items) ? items : []).filter(item => item && item.node && item.data);
+    if (!selected.length || !existingNode && selected.length < 2) throw new Error("至少选择两个节点");
+    const claimed = new Set(this.collectGroups().flatMap(group => group.memberIds));
+    if (selected.some(item => claimed.has(item.id))) throw new Error("选中内容已属于文件夹，请先原位展开或取消编组");
+    const bounds = jamDeckCanvasFolderBounds(selected);
+    const data = existingNode ? existingNode.getData() : {
+      id: crypto.randomBytes(8).toString("hex"), type: "group", label: "文件夹",
+      x: bounds.x - 24, y: bounds.y - 40, width: bounds.width + 48, height: bounds.height + 64,
     };
-    const placedAnchor = { ...anchor, rect: anchorRect };
-    const placed = [placedAnchor];
-    const zoom = jamDeckCanvasStackScreenScale(anchor);
-    const normalizations = new Map();
-    if (anchor.kind === "image" || anchor.kind === "text") {
-      const key = jamDeckCanvasStackNormalizationKey(anchor.kind);
-      const existingNormalization = jamDeckCanvasStackNormalization(anchor.data, anchor.kind);
-      normalizations.set(anchor.id, {
-        key,
-        value: {
-          version: JAM_DECK_STACK_NORMALIZATION_VERSION,
-          originalCanvasSize: existingNormalization
-            ? { ...existingNormalization.originalCanvasSize }
-            : { width: anchor.rect.width, height: anchor.rect.height },
-          normalizedCanvasSize: { width: anchorRect.width, height: anchorRect.height },
-          anchorNodeIds: selected.map((member) => String(member.id)).sort(),
-        },
-      });
-    }
-    for (const item of jamDeckCanvasFolderMemberSort(selected.filter((candidate) => candidate.id !== anchor.id), anchor.id)) {
-      let candidate = { ...item, rect: { ...item.rect } };
-      const canNormalize = item.kind === "image" || item.kind === "text";
-      const existingNormalization = canNormalize ? jamDeckCanvasStackNormalization(item.data, item.kind) : null;
-      if (canNormalize) {
-        const normalized = jamDeckNormalizeCanvasStackImage(candidate, placed);
-        if (!normalized) throw new Error("无法规范化文件夹成员尺寸");
-        candidate = { ...candidate, rect: normalized.changed ? normalized : candidate.rect };
-      }
-      const snap = jamDeckComputeCanvasStackSnap(candidate, { anchor: placedAnchor, members: placed }, { zoom, screenStep: 7 });
-      if (!snap) throw new Error("无法将文件夹成员集中到锚点");
-      candidate = { ...candidate, rect: snap };
-      placed.push(candidate);
-      if (canNormalize) {
-        const normalizationKey = jamDeckCanvasStackNormalizationKey(item.kind);
-        normalizations.set(item.id, {
-          key: normalizationKey,
-          value: {
-            version: JAM_DECK_STACK_NORMALIZATION_VERSION,
-            originalCanvasSize: existingNormalization
-              ? { ...existingNormalization.originalCanvasSize }
-              : { width: item.rect.width, height: item.rect.height },
-            normalizedCanvasSize: { width: snap.width, height: snap.height },
-            anchorNodeIds: [anchor.id].concat(placed.slice(1).map((member) => String(member.id))).sort(),
-          },
-        });
+    const id = String(data.id);
+    const record = this.folderRecord({ id, collapsed: true }, selected);
+    const groupData = { ...data, jamdeck: { ...(data.jamdeck || {}), folder: record } };
+    const changes = new Map(selected.map(item => [item.id, this.withFolderPayload(item.data, id, null)]));
+    if (existingNode) changes.set(id, groupData);
+    return this.mutateNodes(changes, null, { addNodes: existingNode ? [] : [groupData] });
+  }
+
+  foldNativeGroup(node) {
+    if (!node || node.getData().type !== "group") return false;
+    const existing = this.collectGroups().find(group => group.nativeGroupId === String(node.id));
+    const box = jamDeckCanvasStackRect(node.getData());
+    const contains = rect => rect && rect.x >= box.x && rect.y >= box.y && rect.x + rect.width <= box.x + box.width && rect.y + rect.height <= box.y + box.height;
+    for (const child of this.canvas.nodes.values()) {
+      const data = child.getData();
+      if (String(data.id) !== String(node.id) && data.type === "group" && contains(jamDeckCanvasStackRect(data))) {
+        throw new Error("此章节包含内层分组，请分别收起内层内容，章节框会保留");
       }
     }
-    // Native folders also own a real Canvas group node covering the stacked
-    // area; it is created first so the atomic transaction below can persist
-    // it together with the member move.  The bbox hugs the 200×150 shell
-    // (centred on the anchor slot) instead of the member union.
-    const stacked = {};
-    for (const item of placed) stacked[String(item.id)] = { x: item.rect.x, y: item.rect.y, width: item.rect.width, height: item.rect.height };
-    const shellBounds = this.nativeFolderShellBounds({ anchor, stacked }) || this.nativeFolderBounds({ native: true }, Object.values(stacked));
-    let nativeGroupId = "";
-    if (native && shellBounds && this.canvas) {
-      try {
-        const groupNode = this.canvas.createGroupNode({
-          pos: { x: shellBounds.x, y: shellBounds.y },
-          size: { width: shellBounds.width, height: shellBounds.height },
-          label: "文件夹",
-          save: false,
-        });
-        nativeGroupId = String((groupNode && groupNode.id) || "");
-      } catch (error) {
-        nativeGroupId = "";
-      }
-    }
-    // Real packing from the start: member edges leave data.edges at grouping
-    // time and are parked in the payload until ungroup, so the folded folder
-    // never shows phantom connectors around its members.
-    const nativeMemberIds = new Set(selected.map((item) => String(item.id)));
-    const allEdges = native && this.canvas && typeof this.canvas.getData === "function"
-      ? (this.canvas.getData().edges || [])
-      : [];
-    const hiddenEdges = native
-      ? allEdges.filter((edge) => edge && (nativeMemberIds.has(String(edge.fromNode)) || nativeMemberIds.has(String(edge.toNode))))
-      : [];
-    const folder = this.folderRecord({ id, anchor }, selected, {
-      id,
-      anchorId: anchor.id,
-      collapsed: true,
-      layoutMode: "stack",
-      native: !!nativeGroupId,
-      label: "文件夹",
-      nativeGroupId,
-      positions,
-      stacked,
-    });
-    if (hiddenEdges.length) folder.hiddenEdges = hiddenEdges;
-    const placedById = new Map(placed.map((item) => [String(item.id), item]));
-    for (const item of selected) {
-      const geometry = placedById.get(String(item.id));
-      const next = {
-        ...item.data,
-        x: geometry.rect.x,
-        y: geometry.rect.y,
-        width: geometry.rect.width,
-        height: geometry.rect.height,
-      };
-      const normalization = normalizations.get(item.id);
-      if (normalization && normalization.key) next.jamdeck = { ...(next.jamdeck || {}), [normalization.key]: normalization.value };
-      changes.set(item.id, this.withFolderPayload(next, id, item.id === anchor.id ? folder : null));
-    }
-    if (nativeGroupId && shellBounds) {
-      changes.set(nativeGroupId, this.nativeFolderGroupNodeData({ native: true, nativeGroupId, label: "文件夹" }, shellBounds));
-    }
-    this.mutateNodes(changes, hiddenEdges.length ? { remove: hiddenEdges.map((edge) => edge.id) } : null);
-    return true;
+    const members = this.getItems().filter(item => contains(item.rect));
+    if (!existing) return this.createFolder(members, node);
+    if (!members.length) throw new Error("空分组没有可收起的内容");
+    const otherMembers = new Set(this.collectGroups().filter(group => group.id !== existing.id).flatMap(group => group.memberIds));
+    if (members.some(item => otherMembers.has(item.id))) throw new Error("此章节包含其他文件夹，请保留章节框");
+    const changes = new Map(existing.members.map(item => [item.id, this.withFolderPayload(item.data, null, null)]));
+    for (const item of members) changes.set(item.id, this.withFolderPayload(item.data, existing.id, null));
+    changes.set(existing.id, this.folderGroupData(existing, this.folderRecord(existing, members, { collapsed: true })));
+    return this.mutateNodes(changes);
   }
 
   updateGroupMembership(group, source, targetGroup = null) {
     if (!group || !source) return false;
-    if (targetGroup && targetGroup.id === group.id && group.memberIds.includes(source.id)) return false;
-    const itemsById = new Map(this.getItems().map((item) => [item.id, item]));
-    const sourceMembers = group.members.filter((item) => item.id !== source.id);
-    const changes = new Map();
-    const oldFolder = sourceMembers.length >= 2
-      ? this.folderRecord(group, sourceMembers, { id: group.id, anchorId: source.id === group.anchor.id ? (sourceMembers[0] && sourceMembers[0].id) : group.anchor.id })
-      : null;
-    for (const member of group.members) {
-      if (member.id === source.id) continue;
-      const data = itemsById.get(member.id) && itemsById.get(member.id).data;
-      if (data) changes.set(member.id, this.withFolderPayload(data, oldFolder ? group.id : null, oldFolder && member.id === oldFolder.anchorId ? oldFolder : null));
+    const latest = this.groupFromId(group.id) || group;
+    const target = targetGroup && (this.groupFromId(targetGroup.id) || targetGroup);
+    if (target && latest.id !== target.id) throw new Error("两个文件夹不会自动合并");
+    const current = this.findItem(source.node) || source;
+    const members = target ? latest.members.filter(item => item.id !== current.id).concat(current) : latest.members.filter(item => item.id !== current.id);
+    const changes = new Map([[current.id, this.withFolderPayload(current.data, target ? latest.id : null, null)]]);
+    if (members.length) {
+      const record = this.folderRecord(latest, members);
+      changes.set(latest.nativeGroupId, target ? this.expandGroupBounds(latest, record, members) : this.folderGroupData(latest, record));
     }
-    if (!targetGroup) {
-      const sourceData = itemsById.get(source.id) && itemsById.get(source.id).data;
-      if (sourceData) changes.set(source.id, this.withFolderPayload(sourceData, null, null));
-      this.mutateNodes(changes);
-      return true;
-    }
-    const targetMembers = targetGroup.members.concat(source);
-    // Native membership: the joined member needs authored stacked/expanded
-    // rectangles too.  Folded targets pull it onto the anchor slot; expanded
-    // targets keep it where the user dropped it.
-    let targetOverrides = { id: targetGroup.id, anchorId: targetGroup.anchor.id };
-    let sourceFoldedRect = null;
-    if (this.isNativeFolder(targetGroup)) {
-      const anchorStacked = targetGroup.stacked && targetGroup.stacked[String(targetGroup.anchor.id)];
-      const sourcePosition = { x: source.data.x, y: source.data.y, width: source.data.width, height: source.data.height };
-      const stacked = { ...(targetGroup.stacked || {}) };
-      const positions = { ...(targetGroup.positions || {}) };
-      stacked[String(source.id)] = anchorStacked ? { ...anchorStacked } : { ...sourcePosition };
-      positions[String(source.id)] = { ...sourcePosition };
-      targetOverrides = { ...targetOverrides, stacked, positions };
-      if (targetGroup.collapsed && anchorStacked) {
-        // Fold the member onto the anchor slot WITHOUT stealing the anchor's
-        // dimensions: the member's authored width/height stay intact so the
-        // preview card keeps its real aspect (a wide/short texture must not
-        // be squeezed into the anchor rect and look cropped).
-        const width = Number(sourcePosition.width) > 0 ? Number(sourcePosition.width) : Number(anchorStacked.width) || 1;
-        const height = Number(sourcePosition.height) > 0 ? Number(sourcePosition.height) : Number(anchorStacked.height) || 1;
-        sourceFoldedRect = {
-          x: jamDeckRoundCanvasStackValue(anchorStacked.x + (anchorStacked.width - width) / 2),
-          y: jamDeckRoundCanvasStackValue(anchorStacked.y + (anchorStacked.height - height) / 2),
-          width,
-          height,
-        };
-        stacked[String(source.id)] = { ...sourceFoldedRect };
-      }
-    }
-    const targetFolder = this.folderRecord(targetGroup, targetMembers, targetOverrides);
-    for (const member of targetMembers) {
-      const data = itemsById.get(member.id) && itemsById.get(member.id).data;
-      if (!data) continue;
-      if (member.id === source.id && sourceFoldedRect) {
-        changes.set(member.id, this.withFolderPayload({ ...data, x: sourceFoldedRect.x, y: sourceFoldedRect.y, width: sourceFoldedRect.width, height: sourceFoldedRect.height }, targetGroup.id, member.id === targetFolder.anchorId ? targetFolder : null));
-      } else {
-        changes.set(member.id, this.withFolderPayload(data, targetGroup.id, member.id === targetFolder.anchorId ? targetFolder : null));
-      }
-    }
-    this.mutateNodes(changes);
-    return true;
+    return this.mutateNodes(changes, null, { removeNodes: members.length ? [] : [latest.nativeGroupId] });
   }
 
   groupFromId(id) {
-    return id ? this.groups.get(String(id)) || this.collectGroups().find((group) => group.id === String(id)) : null;
+    return id ? this.collectGroups().find(group => group.id === String(id)) || null : null;
   }
 
   folderShellPointerHit(group, pointer) {
@@ -6954,7 +6797,10 @@ class CanvasFolderController {
         // A member may be rearranged inside its own expanded folder.  Only a
         // drop that clears every other member's strict overlap threshold is an
         // explicit drag-out; otherwise preserve the existing membership.
-        if (!target && sourceGroup.members.some((member) => member.id !== source.id && jamDeckCanvasStackOverlapRatio(source.rect, member.rect) > JAM_DECK_STACK_OVERLAP_THRESHOLD)) return;
+        const box = sourceGroup.bounds;
+        const cx = source.rect.x + source.rect.width / 2;
+        const cy = source.rect.y + source.rect.height / 2;
+        if (!target && box && cx >= box.x && cx <= box.x + box.width && cy >= box.y && cy <= box.y + box.height) return;
         if (target && target.group && target.group.id !== sourceGroup.id) {
           new Notice("Jam Deck：两个文件夹不会自动合并");
           return;
@@ -6977,35 +6823,7 @@ class CanvasFolderController {
     }
   }
 
-  folderGridLayoutForExpand(group) {
-    if (!group || !Array.isArray(group.members) || group.members.length < 2) return null;
-    const members = group.members.slice();
-    const columns = jamDeckCanvasFolderExpansionColumns(members);
-    const scale = Math.max(0.04, Number(this.canvas && this.canvas.scale) || 1);
-    const gap = Math.max(8, 18 / scale);
-    const maxWidth = Math.max(...members.map((member) => Number(member.rect && member.rect.width) || 1));
-    const maxHeight = Math.max(...members.map((member) => Number(member.rect && member.rect.height) || 1));
-    const rows = Math.ceil(members.length / columns);
-    const width = columns * maxWidth + Math.max(0, columns - 1) * gap;
-    const height = rows * maxHeight + Math.max(0, rows - 1) * gap;
-    const bounds = jamDeckCanvasFolderBounds(members) || { x: 0, y: 0, width, height };
-    const centerX = bounds.x + bounds.width / 2;
-    const centerY = bounds.y + bounds.height / 2;
-    const left = centerX - width / 2;
-    const top = centerY - height / 2;
-    const positions = members.map((member, index) => {
-      const rect = jamDeckCanvasStackRect(member.rect) || { width: maxWidth, height: maxHeight };
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      return {
-        x: jamDeckRoundCanvasStackValue(left + column * (maxWidth + gap) + (maxWidth - rect.width) / 2),
-        y: jamDeckRoundCanvasStackValue(top + row * (maxHeight + gap) + (maxHeight - rect.height) / 2),
-        width: rect.width,
-        height: rect.height,
-      };
-    });
-    return { members, positions, columns, rows, gap, x: left, y: top, width, height };
-  }
+
 
   captureFolderScreenRects(group) {
     const snapshot = new Map();
@@ -7021,223 +6839,47 @@ class CanvasFolderController {
   }
 
   updateFolder(folder, overrides = {}) {
-    const group = typeof folder === "string" ? this.groupFromId(folder) : folder;
+    const group = typeof folder === "string" ? this.groupFromId(folder) : this.groupFromId(folder && folder.id) || folder;
     if (!group) return false;
     if (Object.prototype.hasOwnProperty.call(overrides, "collapsed")) {
-      // Folder opening is presentation-only in v4. Persisted expansion used
-      // to compete with the click preview and is intentionally retired.
-      return this.toggleFolderPreview(group);
+      if (this.stack && this.stack.previewClusterId === `folder:${group.id}`) this.stack.collapsePreview(true);
+      this.clearFolderPreviewRuntime(group.id, true);
     }
-    const latest = this.groupFromId(group.id) || group;
-    const nextCollapsed = overrides.collapsed !== undefined ? !!overrides.collapsed : !!latest.collapsed;
-    const opening = !!latest.collapsed && !nextCollapsed;
-    const closing = !latest.collapsed && nextCollapsed;
-    const transitionSnapshot = (opening || closing) ? this.captureFolderScreenRects(latest) : null;
-    const runtime = this.getFolderRuntime(latest.id, latest);
-    if (opening || closing) this.cancelFolderTransition(runtime);
-    let geometry = null;
-    const recordOverrides = { ...overrides, collapsed: nextCollapsed };
-    if (opening && latest.layoutMode !== "grid") {
-      geometry = this.folderGridLayoutForExpand(latest);
-      if (!geometry) return false;
-      recordOverrides.layoutMode = "grid";
-    }
-    const record = this.folderRecord(latest, latest.members, recordOverrides);
-    const changes = new Map();
-    const positions = geometry ? new Map(geometry.members.map((member, index) => [String(member.id), geometry.positions[index]])) : null;
-    for (const member of latest.members) {
-      let data = member.data;
-      if (positions && positions.has(String(member.id))) {
-        const position = positions.get(String(member.id));
-        data = { ...data, x: position.x, y: position.y, width: position.width, height: position.height };
-      }
-      changes.set(member.id, this.withFolderPayload(data, latest.id, member.id === record.anchorId ? record : null));
-    }
-    if (!changes.size) return false;
-    try {
-      this.mutateNodes(changes);
-    } catch (error) {
-      if (runtime) this.cancelFolderTransition(runtime);
-      throw error;
-    }
-    if (runtime && (opening || closing)) {
-      runtime.pendingFocus = runtime.pendingFocus || !!(this.focusRequestToken && this.focusRequestToken.id === latest.id);
-      runtime.expectedCollapsed = nextCollapsed;
-      runtime.memberSignature = latest.memberIds.map(String).sort().join("|");
-      runtime.state = opening ? "opening" : "closing";
-      this.reconcile();
-      this.animateFolderTransition(this.groups.get(latest.id) || latest, opening, transitionSnapshot);
-    } else {
-      this.reconcile();
-    }
-    return true;
+    const record = this.folderRecord(group, group.members, overrides);
+    return this.mutateNodes(new Map([[group.nativeGroupId, this.folderGroupData(group, record)]]));
   }
 
-  folderUngroupLayout(group) {
-    if (!group || !group.anchor || !Array.isArray(group.members) || group.members.length < 2) return null;
-    const members = jamDeckCanvasFolderMemberSort(group.members, group.anchor.id);
-    const columns = Math.max(2, Math.min(3, jamDeckCanvasFolderExpansionColumns(members.length)));
-    const rows = Math.ceil(members.length / columns);
-    const gap = 28;
-    const columnWidths = Array(columns).fill(0);
-    const rowHeights = Array(rows).fill(0);
-    members.forEach((member, index) => {
-      const rect = jamDeckCanvasStackRect(member.rect || member.data);
-      if (!rect) return;
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      columnWidths[column] = Math.max(columnWidths[column], rect.width);
-      rowHeights[row] = Math.max(rowHeights[row], rect.height);
-    });
-    if (columnWidths.some((value) => !(value > 0)) || rowHeights.some((value) => !(value > 0))) return null;
-    const totalWidth = columnWidths.reduce((sum, value) => sum + value, 0) + gap * (columns - 1);
-    const totalHeight = rowHeights.reduce((sum, value) => sum + value, 0) + gap * (rows - 1);
-    const anchorRect = jamDeckCanvasStackRect(group.anchor.rect || group.anchor.data);
-    if (!anchorRect) return null;
-    const startX = anchorRect.x + anchorRect.width / 2 - totalWidth / 2;
-    const startY = anchorRect.y + anchorRect.height / 2 - totalHeight / 2;
-    const xOffsets = [];
-    const yOffsets = [];
-    for (let column = 0, cursor = startX; column < columns; column += 1) { xOffsets[column] = cursor; cursor += columnWidths[column] + gap; }
-    for (let row = 0, cursor = startY; row < rows; row += 1) { yOffsets[row] = cursor; cursor += rowHeights[row] + gap; }
-    const positions = members.map((member, index) => {
-      const rect = jamDeckCanvasStackRect(member.rect || member.data);
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      return {
-        id: String(member.id),
-        x: jamDeckRoundCanvasStackValue(xOffsets[column] + (columnWidths[column] - rect.width) / 2),
-        y: jamDeckRoundCanvasStackValue(yOffsets[row] + (rowHeights[row] - rect.height) / 2),
-        width: rect.width,
-        height: rect.height,
-      };
-    });
-    for (let left = 0; left < positions.length; left += 1) {
-      const a = positions[left];
-      if (![a.x, a.y, a.width, a.height].every(Number.isFinite)) return null;
-      for (let right = left + 1; right < positions.length; right += 1) {
-        const b = positions[right];
-        const overlap = a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-        if (overlap) return null;
-      }
-    }
-    return { members, positions, columns };
-  }
+
 
   ungroup(folder) {
-    const group = typeof folder === "string" ? this.groupFromId(folder) : folder;
-    const latest = group && this.groupFromId(group.id) || group;
-    if (!latest) return false;
-    const native = this.isNativeFolder(latest);
-    const layout = native ? null : this.folderUngroupLayout(latest);
-    if (!native && !layout) throw new Error("无法生成安全的取消编组布局");
-    const view = this.folderViews.get(String(latest.id));
-    if (view) view.generation += 1;
-    if (this.focusRequestToken && this.focusRequestToken.id === latest.id) this.focusRequestToken = null;
-    const runtime = this.getFolderRuntime(latest.id, latest);
-    if (runtime) this.cancelFolderTransition(runtime);
-    const changes = new Map();
-    if (native) {
-      // Native ungroup restores each member to its authored expanded
-      // rectangle, drops the folder payload and removes the group node.  Any
-      // edges parked while the folder was folded come back too.
-      const positions = latest.positions || {};
-      for (const member of latest.members) {
-        const pos = positions[String(member.id)] || { x: member.data.x, y: member.data.y, width: member.data.width, height: member.data.height };
-        const data = this.withFolderPayload(member.data, null, null);
-        changes.set(member.id, { ...data, x: pos.x, y: pos.y, width: pos.width, height: pos.height });
-      }
-    } else {
-      const positions = new Map(layout.positions.map((position) => [position.id, position]));
-      for (const member of layout.members) {
-        const position = positions.get(String(member.id));
-        const data = this.withFolderPayload(member.data, null, null);
-        changes.set(member.id, { ...data, x: position.x, y: position.y, width: position.width, height: position.height });
-      }
-    }
-    const ungroupHiddenEdges = native && Array.isArray(latest.hiddenEdges) ? latest.hiddenEdges : [];
-    try {
-      this.mutateNodes(changes, ungroupHiddenEdges.length ? { add: ungroupHiddenEdges } : null);
-    } catch (error) {
-      if (view) view.generation += 1;
-      this.scheduleReconcile();
-      throw error;
-    }
-    if (native) {
-      const g = this.nativeGroupNode(latest);
-      if (g && this.canvas && typeof this.canvas.removeNode === "function") {
-        try {
-          this.canvas.removeNode(g);
-          if (this.canvas.view && typeof this.canvas.view.requestSave === "function") this.canvas.view.requestSave();
-        } catch (error) {
-          console.error("jam-deck native folder ungroup remove failed", error);
-        }
-      }
-      // Also purge any orphan group frames left behind so no invisible group
-      // boxes linger after the folder is dissolved.
-      this.purgeStaleNativeGroupNodes();
-    }
-    try {
-      if (this.activePopover && this.activePopover.group && String(this.activePopover.group.id) === String(latest.id)) this.closeFolderColorPopover(false);
-      if (this.stack && this.stack.previewClusterId === `folder:${latest.id}`) this.stack.collapsePreview(true);
-      this.clearFolderPreviewRuntime(latest.id, true);
-      this.restoreFolderOwnedNodes(latest);
-      const activeView = this.folderViews.get(String(latest.id));
-      if (activeView && typeof activeView.dispose === "function") activeView.dispose();
-      this.folderViews.delete(String(latest.id));
-      this.folderRuntimes.delete(String(latest.id));
-      this.groups.delete(String(latest.id));
-    } finally {
-      this.restoreFolderOwnedNodes(latest);
-      this.scheduleReconcile();
-    }
+    const group = typeof folder === "string" ? this.groupFromId(folder) : this.groupFromId(folder && folder.id) || folder;
+    if (!group) return false;
+    const changes = new Map(group.members.map(member => [member.id, this.withFolderPayload(member.data, null, null)]));
+    this.mutateNodes(changes, null, { removeNodes: [group.nativeGroupId] });
+    if (this.stack && this.stack.previewClusterId === `folder:${group.id}`) this.stack.collapsePreview(true);
+    this.clearFolderPreviewRuntime(group.id, true);
+    this.restoreFolderOwnedNodes(group);
+    this.scheduleReconcile();
     return true;
   }
 
   detachPreviewMember(folderId, nodeId, finalRect, options = {}) {
     const group = this.groupFromId(folderId);
     const rect = jamDeckCanvasStackRect(finalRect);
-    const id = String(nodeId || "");
-    if (!group || !rect || !id) return false;
-    const dragged = (group.members || []).find((member) => String(member.id) === id);
+    if (!group || !rect) return false;
+    const dragged = group.members.find(member => member.id === String(nodeId));
     if (!dragged) return false;
-    const remaining = (group.members || []).filter((member) => String(member.id) !== id);
-    const changes = new Map();
-    let draggedData = this.withFolderPayload(dragged.data, null, null);
-    draggedData = { ...draggedData, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    const remaining = group.members.filter(member => member.id !== dragged.id);
+    const data = { ...this.withFolderPayload(dragged.data, null, null), ...rect };
     const normalizationKey = jamDeckCanvasStackNormalizationKey(options.normalizationKind);
-    if (options.removeNormalization && normalizationKey && draggedData.jamdeck && Object.prototype.hasOwnProperty.call(draggedData.jamdeck, normalizationKey)) {
-      draggedData.jamdeck = { ...draggedData.jamdeck };
-      delete draggedData.jamdeck[normalizationKey];
-      if (!Object.keys(draggedData.jamdeck).length) delete draggedData.jamdeck;
+    if (options.removeNormalization && normalizationKey && data.jamdeck) {
+      delete data.jamdeck[normalizationKey];
+      if (!Object.keys(data.jamdeck).length) delete data.jamdeck;
     }
-    changes.set(id, draggedData);
-    if (remaining.length >= 2) {
-      const nextAnchor = remaining.some((member) => String(member.id) === String(group.anchor.id))
-        ? remaining.find((member) => String(member.id) === String(group.anchor.id))
-        : jamDeckCanvasFolderMemberSort(remaining)[0];
-      const record = this.folderRecord(group, remaining, { anchorId: nextAnchor.id, collapsed: true });
-      for (const member of remaining) changes.set(member.id, this.withFolderPayload(member.data, group.id, String(member.id) === String(nextAnchor.id) ? record : null));
-    } else {
-      for (const member of remaining) changes.set(member.id, this.withFolderPayload(member.data, null, null));
-    }
-    this.mutateNodes(changes);
-    // Restore member presentation immediately: a detached node keeps the
-    // folded container transform (stacked pose) if we leave runtime.presentation
-    // for the next reconcile frame, which makes it look hidden until a zoom.
-    const runtime = this.getFolderRuntime(group.id, group);
-    if (runtime) this.restoreFolderPresentation(runtime);
-    const draggedEl = dragged.node && dragged.node.nodeEl;
-    if (draggedEl) {
-      for (const cls of ["is-jam-deck-folder-member", "is-jam-deck-folder-anchor", "is-jam-deck-folder-collapsed", "is-jam-deck-folder-expanded", "is-jam-deck-folder-representative", "is-jam-deck-folder-hidden-member", "is-jam-deck-folder-proxy-hidden", "is-jam-deck-folder-transitioning"]) {
-        if (draggedEl.removeClass) draggedEl.removeClass(cls);
-      }
-      if (draggedEl.dataset) delete draggedEl.dataset.jamDeckFolderOwner;
-      if (draggedEl.style) {
-        draggedEl.style.removeProperty("visibility");
-        draggedEl.style.removeProperty("pointer-events");
-      }
-    }
+    const changes = new Map([[dragged.id, data]]);
+    if (remaining.length) changes.set(group.nativeGroupId, this.folderGroupData(group, this.folderRecord(group, remaining)));
+    this.mutateNodes(changes, null, { removeNodes: remaining.length ? [] : [group.nativeGroupId] });
+    this.restoreFolderOwnedNodes(group.id, [dragged]);
     this.clearFolderPreviewRuntime(group.id, true);
     this.scheduleReconcile();
     return true;
@@ -7296,8 +6938,8 @@ class CanvasFolderController {
       });
     });
     if (sameGroup) {
-      const record = this.folderRecord(sameGroup, items, { id: sameGroup.id, anchorId: sameGroup.anchor.id, layoutMode: "grid", representativeColumns: jamDeckCanvasFolderRepresentativeColumns(items) });
-      for (const item of items) changes.set(item.id, this.withFolderPayload(changes.get(item.id), sameGroup.id, item.id === record.anchorId ? record : null));
+      const record = this.folderRecord(sameGroup, items, { layoutMode: "grid" });
+      changes.set(sameGroup.nativeGroupId, this.expandGroupBounds(sameGroup, record, items.map(item => ({ ...item, rect: changes.get(item.id) }))));
     }
     this.mutateNodes(changes);
     return true;
@@ -7562,14 +7204,11 @@ class CanvasFolderController {
     if (this.isNativeFolder(latest)) {
       const g = this.nativeGroupNode(latest);
       if (g) {
+        const data = g.getData();
         changes.set(String(latest.nativeGroupId), {
-          id: String(latest.nativeGroupId),
-          x: jamDeckRoundCanvasStackValue(Number(g.x) + dx),
-          y: jamDeckRoundCanvasStackValue(Number(g.y) + dy),
-          width: Number(g.width) || 0,
-          height: Number(g.height) || 0,
-          type: "group",
-          label: latest.label || "文件夹",
+          ...data,
+          x: jamDeckRoundCanvasStackValue(Number(data.x) + dx),
+          y: jamDeckRoundCanvasStackValue(Number(data.y) + dy),
         });
       }
     }
@@ -7603,15 +7242,11 @@ class CanvasFolderController {
   }
 
   folderWorldShellRect(group) {
-    const anchor = group && group.anchor;
-    const rect = anchor && jamDeckCanvasStackRect(anchor.rect || anchor.data);
-    if (!rect) return null;
-    return {
-      x: jamDeckRoundCanvasStackValue(rect.x + rect.width / 2 - 100),
-      y: jamDeckRoundCanvasStackValue(rect.y + rect.height / 2 - 75),
-      width: 200,
-      height: 150,
-    };
+    const node = this.nativeGroupNode(group);
+    const box = node && jamDeckCanvasStackRect(node.getData());
+    if (!box) return null;
+    const offset = group.shellOffset || { x: 0, y: 0 };
+    return { x: box.x + offset.x, y: box.y + offset.y, width: JAM_DECK_CANVAS_FOLDER_BASE_WIDTH, height: JAM_DECK_CANVAS_FOLDER_BASE_HEIGHT };
   }
 
   folderShellIsHighZoom(shell) {
@@ -7925,7 +7560,10 @@ class CanvasFolderController {
       });
       modal.open();
     });
-    controls.append(view.color, view.ungroup, view.rename);
+    view.expand = this.createFolderControl("jam-deck-canvas-folder-expand", "原位展开并编辑", "expand", () => {
+      try { if (view.group) this.updateFolder(view.group, { collapsed: false }); } catch (error) { new Notice(`Jam Deck：${error.message}`); }
+    });
+    controls.append(view.color, view.expand, view.ungroup, view.rename);
     header.append(meta, controls);
   }
 
@@ -7940,6 +7578,8 @@ class CanvasFolderController {
     if (state === "collapsed" && this.canvas && this.canvas.selection && typeof this.canvas.deselectAll === "function") {
       const hasSelectedMember = (group.members || []).some((member) => member && member.node && this.canvas.selection.has(member.node));
       if (hasSelectedMember) this.canvas.deselectAll();
+      const frame = this.nativeGroupNode(group);
+      if (frame && this.canvas.selection.has(frame)) this.canvas.deselectAll();
     }
     view.shell.classList.toggle("is-collapsed", state === "collapsed");
     view.shell.classList.toggle("is-expanded", state === "expanded");
@@ -8021,6 +7661,7 @@ class CanvasFolderController {
     const writable = !!this.getAtomicFolderCapability() && !(this.canvas && this.canvas.readonly);
     if (view.color) view.color.disabled = !writable;
     if (view.ungroup) view.ungroup.disabled = !writable;
+    if (view.expand) view.expand.disabled = !writable;
     return true;
   }
 
@@ -8160,6 +7801,21 @@ class CanvasFolderController {
     }
   }
 
+  syncFolderVisibility(groups = []) {
+    const hidden = new Set(groups.filter(group => group.collapsed).flatMap(group => [group.nativeGroupId, ...group.memberIds]));
+    for (const node of this.canvas && this.canvas.nodes && this.canvas.nodes.values() || []) {
+      const el = node.nodeEl;
+      if (el && node.getData().type === "group") el.classList.toggle("is-jam-deck-folder-group-hidden", hidden.has(String(node.id)));
+    }
+    for (const edge of this.canvas && this.canvas.edges && this.canvas.edges.values() || []) {
+      const data = edge.getData();
+      const hide = hidden.has(String(data.fromNode)) || hidden.has(String(data.toNode));
+      for (const el of [edge.lineGroupEl, edge.lineEndGroupEl, edge.labelElement && edge.labelElement.wrapperEl]) {
+        if (el && el.classList) el.classList.toggle("is-jam-deck-folder-edge-hidden", hide);
+      }
+    }
+  }
+
   reportFolderSafetyOnce(key, message) {
     this.folderSafetyNotices = this.folderSafetyNotices || new Set();
     const token = String(key || message || "folder-safety");
@@ -8169,27 +7825,18 @@ class CanvasFolderController {
   }
 
   validateFolderGroup(group, claimed) {
-    if (!group || !group.anchor || !Array.isArray(group.members) || group.members.length < 2) return { ok: false, reason: "文件夹成员不足" };
+    if (!group || !group.anchor || !group.members.length) return { ok: false, reason: "文件夹成员不足" };
     const scene = this.folderSceneForGroup(group);
-    if (!scene) return { ok: false, reason: "文件夹成员不在同一个 Canvas 场景" };
-    let anchors = 0;
+    if (!scene) return { ok: false, reason: "文件夹不在当前 Canvas 场景" };
+    if (!this.nativeGroupNode(group)) return { ok: false, reason: "文件夹的原生分组不存在" };
     for (const member of group.members) {
-      const id = String(member.id);
-      const prior = claimed.get(id);
-      if (prior && prior !== String(group.id)) return { ok: false, reason: "同一节点被多个文件夹声明" };
-      const payload = member.data && member.data.jamdeck && member.data.jamdeck.folder;
-      if (payload) {
-        anchors += 1;
-        if (String(member.id) !== String(group.anchor.id) || String(payload.id || "") !== String(group.id)) return { ok: false, reason: "检测到嵌套或重复文件夹锚点" };
-      }
+      const prior = claimed.get(member.id);
+      if (prior && prior !== group.id) return { ok: false, reason: "同一节点被多个文件夹声明" };
     }
-    if (anchors !== 1) return { ok: false, reason: "文件夹锚点记录不唯一" };
-    for (const member of group.members) claimed.set(String(member.id), String(group.id));
+    for (const member of group.members) claimed.set(member.id, group.id);
     return { ok: true, scene };
   }
 
-  // Active v4 reconcile. It validates ownership before hiding any native
-  // node, then mounts the proxy shell and applies class-only presentation.
   reconcile() {
     if (this.destroyed) return;
     if (this.atomicFolderMutation) {
@@ -8203,8 +7850,7 @@ class CanvasFolderController {
     const valid = new Map();
     const collected = this.collectGroups();
     for (const collectedGroup of collected) {
-      // 折叠是唯一的持久状态，展开只是临时预览（preview 卡片，不还原真节点）。
-      const group = { ...collectedGroup, collapsed: true };
+      const group = collectedGroup;
       const verdict = this.validateFolderGroup(group, claimed);
       if (!verdict.ok) {
         this.restoreFolderOwnedNodes(group);
@@ -8222,6 +7868,7 @@ class CanvasFolderController {
       this.clearFolderPreviewRuntime(id, true);
     }
     this.groups = valid;
+    this.syncFolderVisibility([...valid.values()]);
     this.nodeToGroup.clear();
     this.renderFolderLayer();
     const seen = new Set();
@@ -8247,7 +7894,8 @@ class CanvasFolderController {
       if (seen.has(String(item.id))) continue;
       const nodeEl = item.node && item.node.nodeEl;
       if (!nodeEl) continue;
-      if (!nodeEl.dataset || !nodeEl.dataset.jamDeckFolderOwner) nodeEl.removeClass("is-jam-deck-folder-proxy-hidden");
+      nodeEl.removeClass("is-jam-deck-folder-proxy-hidden");
+      if (nodeEl.dataset) delete nodeEl.dataset.jamDeckFolderOwner;
       nodeEl.removeClass("is-jam-deck-folder-member");
       nodeEl.removeClass("is-jam-deck-folder-anchor");
       nodeEl.removeClass("is-jam-deck-folder-collapsed");
@@ -8323,6 +7971,7 @@ class CanvasFolderController {
     if (this.popoverLayer) this.popoverLayer.remove();
     this.popoverLayer = null;
     if (this.root) this.root.removeClass("has-jam-deck-canvas-folders");
+    this.syncFolderVisibility();
     this.groups.clear();
     this.nodeToGroup.clear();
   }
@@ -9076,7 +8725,6 @@ class IslandModeController {
     const svgIcon = (enabled) => enabled
       ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>'
       : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
-    const escapeHtml = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
     function renderClipboard() {
       rail.replaceChildren();
@@ -9127,23 +8775,21 @@ class IslandModeController {
           activity();
         });
         chip.addEventListener("dragstart", (event) => {
-          chip.classList.add("is-dragging");
+          if (item.type === "image") {
+            // Native file drag owns its preview and completion. Cancel Chromium's
+            // capsule drag first; it may never emit a DOM dragend after handoff.
+            event.preventDefault();
+            activity();
+            send({ type: "drag-image", ts: item.ts });
+            return;
+          }
           const transfer = event.dataTransfer;
           if (!transfer) return;
+          dragging = true;
+          chip.classList.add("is-dragging");
           transfer.effectAllowed = "copy";
           try { transfer.setData(CLIP_MIME, JSON.stringify({ ts: item.ts, type: item.type })); } catch (error) {}
-          if (item.type === "text") {
-            transfer.setData("text/plain", item.content || "");
-          } else {
-            const url = item.fileUrl || item.resourceUrl || "";
-            if (url) {
-              try { transfer.setData("text/uri-list", url); } catch (error) {}
-              try { transfer.setData("DownloadURL", (item.mime || "image/png") + ":" + item.filename + ":" + url); } catch (error) {}
-              try { transfer.setData("text/plain", url); } catch (error) {}
-              try { transfer.setData("text/html", '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(item.filename) + '">'); } catch (error) {}
-            }
-            send({ type: "drag-image", ts: item.ts });
-          }
+          transfer.setData("text/plain", item.content || "");
           activity();
         });
         chip.addEventListener("dragend", () => chip.classList.remove("is-dragging"));
@@ -9236,7 +8882,6 @@ class IslandModeController {
       if (state.collapsed && !inPeekZone(event)) return;
       activity(state.collapsed);
     }, { capture: true, passive: true });
-    document.addEventListener("dragstart", () => { dragging = true; clearLeave(); }, true);
     document.addEventListener("dragend", () => { dragging = false; }, true);
     document.documentElement.addEventListener("mouseenter", (event) => {
       clearLeave();
@@ -10038,6 +9683,7 @@ class CanvasRuntimeAdapter {
     this.destroyPromises = new Map();
     this.nativeConflictSuspendedIds = new Set();
     this.returnCoordinators = new Map();
+    this.downloads = new CanvasDownloadCoordinator(this);
     this.generation = 0;
     this.activeStage = null;
   }
@@ -10952,6 +10598,7 @@ class CanvasRuntimeAdapter {
   }
 
   async destroyAll() {
+    await this.downloads.destroy();
     await Promise.all(Array.from(this.entries.keys()).map((id) => this.destroy(id)));
     this.nativeConflictSuspendedIds.clear();
     for (const coordinator of this.returnCoordinators.values()) coordinator.destroy();
@@ -12052,6 +11699,9 @@ class JamDeckView extends ItemView {
   }
 
   async onClose() {
+    for (const dispose of this.captionDisposers || []) dispose();
+    this.captionDisposers = [];
+    this.plugin.captions?.stopUnused();
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
@@ -12131,6 +11781,8 @@ class JamDeckView extends ItemView {
       return;
     }
     const root = this.contentEl;
+    for (const dispose of this.captionDisposers || []) dispose();
+    this.captionDisposers = [];
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
@@ -12257,20 +11909,17 @@ class JamDeckView extends ItemView {
     button.addEventListener("click", handler);
   }
 
+  aiProviderLabel() {
+    return this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+  }
+
   toggleAiProvider() {
     const next = this.plugin.settings.aiProvider === "glm" ? "deepseek" : "glm";
     this.plugin.settings.aiProvider = next;
     void this.plugin.saveSettings();
-    const label = next === "glm" ? "GLM（可看图）" : "DeepSeek";
+    const label = next === "glm" ? "GLM" : `DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}）`;
     new Notice(`Jam Deck：AI 已切换到 ${label}`);
-    if (next === "deepseek" && this.aiCanvasContext && this.aiCanvasContext.kind === "image") {
-      // 图片上下文只属于 GLM 多模态：切到 DeepSeek 后降级为纯节点上下文，
-      // 纯文本对话可以继续，避免“看图需要 GLM”误拦截。
-      const ctx = this.aiCanvasContext;
-      this.aiCanvasContext = { canvas: ctx.canvas || null, nodeId: ctx.nodeId || null, rect: ctx.rect || null };
-      this.clearAiImageDock();
-      this.addAiMessage("assistant", "已切换到 DeepSeek：图片上下文已移除，纯文本对话继续；需要再看图请重新对图片节点打开 AI 助手或把图片拖进对话框。");
-    }
+    // DeepSeek 与 GLM 都支持图片输入：已载入的图片上下文随切换保留，不再降级为纯文本。
     this.refreshAiAssistantPage();
   }
 
@@ -12287,7 +11936,7 @@ class JamDeckView extends ItemView {
       new Notice("Jam Deck：未配置 DeepSeek API Key，无法归档");
       return;
     }
-    const dsModel = this.plugin.settings.aiModel || "deepseek-v4-flash";
+    const dsModel = JAM_DECK_DEEPSEEK_MODEL;
     const lines = [];
     for (const msg of pending) {
       if (msg.role === "user") {
@@ -12539,10 +12188,7 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "glm") {
-      this.plugin.settings.aiProvider = "glm";
-      void this.plugin.saveSettings();
-    }
+    // DeepSeek 与 GLM 都支持图片输入，载入图片时不再把 provider 强制切到 GLM。
     this.aiCanvasContext = {
       canvas: canvas || null,
       nodeId: node && node.id || null,
@@ -12565,7 +12211,7 @@ class JamDeckView extends ItemView {
     });
     this.aiMessages.push({
       role: "assistant",
-      content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。",
+      content: `已载入图片（${this.aiProviderLabel()} · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。`,
     });
     if (this.aiChat) {
       this.aiChat.hidden = false;
@@ -12597,15 +12243,12 @@ class JamDeckView extends ItemView {
         displaySrc = compressed.dataUrl;
       }
     } catch (error) {}
-    if (this.plugin.settings.aiProvider !== "glm") {
-      this.plugin.settings.aiProvider = "glm";
-      void this.plugin.saveSettings();
-    }
+    // 同上：两边的模型都能看图，无需切换 provider。
     this.aiCanvasContext = { canvas: null, nodeId: null, kind: "image", image: { path, mime: sendMime, base64: sendBase64 } };
     this.aiQuickDone = true;
     const displayName = name || String(path || "").split("/").pop() || "图片";
     this.aiMessages.push({ role: "user", image: { src: displaySrc, alt: displayName }, text: "[图片]" });
-    this.aiMessages.push({ role: "assistant", content: "已载入图片（GLM · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。" });
+    this.aiMessages.push({ role: "assistant", content: `已载入图片（${this.aiProviderLabel()} · 多模态）。描述这张图，或问配色 / 构图 / 风格 / 内容相关问题。` });
     if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 2]);
       this.renderAiMessage(this.aiMessagesEl, this.aiMessages[this.aiMessages.length - 1]);
@@ -12713,11 +12356,11 @@ class JamDeckView extends ItemView {
 
   refreshAiAssistantPage() {
     if (this.aiProviderBtn) {
-      const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+      const provider = this.aiProviderLabel();
       this.aiProviderBtn.textContent = provider;
       this.aiProviderBtn.title = provider === "GLM"
-        ? "当前：GLM（多模态）· 点击切换到 DeepSeek"
-        : "当前：DeepSeek · 点击切换到 GLM（可看图）";
+        ? `当前：GLM（可看图）· 点击切换到 DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）`
+        : `当前：DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）· 点击切换到 GLM（可看图）`;
     }
     this.renderAiAssistantPage();
   }
@@ -12861,11 +12504,16 @@ class JamDeckView extends ItemView {
   renderAiChatHeader(header, { assistantPageId, localWebPageId }) {
     const titleGroup = header.createDiv({ cls: "jam-deck-ai-chat-title-group" });
     titleGroup.createSpan({ text: "AI 助手", cls: "jam-deck-ai-chat-title" });
-    const provider = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
+    const provider = this.aiProviderLabel();
     const providerBtn = titleGroup.createEl("button", {
       text: provider,
       cls: "jam-deck-ai-provider-btn",
-      attr: { type: "button", title: provider === "GLM" ? "当前：GLM（多模态）· 点击切换到 DeepSeek" : "当前：DeepSeek · 点击切换到 GLM（可看图）" },
+      attr: {
+        type: "button",
+        title: provider === "GLM"
+          ? `当前：GLM（可看图）· 点击切换到 DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）`
+          : `当前：DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}，可看图）· 点击切换到 GLM（可看图）`,
+      },
     });
     this.aiProviderBtn = providerBtn;
     providerBtn.addEventListener("click", () => this.toggleAiProvider());
@@ -12934,21 +12582,30 @@ class JamDeckView extends ItemView {
   renderAiChatBody(chat) {
     const messages = chat.createDiv({ cls: "jam-deck-ai-messages" });
     this.aiMessagesEl = messages;
-    if (!this.aiMessages || !this.aiMessages.length) {
-      const empty = messages.createDiv({ cls: "jam-deck-ai-empty" });
-      empty.createDiv({ text: "今天想处理什么？", cls: "jam-deck-ai-empty-title" });
-      empty.createDiv({ text: "直接用自然语言新增、完成或删除待办，也可以指定日期和分类。", cls: "jam-deck-ai-empty-copy" });
-      empty.createDiv({ text: "例如：周一加一条「参考图集归档」，工作分类", cls: "jam-deck-ai-empty-example" });
-    } else {
-      for (const msg of this.aiMessages) this.renderAiMessage(messages, msg);
-    }
-    if (this.aiCanvasContext && this.aiCanvasContext.nodeId && !this.aiQuickDone) {
-      this.renderAiQuickOptions(messages);
-    }
+    this.renderAiMessagesList(messages);
 
     const dock = chat.createDiv({ cls: "jam-deck-ai-image-dock" });
     dock.hidden = true;
     this.aiImageDockEl = dock;
+  }
+
+  // 消息列表的唯一渲染入口：始终以 this.aiMessages 为唯一真源整体重建。
+  // 结算回复也复用这里，不再用 lastElementChild 猜「最后一条消息气泡」——
+  // 列表尾部还会挂 jam-deck-ai-quick 快捷块，猜位置会把结果写进错误的节点，
+  // 真正的「处理中…」气泡反而永远留在界面上。
+  renderAiMessagesList(list) {
+    list.empty();
+    if (!this.aiMessages || !this.aiMessages.length) {
+      const empty = list.createDiv({ cls: "jam-deck-ai-empty" });
+      empty.createDiv({ text: "今天想处理什么？", cls: "jam-deck-ai-empty-title" });
+      empty.createDiv({ text: "直接用自然语言新增、完成或删除待办，也可以指定日期和分类。", cls: "jam-deck-ai-empty-copy" });
+      empty.createDiv({ text: "例如：周一加一条「参考图集归档」，工作分类", cls: "jam-deck-ai-empty-example" });
+    } else {
+      for (const msg of this.aiMessages) this.renderAiMessage(list, msg);
+    }
+    if (this.aiCanvasContext && this.aiCanvasContext.nodeId && !this.aiQuickDone) {
+      this.renderAiQuickOptions(list);
+    }
   }
 
   renderAiChatInputRow(chat) {
@@ -13155,11 +12812,40 @@ class JamDeckView extends ItemView {
     }
   }
 
-  addAiMessage(role, content) {
+  pushAiMessage(message) {
     if (!this.aiMessages) this.aiMessages = [];
-    this.aiMessages.push({ role, content });
+    this.aiMessages.push(message);
     if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-      this.renderAiMessage(this.aiMessagesEl, { role, content });
+      // 空对话的引导块不会自己让位：第一条消息落进来时必须移除，
+      // 否则「今天想处理什么？」会一直顶在真实消息上方。
+      const hint = this.aiMessagesEl.querySelector(":scope > .jam-deck-ai-empty");
+      if (hint) hint.remove();
+      const bubble = this.renderAiMessage(this.aiMessagesEl, message);
+      // 快捷翻译块始终贴在列表末尾；新消息插在它之前，否则会被它夹在中间。
+      const quick = this.aiMessagesEl.querySelector(":scope > .jam-deck-ai-quick");
+      if (quick) this.aiMessagesEl.insertBefore(bubble, quick);
+      this.scrollAiMessages();
+      return bubble;
+    }
+    return null;
+  }
+
+  addAiMessage(role, content) {
+    return this.pushAiMessage({ role, content });
+  }
+
+  // 结算「处理中…」占位消息：先更新数组，再按数组全量重渲染列表。
+  // 不能只改 DOM：applyAiOperations() 结尾的 renderAllViews() 会整体重建视图，
+  // 重建那一刻读到的数组仍是「处理中…」，之前拿到的气泡引用也已经脱离文档。
+  // 消息对象本身是稳定锚点，位置不是。
+  settleAiPendingMessage(pendingMessage, content) {
+    if (this.aiMessages) {
+      const index = this.aiMessages.indexOf(pendingMessage);
+      if (index >= 0) this.aiMessages[index] = { role: "assistant", content };
+      else if (this.aiMessages.length) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content };
+    }
+    if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
+      this.renderAiMessagesList(this.aiMessagesEl);
       this.scrollAiMessages();
     }
   }
@@ -13202,19 +12888,11 @@ class JamDeckView extends ItemView {
       : null;
     if ((!text && !imageCtx) || this.aiBusy) return { ok: false, reason: "idle" };
     const config = this.plugin.getAiConfig();
-    if (imageCtx) {
-      if (this.plugin.settings.aiProvider !== "glm") {
-        this.addAiMessage("assistant", "看图需要 GLM（多模态）。请点击标题旁的模型按钮切换到 GLM。");
-        return { ok: false, reason: "need-glm" };
-      }
-      if (!config.apiKey) {
-        this.addAiMessage("assistant", "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key");
-        return { ok: false, reason: "no-key" };
-      }
-    } else if (!config.apiKey) {
-      const tip = this.plugin.settings.aiProvider === "glm"
+    if (!config.apiKey) {
+      // DeepSeek 与 GLM 都支持图片输入，缺 Key 时只按当前 provider 给出对应提示。
+      const tip = config.label === "GLM"
         ? "还没配置 GLM API Key：设置 → 第三方插件 → Jam Deck → GLM API Key"
-        : "还没配置 API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
+        : "还没配置 DeepSeek API Key：设置 → 第三方插件 → Jam Deck → DeepSeek API Key";
       this.addAiMessage("assistant", tip);
       return { ok: false, reason: "no-key" };
     }
@@ -13224,11 +12902,18 @@ class JamDeckView extends ItemView {
       this.aiSendBtn.disabled = true;
       this.aiSendBtn.textContent = "…";
     }
-    const providerLabel = this.plugin.settings.aiProvider === "glm" ? "GLM" : "DeepSeek";
-    this.addAiMessage("assistant", `${providerLabel} 处理中…`);
+    const providerLabel = this.aiProviderLabel();
+    const useHarness = !imageCtx && this.plugin.shouldUseHarness(text);
+    // 占位气泡用消息对象本身作为锚点。列表尾部还可能挂着 jam-deck-ai-quick
+    // 快捷块，任何「取列表最后一个元素」的写法都可能摸到它而不是这条消息。
+    const pendingMessage = {
+      role: "assistant",
+      content: useHarness ? "DeepSeek Harness 处理中…（本机 dsh，通常 20–30 秒）" : `${providerLabel} 处理中…`,
+    };
+    const pendingEl = this.pushAiMessage(pendingMessage);
     try {
       if (imageCtx) {
-        const bubble = this.aiChat && !this.aiChat.hidden ? this.aiMessagesEl.lastElementChild : null;
+        const bubble = pendingEl && pendingEl.isConnected ? pendingEl : null;
         let full = "";
         const translated = await this.plugin.streamChatWithImage(imageCtx.image.base64, imageCtx.image.mime, text, (chunk) => {
           full += chunk;
@@ -13239,42 +12924,33 @@ class JamDeckView extends ItemView {
           }
         });
         const content = (translated || "").trim() || "（没有返回内容）";
-        if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content };
-        if (bubble) {
-          bubble.empty();
-          bubble.createSpan({ text: content, cls: "jam-deck-ai-message-text" });
-        }
+        this.settleAiPendingMessage(pendingMessage, content);
         const glmConfig = this.plugin.getAiConfig();
         await this.plugin.appendAiLog("user", `[图片：${imageCtx.image.path.split("/").pop()}] ${text}`, glmConfig.label);
         await this.plugin.appendAiLog("assistant", content, glmConfig.label);
         return { ok: true, reply: content };
       }
+      if (useHarness) {
+        // Harness 只回自然语言，没有待办操作可解析——不用假装执行了什么。
+        const harnessReply = (await this.plugin.askHarness(text)).trim() || "（DeepSeek Harness 没有返回内容）";
+        this.aiLastResult = { added: 0, completed: 0, removed: 0, skipped: 0 };
+        this.settleAiPendingMessage(pendingMessage, harnessReply);
+        await this.plugin.appendAiLog("user", text, "DeepSeek Harness");
+        await this.plugin.appendAiLog("assistant", harnessReply, "DeepSeek Harness");
+        return { ok: true, reply: harnessReply };
+      }
       const result = await this.plugin.askDeckAi(text, this.aiCanvasContext);
       const stats = await this.plugin.applyAiOperations(result.operations, this.aiCanvasContext);
       const summary = this.buildAiSummary(result.reply, stats);
-      if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: summary };
       this.aiLastResult = stats;
-      if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-        const last = this.aiMessagesEl.lastElementChild;
-        if (last) {
-          last.empty();
-          last.createSpan({ text: summary, cls: "jam-deck-ai-message-text" });
-        }
-      }
+      this.settleAiPendingMessage(pendingMessage, summary);
       const dsConfig = this.plugin.getAiConfig();
       await this.plugin.appendAiLog("user", text, dsConfig.label);
       await this.plugin.appendAiLog("assistant", summary, dsConfig.label);
       return { ok: true, reply: summary };
     } catch (error) {
       const message = `出错了：${error.message || "未知错误"}`;
-      if (this.aiMessages) this.aiMessages[this.aiMessages.length - 1] = { role: "assistant", content: message };
-      if (this.aiMessagesEl && this.aiChat && !this.aiChat.hidden) {
-        const last = this.aiMessagesEl.lastElementChild;
-        if (last) {
-          last.empty();
-          last.createSpan({ text: message, cls: "jam-deck-ai-message-text" });
-        }
-      }
+      this.settleAiPendingMessage(pendingMessage, message);
       return { ok: false, reason: "error", reply: message };
     } finally {
       this.aiBusy = false;
@@ -13408,6 +13084,13 @@ class JamDeckView extends ItemView {
 
   renderWidgetBody(body, widget) {
     switch (widget.type) {
+      case "captions":
+        if (this.plugin.captions) (this.captionDisposers ||= []).push(this.plugin.captions.mount(body, widget.id));
+        else {
+          body.createEl("p", { cls: "jam-deck-caption-empty", text: this.plugin.captionLoadError || "字幕墙是可选扩展，请先安装字幕扩展包。" });
+          body.createEl("a", { text: "查看安装说明", href: "https://github.com/J4M16/jam-deck/blob/develop/docs/CAPTION_WALL.md", attr: { target: "_blank", rel: "noopener" } });
+        }
+        break;
       case "clock":
         this.renderClock(body, widget);
         break;
@@ -14786,6 +14469,15 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictDisposed = false;
     this.islandMode = new IslandModeController(this);
     await this.loadSettings();
+    const captionDirectory = nodePath.join(jamDeckVaultBasePath(this.app), this.manifest.dir);
+    const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
+    if (require("fs").existsSync(captionHostPath)) {
+      try {
+        const captionRequire = require("module").createRequire(nodePath.join(captionDirectory, "main.js"));
+        delete captionRequire.cache[captionRequire.resolve(captionHostPath)];
+        this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, setIcon, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
+      } catch (error) { this.captionLoadError = `字幕扩展加载失败，请重新安装：${error.message}`; }
+    }
     await this.ensureClipboardDir();
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();
@@ -14842,6 +14534,7 @@ class JamDeckPlugin extends Plugin {
   }
 
   onunload() {
+    this.captions?.dispose();
     this.canvasNativeConflictDisposed = true;
     this.canvasNativeConflictReconcileQueued = false;
     if (this.canvasNativeConflictTimer != null) {
@@ -15258,39 +14951,83 @@ class JamDeckPlugin extends Plugin {
       ],
       tool_choice: "auto",
     };
-    let response = await this.chatCompletion(payload);
-    const firstMessage = response && response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message;
-    if (firstMessage && Array.isArray(firstMessage.tool_calls) && firstMessage.tool_calls.length) {
-      const call = firstMessage.tool_calls[0];
-      payload.messages.push(firstMessage);
-      let toolResult = "搜索失败：无可用搜索结果";
-      if (call.function && call.function.name === "web_search") {
-        try {
-          const args = typeof call.function.arguments === "string" ? JSON.parse(call.function.arguments) : {};
-          toolResult = await this.webSearch(String(args.query || userText || "").slice(0, 100));
-        } catch (error) {
-          toolResult = `搜索失败：${error.message || "未知错误"}`;
-        }
+    let content = "";
+    let toolRoundsUsed = 0;
+    for (let round = 0; round <= AI_TOOL_MAX_ROUNDS; round += 1) {
+      const response = await this.chatCompletion(payload);
+      const message = response && response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message;
+      if (!message) break;
+      // 模型可能并行发起多个 tool_call；只回其中一条，服务端就会以
+      // "insufficient tool messages following tool_calls message" 拒绝整轮请求。
+      const calls = (Array.isArray(message.tool_calls) ? message.tool_calls : []).filter((call) => call && call.id);
+      if (!calls.length) {
+        content = String(message.content || "").trim();
+        break;
       }
-      payload.messages.push({ role: "tool", tool_call_id: call.id, content: toolResult });
-      response = await this.chatCompletion(payload);
+      toolRoundsUsed += 1;
+      const assistantMessage = {
+        role: "assistant",
+        content: typeof message.content === "string" ? message.content : "",
+        tool_calls: calls.map((call) => ({
+          id: call.id,
+          type: call.type || "function",
+          function: { name: call.function && call.function.name, arguments: call.function && call.function.arguments },
+        })),
+      };
+      // DeepSeek 思考模式要求 reasoning_content 原样回传，漏掉直接 400。
+      if (typeof message.reasoning_content === "string") assistantMessage.reasoning_content = message.reasoning_content;
+      payload.messages.push(assistantMessage);
+      for (const call of calls) {
+        payload.messages.push({ role: "tool", tool_call_id: call.id, content: await this.runAiToolCall(call, userText) });
+      }
+      if (toolRoundsUsed >= AI_TOOL_MAX_ROUNDS) {
+        // 搜索预算用尽：撤掉工具再问一次，让模型拿已有结果收尾。模型会不停换
+        // 关键词重搜，这时候直接报错等于把失败甩给用户。
+        delete payload.tools;
+        delete payload.tool_choice;
+      }
     }
-    const content = response && response.json && response.json.choices && response.json.choices[0] && response.json.choices[0].message
-      ? response.json.choices[0].message.content
-      : "";
     if (!content) throw new Error("模型没有返回内容");
-    let parsed;
+    let parsed = null;
     try {
       parsed = JSON.parse(content);
     } catch (error) {
       const match = String(content).match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("模型返回无法解析");
-      parsed = JSON.parse(match[0]);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch (inner) {
+          parsed = null;
+        }
+      }
+    }
+    if (!parsed || typeof parsed !== "object") {
+      // 被强制收尾时模型常直接给自然语言，照原样显示胜过抛「无法解析」。
+      return { reply: content.slice(0, 600), operations: [] };
     }
     return {
-      reply: String(parsed && parsed.reply || "").trim(),
-      operations: Array.isArray(parsed && parsed.operations) ? parsed.operations : [],
+      reply: String(parsed.reply || "").trim() || content.slice(0, 600),
+      operations: Array.isArray(parsed.operations) ? parsed.operations : [],
     };
+  }
+
+  // 执行单个 tool_call，返回给模型的 tool 消息内容（必须始终是字符串）。
+  async runAiToolCall(call, fallbackQuery) {
+    const name = call && call.function && call.function.name;
+    if (name !== "web_search") return `未实现的工具：${name || "未命名"}，本轮没有可用结果。`;
+    let query = String(fallbackQuery || "").trim();
+    try {
+      const args = typeof call.function.arguments === "string" ? JSON.parse(call.function.arguments) : call.function.arguments;
+      if (args && args.query) query = String(args.query).trim();
+    } catch (error) {
+      // 参数不是合法 JSON 时退回用户原话，搜索还能继续。
+    }
+    if (!query) return "搜索失败：没有可用的搜索关键词。";
+    try {
+      return await this.webSearch(query.slice(0, 100));
+    } catch (error) {
+      return `搜索失败：${error.message || "未知错误"}`;
+    }
   }
 
   getAiConfig() {
@@ -15305,9 +15042,76 @@ class JamDeckPlugin extends Plugin {
     return {
       baseUrl: "https://api.deepseek.com",
       apiKey: this.settings.aiApiKey || "",
-      model: this.settings.aiModel || "deepseek-v4-flash",
+      model: JAM_DECK_DEEPSEEK_MODEL,
       label: "DeepSeek",
     };
+  }
+
+  // —— 本机 DeepSeek Harness（dsh）—— 搜索类提问交给它，回答直接显示，不解析成待办操作。
+  harnessNodePath() {
+    const fs = require("fs");
+    const candidates = [
+      nodePath.join(process.env.ProgramFiles || "C:\\Program Files", "nodejs", "node.exe"),
+      nodePath.join(process.env.LOCALAPPDATA || "", "Programs", "nodejs", "node.exe"),
+    ];
+    for (const candidate of candidates) {
+      try { if (fs.existsSync(candidate)) return candidate; } catch (error) {}
+    }
+    // 退回 PATH：npm 的 dsh.cmd 本身也是这么找 node 的。
+    return "node";
+  }
+
+  harnessScriptPath() {
+    const fs = require("fs");
+    const script = nodePath.join(process.env.APPDATA || "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+    try { return fs.existsSync(script) ? script : null; } catch (error) { return null; }
+  }
+
+  harnessAvailable() {
+    return !!this.harnessScriptPath();
+  }
+
+  shouldUseHarness(text) {
+    if (this.settings.harnessSearch === false) return false;
+    if (!this.harnessAvailable()) return false;
+    return JAM_DECK_HARNESS_PATTERN.test(String(text || ""));
+  }
+
+  askHarness(task, options = {}) {
+    const script = this.harnessScriptPath();
+    if (!script) return Promise.reject(new Error("本机未找到 dsh（DeepSeek Harness）"));
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : JAM_DECK_HARNESS_TIMEOUT_MS;
+    return new Promise((resolve, reject) => {
+      let child = null;
+      try {
+        child = spawn(this.harnessNodePath(), [script, "--profile", JAM_DECK_HARNESS_PROFILE, String(task)], { windowsHide: true });
+      } catch (error) {
+        reject(new Error(`无法启动 DeepSeek Harness：${error.message}`));
+        return;
+      }
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      let timer = null;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        fn(value);
+      };
+      timer = setTimeout(() => {
+        try { child.kill(); } catch (error) {}
+        settle(reject, new Error(`DeepSeek Harness 超过 ${Math.round(timeoutMs / 1000)} 秒未返回，已中止`));
+      }, timeoutMs);
+      child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+      child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+      child.on("error", (error) => settle(reject, new Error(`无法启动 DeepSeek Harness：${error.message}`)));
+      child.on("close", (code) => {
+        const text = stdout.trim();
+        if (code === 0 && text) settle(resolve, text);
+        else settle(reject, new Error(text.slice(0, 200) || stderr.trim().slice(-200) || `DeepSeek Harness 退出码 ${code}`));
+      });
+    });
   }
 
   async chatCompletion(payload) {
@@ -15341,9 +15145,13 @@ class JamDeckPlugin extends Plugin {
   }
 
   async webSearch(query) {
+    const encoded = encodeURIComponent(query);
+    // 两个后端都是抓结果页 HTML。360 实测对中文查询最准（返回 data-mdurl 真实地址）；
+    // www.bing.com 在无 cookie 时经常回一堆无关推荐（「File Explorer in Windows」那种），
+    // 只能当兜底；cn.bing.com 与 DuckDuckGo 已废（空壳 / 202 反爬）。
     const attempts = [
-      { url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, bing: false },
-      { url: `https://cn.bing.com/search?q=${encodeURIComponent(query)}`, bing: true },
+      { url: `https://www.so.com/s?q=${encoded}`, engine: "so360" },
+      { url: `https://www.bing.com/search?q=${encoded}`, engine: "bing" },
     ];
     for (const attempt of attempts) {
       try {
@@ -15357,37 +15165,37 @@ class JamDeckPlugin extends Plugin {
           },
         });
         if (!res || res.status !== 200 || typeof res.text !== "string" || !res.text.length) continue;
-        const results = this.parseSearchHtml(res.text, attempt.bing);
+        const results = this.parseSearchHtml(res.text, attempt.engine);
         if (results.length) return results;
       } catch (error) {}
     }
-    return `搜索「${query}」没有返回可用结果。`;
+    // 明确告诉模型别再重试：否则它会一路换关键词死磕到预算用尽。
+    return `搜索「${query}」没有返回可用结果（搜索通道本次不可用）。不要再尝试搜索，直接基于已有信息回答；确实查不到就说明无法获取。`;
   }
 
-  parseSearchHtml(html, bing) {
+  parseSearchHtml(html, engine) {
     const items = [];
+    const clean = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     const add = (title, url, snippet) => {
-      const clean = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
       const t = clean(title).slice(0, 80);
       if (!t) return;
-      items.push(`${items.length + 1}. ${t}\n   来源：${String(url || "").slice(0, 120)}\n   摘要：${clean(snippet).slice(0, 160)}`);
+      const s = clean(snippet).slice(0, 160);
+      items.push(`${items.length + 1}. ${t}\n   来源：${String(url || "").slice(0, 120)}${s ? `\n   摘要：${s}` : ""}`);
     };
     const source = String(html);
-    if (bing) {
-      const blocks = source.split(/<li class="b_algo"/);
-      for (const block of blocks.slice(1)) {
-        const linkMatch = block.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>/);
-        const titleMatch = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
-        const snipMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
-        add(titleMatch ? titleMatch[1] : "", linkMatch ? linkMatch[1] : "", snipMatch ? snipMatch[1] : "");
+    if (engine === "so360") {
+      for (const block of source.split(/<li class="res-list"/).slice(1)) {
+        const titleMatch = block.match(/class="res-title"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/);
+        const urlMatch = block.match(/data-mdurl="(https?:\/\/[^"]+)"/) || block.match(/<a[^>]+href="(https?:\/\/[^"]+)"/);
+        const snipMatch = block.match(/class="res-desc"[^>]*>([\s\S]*?)<\/p>/);
+        add(titleMatch ? titleMatch[1] : "", urlMatch ? urlMatch[1] : "", snipMatch ? snipMatch[1] : "");
         if (items.length >= 5) break;
       }
     } else {
-      const blocks = source.split(/class="result__a"/);
-      for (const block of blocks.slice(1)) {
-        const linkMatch = block.match(/href="([^"]+)"/);
-        const titleMatch = block.match(/>(.*?)<\/a>/s);
-        const snipMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+      for (const block of source.split(/<li class="b_algo"/).slice(1)) {
+        const linkMatch = block.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>/);
+        const titleMatch = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
+        const snipMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
         add(titleMatch ? titleMatch[1] : "", linkMatch ? linkMatch[1] : "", snipMatch ? snipMatch[1] : "");
         if (items.length >= 5) break;
       }
@@ -15649,7 +15457,9 @@ class JamDeckPlugin extends Plugin {
 
   async streamChatWithImage(imageBase64, mime, prompt, onChunk) {
     const config = this.getAiConfig();
-    const system = `你是 GLM ${config.model}（智谱多模态模型），运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
+    // DeepSeek 与 GLM 都接受 OpenAI 兼容的 image_url + data URL 图片块；
+    // deepseek-flash 已实测可正常识别图片内容（唯一支持图片输入的 DeepSeek 模型）。
+    const system = `你是 ${config.label} 的 ${config.model}，运行在 Jam Deck 中。用户会发送图片并提出问题，请基于图片内容简洁、准确地回答；涉及配色/构图/风格时给出具体描述。`;
     return this.streamChat([
       { role: "system", content: system },
       {
@@ -18411,6 +18221,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
 
   async removeWidget(id) {
     const removed = this.settings.widgets.find((widget) => widget.id === id);
+    this.captions?.remove(id);
     this.settings.widgets = this.settings.widgets.filter((widget) => widget.id !== id);
     await this.saveSettings();
     this.renderAllViews();
@@ -19249,6 +19060,9 @@ JamDeckPlugin.isNativeCanvasFocusButton = jamDeckIsNativeCanvasFocusButton;
 JamDeckPlugin.CanvasRuntimeAdapter = CanvasRuntimeAdapter;
 JamDeckPlugin.CanvasReturnCoordinator = CanvasReturnCoordinator;
 JamDeckPlugin.CanvasLinkNavigationBridge = CanvasLinkNavigationBridge;
+JamDeckPlugin.CanvasDownloadCoordinator = CanvasDownloadCoordinator;
+JamDeckPlugin.createCanvasDownloadService = jamDeckCreateCanvasDownloadService;
+JamDeckPlugin.canvasDownloadNode = jamDeckCanvasDownloadNode;
 JamDeckPlugin.canvasLinkBridgeScript = jamDeckCanvasLinkBridgeScript;
 JamDeckPlugin.canvasReturnIframeArmTtlMs = CANVAS_RETURN_IFRAME_ARM_TTL_MS;
 JamDeckPlugin.countdownHelpers = {
@@ -19378,11 +19192,11 @@ class JamDeckSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "DeepSeek（文本）", cls: "jam-deck-setting-h3" });
+    containerEl.createEl("h3", { text: "DeepSeek（图文）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)
       .setName("DeepSeek API Key")
-      .setDesc("用于 AI 对话（待办操作、翻译、问答）。在 platform.deepseek.com 创建（sk- 开头）；只保存在本地 data.json，不上传。")
+      .setDesc(`用于 AI 对话（待办操作、翻译、问答、看图）。在 platform.deepseek.com 创建（sk- 开头）；只保存在本地 data.json，不上传。模型固定为 ${JAM_DECK_DEEPSEEK_MODEL} —— DeepSeek 当前唯一支持图片输入的模型（deepseek-v4-pro 无法识别图片）。`)
       .addText((text) => {
         text.setPlaceholder("sk-…").setValue(this.plugin.settings.aiApiKey).onChange(async (value) => {
           this.plugin.settings.aiApiKey = value.trim();
@@ -19391,20 +19205,7 @@ class JamDeckSettingTab extends PluginSettingTab {
         text.inputEl.type = "password";
       });
 
-    new Setting(containerEl)
-      .setName("DeepSeek 模型")
-      .setDesc("deepseek-v4-flash 快速便宜（推荐）；deepseek-v4-pro 推理更强。")
-      .addDropdown((dropdown) => {
-        dropdown.addOption("deepseek-v4-flash", "deepseek-v4-flash（推荐）");
-        dropdown.addOption("deepseek-v4-pro", "deepseek-v4-pro");
-        dropdown.setValue(this.plugin.settings.aiModel || "deepseek-v4-flash");
-        dropdown.onChange(async (value) => {
-          this.plugin.settings.aiModel = value;
-          await this.plugin.saveSettings();
-        });
-      });
-
-    containerEl.createEl("h3", { text: "GLM（多模态，可看图）", cls: "jam-deck-setting-h3" });
+    containerEl.createEl("h3", { text: "GLM（多模态）", cls: "jam-deck-setting-h3" });
 
     new Setting(containerEl)
       .setName("GLM API Key")
@@ -19432,15 +19233,26 @@ class JamDeckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("当前模型")
-      .setDesc("AI 对话窗标题旁的按钮也可随时切换。DeepSeek 处理文本；GLM 可识别图片。")
+      .setDesc(`AI 对话窗标题旁的按钮也可随时切换。DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}）与 GLM 都能识别图片，也都处理待办与问答。`)
       .addDropdown((dropdown) => {
-        dropdown.addOption("deepseek", "DeepSeek（文本）");
+        dropdown.addOption("deepseek", `DeepSeek（${JAM_DECK_DEEPSEEK_MODEL}）`);
         dropdown.addOption("glm", "GLM（多模态）");
         dropdown.setValue(this.plugin.settings.aiProvider || "deepseek");
         dropdown.onChange(async (value) => {
           this.plugin.settings.aiProvider = value;
           await this.plugin.saveSettings();
           new Notice(`Jam Deck：AI 默认模型已切换为 ${value === "glm" ? "GLM" : "DeepSeek"}`);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("搜索类提问交给本机 Harness")
+      .setDesc("开启后，含搜索 / 联网意图的提问（搜索、查一下、最新、新闻、股价…）交给本机 dsh（DeepSeek 官方 harness）执行，通常 20–30 秒；其余提问仍走上方模型。需本机已安装 dsh。")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.harnessSearch !== false);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.harnessSearch = value;
+          await this.plugin.saveSettings();
         });
       });
 
