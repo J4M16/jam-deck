@@ -16,7 +16,7 @@
   其中 `--disable-gpu-sandbox` 是关键 flag（缺它会闪退）。带这三参启动时 Obsidian 1.13 不会进 CLI 模式，参数透传给 Electron，无 FATAL。**长期方案**：进入设置 → 外观 → 关闭「硬件加速」后，无参双击即可。优雅关闭用 `CloseMainWindow`。CLI 操作（plugin:reload / eval / dev:screenshot 等）走 `Obsidian.com <command> vault=Jamnote`。
 - 保持 `manifest.json`、`package.json` 与 `CHANGELOG.md` 版本一致。
 - 每次功能变更同时更新 `docs/DEVELOPMENT_LOG.md` 和 Obsidian 的 `Work/Jam Deck.md`/`log.md`。
-- `docs/DEVELOPMENT_LOG.md` 的每条新变更必须在末尾增加处理模型签名，格式为 `处理模型签名：<模型标识>（<角色>）`。若 Planner、Advisor、Designer、Executor 或其他子代理实际参与，同一行追加所有参与模型与角色；不得猜测不可见的内部模型版本，无法确认时明确写 `具体模型标识不可见`。
+- `docs/DEVELOPMENT_LOG.md`、`CHANGELOG.md` 和 Obsidian 的 `Work/Jam Deck.md` / `log.md` 中，每条新变更必须在末尾注明工具、模型与角色，格式为 `工具：<实际工具名>；处理模型签名：<模型标识>（<角色>）`。工具名必须明确写 Codex、Cursor、WorkBuddy 等实际执行工具，不能只写模型。若 Planner、Advisor、Designer、Executor 或其他子代理实际参与，同一行追加所有参与工具、模型与角色；不得猜测不可见的内部模型版本，无法确认时明确写 `具体模型标识不可见`，但不能因此省略已知工具名。
 - Canvas 适配依赖 Obsidian 内部视图 API；修改生命周期、拖拽或持久化前必须补回归测试。
 - 任何 UI 功能变更前必须先阅读 `docs/VISUAL_DESIGN.md`，复核 Spatial 白板规范；不得因新增功能引入厚重日期格、列表卡片墙或大面积荧光底色。
 - 状态默认使用小圆点、细环、轻分隔和文字层级；工作/生活分类放在待办标题前，不另起一行堆叠彩色胶囊。
@@ -37,5 +37,5 @@
 - 分支策略（0.30.0 起）：`master` 为发布主干，`develop` 为日常开发集成分支；日常功能在 `develop` 上提交（大功能可再开 `feat/<主题>` 从 develop 分出，merge 回 develop），发布时合回 `master` 并打 tag + GitHub Release。merge 前必须 `npm run verify` 全绿。
 - 提交纪律：完成一个原子改动就 commit，**commit 后立即 push 备份**（push 私有仓库 ≠ 发布；发布仅指打 tag + gh release，由 Jam 拍板）。不留长时间未提交/未推送的窗口——只 commit 不 push 是单点，2026-08-06 事故教训。
 - 多 agent 协作：同一时刻只允许一个 agent 持有写权限（唯一写者）；写操作顺序固定为 代码 → verify → 日志/CHANGELOG → commit → push，push 前不放手。**禁止任何会话直接操作主工作区的 `.git` 元数据（gc / filter-repo / reset 等），历史重写必须先征得 Jam 同意**。
-- `CHANGELOG.md`、`docs/DEVELOPMENT_LOG.md` 由完成该任务的写者在 commit 前更新并带模型签名。
+- `CHANGELOG.md`、`docs/DEVELOPMENT_LOG.md` 由完成该任务的写者在 commit 前更新并带完整签名。提交前必须逐条核对本次新增或修改的变更记录是否包含工具、模型与角色，并核对 Obsidian 两份笔记对应条目的签名一致；发现遗漏先补齐，再 commit。只核对本次变更，不凭猜测补写其他历史记录。
 - `data.json` 永不入库；`.workbuddy/`、`debug-backups/` 已 gitignore。
