@@ -1664,7 +1664,7 @@ const stackGeometry = JamDeckPlugin.canvasStackGeometry;
 assert(stackGeometry, "Canvas stack geometry helpers must be exported for deterministic fixtures");
 const folderGeometry = JamDeckPlugin.canvasFolderGeometry;
 assert(folderGeometry, "Canvas folder geometry helpers must be exported for deterministic fixtures");
-assert.strictEqual(folderGeometry.schemaVersion, 1, "Canvas folder schema version must stay explicit");
+assert.strictEqual(folderGeometry.schemaVersion, 2, "Canvas folder schema version must stay explicit");
 assert.strictEqual(folderGeometry.maxRepresentatives, 4, "Canvas folders must cap representatives at four");
 assert.strictEqual(typeof folderGeometry.representativeSlot, "function", "Canvas folder geometry must expose authored Figma representative slots");
 assert(Array.isArray(folderGeometry.colors) && folderGeometry.colors.length === 6, "Canvas folders must expose six restrained color presets");
@@ -1675,47 +1675,13 @@ assert(folderGeometry.colors.every((color) => /^#[0-9a-f]{6}$/i.test(color)), "C
 assert.strictEqual(folderGeometry.schema(null), null, "missing Canvas node data must not parse as a folder");
 assert.strictEqual(folderGeometry.schema({ id: "plain-node", type: "text" }), null, "nodes without jamdeck folder metadata must stay ungrouped");
 assert.strictEqual(folderGeometry.schema({ id: "fallback", jamdeck: { folderId: "folder-fallback" } }).memberIds[0], "fallback", "legacy folderId metadata must still infer the node member");
-const parsedFolder = folderGeometry.schema({
-  id: "anchor",
-  type: "file",
-  file: "Board.canvas",
-  jamdeck: {
-    folder: {
-      id: "folder-alpha",
-      version: "not-a-number",
-      anchorId: "anchor",
-      memberIds: ["zeta", "anchor", "alpha", "overflow", "four", "five", "zeta", ""],
-      collapsed: 0,
-      color: "#not-a-preset",
-      layoutMode: "grid",
-      representativeIds: ["zeta", "alpha", "overflow", "four", "five"],
-      representativeColumns: 99,
-    },
-  },
-});
-assert.deepStrictEqual(parsedFolder.memberIds, ["alpha", "anchor", "five", "four", "overflow", "zeta"], "folder members must be unique and stable-sorted");
-assert.strictEqual(parsedFolder.version, 1, "invalid folder versions must fall back to the current schema");
-assert.strictEqual(parsedFolder.collapsed, false, "folder booleans must normalize through Boolean semantics");
-assert.strictEqual(parsedFolder.color, folderGeometry.colors[0], "unknown folder colors must use the first preset");
-assert.strictEqual(
-  folderGeometry.schema({ id: "legacy-blue", jamdeck: { folder: { id: "legacy", color: "#8EAFCC" } } }).color,
-  "#F7BDB1",
-  "the 0.19.0 blue-gray folder color must migrate to the NZS4 light red preset",
-);
-assert.strictEqual(
-  folderGeometry.schema({ id: "legacy-0286", jamdeck: { folder: { id: "legacy2", color: "#DDDCDC" } } }).color,
-  "#C1C1C1",
-  "the 0.28.6 neutral folder color must migrate to the NZS4 paper gray preset",
-);
-assert.strictEqual(
-  folderGeometry.schema({ id: "default-color", jamdeck: { folder: { id: "default" } } }).color,
-  "#C1C1C1",
-  "new folders must default to the NZS4 paper gray preset",
-);
-assert.strictEqual(parsedFolder.layoutMode, "grid", "grid layout mode must survive schema parsing");
-assert.deepStrictEqual(parsedFolder.representativeIds, ["alpha", "five", "four", "overflow"], "representatives must be stable-sorted and capped at four");
-assert.strictEqual(parsedFolder.representativeColumns, 2, "folder representative columns must clamp to the two-column maximum");
-assert.strictEqual(folderGeometry.schema({ id: "legacy", jamdeck: { folderId: "f" } }).layoutMode, "stack", "legacy folders must default to stack layout");
+const parsedFolder = folderGeometry.schema({ id: "folder-alpha", type: "group", jamdeck: { folder: { version: 2, memberIds: ["a", "b"], collapsed: false, color: "#not-a-preset", layoutMode: "grid", shellOffset: { x: 3, y: 8 } } } });
+assert.deepStrictEqual(parsedFolder.memberIds, ["a", "b"]);
+assert.strictEqual(parsedFolder.version, 2);
+assert.strictEqual(parsedFolder.collapsed, false);
+assert.strictEqual(parsedFolder.color, folderGeometry.colors[0]);
+assert.strictEqual(parsedFolder.layoutMode, "grid");
+assert.deepStrictEqual(parsedFolder.shellOffset, { x: 3, y: 8 });
 
 const stableFolderId = folderGeometry.stableId(["zeta", "alpha", "alpha", ""], "canvas-salt");
 assert.strictEqual(stableFolderId, folderGeometry.stableId(["alpha", "zeta"], "canvas-salt"), "folder IDs must ignore member order and duplicates");
@@ -1830,7 +1796,7 @@ assert(folderControllerSource.includes("this.createFolder(selected)"), "selectio
 assert(folderControllerSource.includes("this.layoutSelectionGrid(selected)"), "selection toolbar grid action must use the shared folder geometry service");
 assert(folderControllerSource.includes("jamDeckCanvasFolderExpansionColumns"), "expanded folder layout must use the independent expansion column policy");
 const toolbarActions = [...folderControllerSource.matchAll(/ensureToolbarButton\(menu, "([^"]+)"/g)].map((match) => match[1]);
-assert.deepStrictEqual(toolbarActions, ["stack", "grid"], "Canvas selection toolbar must expose exactly stack and grid folder actions");
+assert.deepStrictEqual(toolbarActions, ["folder", "stack", "grid"], "Canvas toolbar must expose native section folding and node layout actions");
 assert(folderControllerSource.includes('ensureToolbarButton(menu, "grid", "网格排列", "layout-grid"'), "Canvas grid action must use an Obsidian-supported Lucide icon");
 assert(folderControllerSource.includes('data-folder-action="${id}"'), "folder toolbar buttons must carry a stable action data attribute");
 assert(folderControllerSource.includes("selection.length > 1 && selection.some"), "multi-selection must yield to native Canvas selection drag behavior");
@@ -1849,22 +1815,8 @@ assert(stackShowPreviewSource.indexOf("const previewBystanders = this.prepareBys
 assert(stackControllerSource.includes("const folderSource = cluster && cluster.folderId ? visual.source : null"), "folder cards must return to their visible proxy source instead of hidden native-node geometry");
 assert(stackControllerSource.includes("Number(target.x) || 0") && stackControllerSource.includes("returnLeft - targetLeft"), "preview collapse must convert layout x/y into finite return offsets instead of emitting NaNpx");
 
-// Folder schema and runtime contracts stay deliberately separate: the portable
-// fields are persisted on the anchor Canvas node, while anchorNodeId,
-// transitions, keyed DOM views and focus requests remain runtime-only.  Schema
-// v1 gained five optional native-group fields (native/label/nativeGroupId/
-// positions/stacked) that legacy folders simply omit.
-assert.deepStrictEqual(
-  Object.keys(parsedFolder).filter((key) => key !== "version").sort(),
-  ["anchorId", "collapsed", "color", "id", "layoutMode", "memberIds", "native", "label", "nativeGroupId", "positions", "stacked", "hiddenEdges", "representativeColumns", "representativeIds"].sort(),
-  "schema v1 must keep exactly fourteen portable folder fields besides version",
-);
-assert.strictEqual(parsedFolder.native, false, "legacy folders must default to the non-native preview mode");
-assert.strictEqual(parsedFolder.label, "文件夹", "legacy folders must default to the 文件夹 label");
-assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", native: true, label: "参考", positions: { n: { x: 1, y: 2, width: 100, height: 80 } }, stacked: { n: { x: 5, y: 6, width: 40, height: 30 } } } } }).label, "参考", "native folder labels must survive schema parsing");
-assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", native: true } } }).native, true, "native flag must survive schema parsing");
-assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", positions: { n: { x: 1, y: 2, width: 100, height: 80 } } } } }).positions.n.width, 100, "folder expanded positions must parse authored member rectangles");
-assert.strictEqual(folderGeometry.schema({ id: "n", jamdeck: { folder: { id: "f", stacked: { n: { x: 1, y: 2, width: 0, height: 0 } } } } }).stacked, null, "invalid stacked rectangles must be dropped");
+// Standard Canvas geometry is authoritative; folder records have no saved geometry copies.
+assert.deepStrictEqual(Object.keys(parsedFolder).sort(), ["version", "id", "memberIds", "collapsed", "color", "layoutMode", "shellOffset"].sort());
 assert(folderControllerSource.includes("anchorNodeId"), "folder runtime groups must expose an anchorNodeId alias");
 for (const state of ["collapsed", "opening", "expanded", "closing", "destroyed"]) {
   assert(folderControllerSource.includes(`"${state}"`), `folder runtime must model the ${state} lifecycle state`);
@@ -1906,7 +1858,6 @@ const focusMethodSource = folderControllerSource.slice(focusMethodStart, focusMe
 assert(focusMethodStart >= 0 && focusMethodEnd > focusMethodStart, "folder focus action must remain an explicit controller method");
 assert(focusMethodSource.includes("toggleFolderPreview(group)"), "folder focus must use the same transient all-member preview as shell activation");
 assert(!focusMethodSource.includes("mutateNodes("), "focus must never mutate Canvas node data");
-assert(folderControllerSource.includes('Object.prototype.hasOwnProperty.call(overrides, "collapsed")') && folderControllerSource.includes("return this.toggleFolderPreview(group)"), "persisted expand requests must be redirected to the transient preview path");
 const previewFrontStart = folderControllerSource.indexOf("animateFolderPreviewFront(");
 const previewFrontSource = folderControllerSource.slice(previewFrontStart, previewFrontStart + 2600);
 assert(previewFrontSource.includes('fill: "both"') && previewFrontSource.includes("latest.animation.cancel"), "preview flap WAAPI must cancel its fill:both animation on finish so CSS hover motion is never shadowed");
@@ -2198,183 +2149,8 @@ assert.strictEqual(rollbackAtomic.historyPushes, 0, "failed aggregate mutations 
 assert.strictEqual(rollbackAtomic.history.current, 0, "failed aggregate mutations must restore the visible history cursor");
 assert.strictEqual(rollbackAtomic.saves, 1, "failed folder mutations must persist the restored baseline once");
 
-// The selection toolbar's stack→grid action must use the same transaction as
-// other folder mutations, including a full rollback when a member write fails.
-const gridData = new Map([
-  ["grid-a", { id: "grid-a", x: 0, y: 0, width: 120, height: 80, jamdeck: { folderId: "grid-folder" } }],
-  ["grid-b", { id: "grid-b", x: 160, y: 0, width: 90, height: 120, jamdeck: { folderId: "grid-folder" } }],
-]);
-const folderGridItems = ["grid-a", "grid-b"].map((id) => ({
-  id,
-  node: { id, getData: () => gridData.get(id), setData: (next) => gridData.set(id, next), render: () => {} },
-  get data() { return gridData.get(id); },
-  rect: id === "grid-a" ? { x: 0, y: 0, width: 120, height: 80 } : { x: 160, y: 0, width: 90, height: 120 },
-  kind: "image",
-}));
-const gridGroup = {
-  id: "grid-folder",
-  anchor: folderGridItems[0],
-  anchorId: "grid-a",
-  anchorNodeId: "grid-a",
-  members: folderGridItems,
-  memberIds: folderGridItems.map((item) => item.id),
-  collapsed: true,
-  color: folderGeometry.colors[0],
-  layoutMode: "stack",
-  representativeIds: ["grid-a", "grid-b"],
-  representativeColumns: 2,
-};
-folderController.ownerWindow = { cancelAnimationFrame: () => {} };
-folderController.scheduleReconcile = () => {};
-folderController.getItems = () => folderGridItems;
-folderController.collectGroups = () => [gridGroup];
-const gridAtomic = createAtomicCanvasFixture(gridData);
-folderController.canvas = gridAtomic.canvas;
-assert(folderController.layoutSelectionGrid(folderGridItems), "selection grid action must commit through the folder mutation transaction");
-assert.strictEqual(gridData.get("grid-a").jamdeck.folder.layoutMode, "grid", "stack→grid must persist grid layout mode on the anchor record");
-assert.strictEqual(gridData.get("grid-b").jamdeck.folderId, "grid-folder", "stack→grid must retain folder membership for every member");
-assert.strictEqual(gridAtomic.historyPushes, 1, "stack→grid must create one aggregate native history entry");
-assert.strictEqual(gridAtomic.saves, 1, "stack→grid must request one low-level Canvas save");
-
-const gridRollbackData = new Map([
-  ["grid-a", { id: "grid-a", x: 0, y: 0, width: 120, height: 80, jamdeck: { folderId: "grid-folder" } }],
-  ["grid-b", { id: "grid-b", x: 160, y: 0, width: 90, height: 120, jamdeck: { folderId: "grid-folder" } }],
-]);
-const gridRollbackItems = ["grid-a", "grid-b"].map((id) => ({
-  id,
-  node: {
-    id,
-    getData: () => gridRollbackData.get(id),
-    setData: (next) => gridRollbackData.set(id, next),
-    render: () => {},
-  },
-  get data() { return gridRollbackData.get(id); },
-  rect: id === "grid-a" ? { x: 0, y: 0, width: 120, height: 80 } : { x: 160, y: 0, width: 90, height: 120 },
-  kind: "image",
-}));
-folderController.getItems = () => gridRollbackItems;
-folderController.collectGroups = () => [{ ...gridGroup, anchor: gridRollbackItems[0], members: gridRollbackItems }];
-const gridRollbackAtomic = createAtomicCanvasFixture(gridRollbackData, { failNextImport: true, failureMessage: "simulated grid failure" });
-folderController.canvas = gridRollbackAtomic.canvas;
-assert.throws(() => folderController.layoutSelectionGrid(gridRollbackItems), /simulated grid failure/, "stack→grid failures must surface the original error");
-assert.strictEqual(gridRollbackData.get("grid-a").x, 0, "failed stack→grid must restore the first member snapshot");
-assert.strictEqual(gridRollbackData.get("grid-a").jamdeck.folderId, "grid-folder", "failed stack→grid must restore folder metadata");
-
-const saveFailureData = new Map([["save-a", { id: "save-a", x: 4 }], ["save-b", { id: "save-b", x: 14 }]]);
-const saveFailureAtomic = createAtomicCanvasFixture(saveFailureData, { failNextSave: true, saveFailureMessage: "simulated Canvas save failure" });
-folderController.canvas = saveFailureAtomic.canvas;
-assert.throws(
-  () => folderController.mutateNodes(new Map([["save-a", { id: "save-a", x: 40 }], ["save-b", { id: "save-b", x: 140 }]])),
-  /simulated Canvas save failure/,
-  "save-stage failures must surface after the aggregate setter",
-);
-assert.strictEqual(saveFailureData.get("save-a").x, 4, "save-stage rollback must restore complete Canvas data");
-assert.strictEqual(saveFailureAtomic.history.data.length, 1, "save-stage rollback must remove the speculative history state");
-assert.strictEqual(saveFailureAtomic.history.current, 0, "save-stage rollback must restore the undo cursor");
-assert.strictEqual(saveFailureAtomic.saves, 2, "save-stage rollback must retry persistence only for the restored baseline");
-
-const ungroupRecord = {
-  id: "ungroup-folder",
-  anchorId: "ungroup-a",
-  memberIds: ["ungroup-a", "ungroup-b", "ungroup-c"],
-  representativeIds: ["ungroup-a", "ungroup-b", "ungroup-c"],
-  collapsed: true,
-  color: folderGeometry.colors[2],
-  layoutMode: "stack",
-  representativeColumns: 3,
-};
-const ungroupData = new Map([
-  ["ungroup-a", { id: "ungroup-a", type: "file", x: 100, y: 100, width: 120, height: 80, jamdeck: { folderId: "ungroup-folder", folder: ungroupRecord, unrelated: "keep-a" } }],
-  ["ungroup-b", { id: "ungroup-b", type: "file", x: 100, y: 100, width: 90, height: 130, jamdeck: { folderId: "ungroup-folder", unrelated: "keep-b" } }],
-  ["ungroup-c", { id: "ungroup-c", type: "text", x: 100, y: 100, width: 150, height: 70, jamdeck: { folderId: "ungroup-folder", stackTextNormalization: { version: 1 } } }],
-]);
-const ungroupItems = [...ungroupData.keys()].map((id) => ({
-  id,
-  node: { id },
-  get data() { return ungroupData.get(id); },
-  get rect() { const data = ungroupData.get(id); return { x: data.x, y: data.y, width: data.width, height: data.height }; },
-  kind: id === "ungroup-c" ? "text" : "image",
-}));
-const ungroupGroup = {
-  id: "ungroup-folder",
-  anchor: ungroupItems[0],
-  anchorId: "ungroup-a",
-  members: ungroupItems,
-  memberIds: ungroupItems.map((item) => item.id),
-  representativeIds: ungroupItems.map((item) => item.id),
-  collapsed: true,
-  color: folderGeometry.colors[2],
-  layoutMode: "stack",
-  representativeColumns: 3,
-};
-const ungroupAtomic = createAtomicCanvasFixture(ungroupData);
-folderController.canvas = ungroupAtomic.canvas;
-folderController.groupFromId = () => ungroupGroup;
-folderController.scheduleReconcile = () => {};
-folderController.folderViews.clear();
-folderController.folderRuntimes.clear();
-folderController.groups.set(ungroupGroup.id, ungroupGroup);
-assert(folderController.ungroup(ungroupGroup), "ungroup must commit a permanent spread layout");
-const ungroupRects = [...ungroupData.values()].map((data) => ({ x: data.x, y: data.y, width: data.width, height: data.height }));
-for (let left = 0; left < ungroupRects.length; left += 1) for (let right = left + 1; right < ungroupRects.length; right += 1) {
-  const a = ungroupRects[left];
-  const b = ungroupRects[right];
-  assert(!(a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y), "ungrouped members must never remain an implicit overlap stack");
-}
-assert.strictEqual(ungroupData.get("ungroup-a").jamdeck.folderId, undefined, "ungroup must clear anchor membership metadata");
-assert.strictEqual(ungroupData.get("ungroup-a").jamdeck.folder, undefined, "ungroup must clear the canonical anchor record");
-assert.strictEqual(ungroupData.get("ungroup-a").jamdeck.unrelated, "keep-a", "ungroup must preserve unrelated anchor metadata");
-assert.deepStrictEqual(ungroupData.get("ungroup-c").jamdeck.stackTextNormalization, { version: 1 }, "ungroup must preserve stack normalization metadata");
-assert.strictEqual(ungroupAtomic.historyPushes, 1, "ungroup must create exactly one native history state");
-assert.strictEqual(ungroupAtomic.saves, 1, "ungroup must request exactly one low-level Canvas save");
-
-const detachData = new Map([
-  ["detach-a", { id: "detach-a", type: "file", x: 0, y: 0, width: 100, height: 80, jamdeck: { folderId: "detach-folder", folder: { ...ungroupRecord, id: "detach-folder", anchorId: "detach-a", memberIds: ["detach-a", "detach-b", "detach-c"] } } }],
-  ["detach-b", { id: "detach-b", type: "file", x: 0, y: 0, width: 100, height: 80, jamdeck: { folderId: "detach-folder" } }],
-  ["detach-c", { id: "detach-c", type: "text", x: 0, y: 0, width: 100, height: 80, jamdeck: { folderId: "detach-folder", stackTextNormalization: { version: 1 } } }],
-]);
-const detachItems = [...detachData.keys()].map((id) => ({
-  id,
-  node: { id },
-  get data() { return detachData.get(id); },
-  get rect() { const data = detachData.get(id); return { x: data.x, y: data.y, width: data.width, height: data.height }; },
-  kind: id === "detach-c" ? "text" : "image",
-}));
-const detachGroup = { ...ungroupGroup, id: "detach-folder", anchor: detachItems[0], anchorId: "detach-a", members: detachItems, memberIds: detachItems.map((item) => item.id) };
-const detachAtomic = createAtomicCanvasFixture(detachData);
-folderController.canvas = detachAtomic.canvas;
-folderController.groupFromId = () => detachGroup;
-assert(folderController.detachPreviewMember("detach-folder", "detach-c", { x: 420, y: 260, width: 100, height: 80 }, { removeNormalization: true, normalizationKind: "text" }), "dragging a preview card out must detach it from explicit folder metadata");
-assert.strictEqual(detachData.get("detach-c").jamdeck, undefined, "dragged-out members must clear folder and consumed normalization metadata together");
-assert.strictEqual(detachData.get("detach-c").x, 420, "dragged-out members must commit their final world position in the same transaction");
-assert.deepStrictEqual(detachData.get("detach-a").jamdeck.folder.memberIds, ["detach-a", "detach-b"], "remaining folder metadata must be rebuilt without the dragged member");
-assert.strictEqual(detachAtomic.historyPushes, 1, "folder drag-out must create one aggregate history state");
-assert.strictEqual(detachAtomic.saves, 1, "folder drag-out must request one low-level save");
-assert(pluginSource.includes("folderController.detachPreviewMember(folderId, press.nodeId, finalRect"), "expanded folder drag-out must route through the atomic membership service");
-
-const colorData = new Map([
-  ["color-a", { id: "color-a", type: "file", x: 0, y: 0, width: 100, height: 80, jamdeck: { folderId: "color-folder", folder: { ...ungroupRecord, id: "color-folder", anchorId: "color-a", memberIds: ["color-a", "color-b"], color: folderGeometry.colors[0] }, unrelated: "anchor-meta" } }],
-  ["color-b", { id: "color-b", type: "file", x: 0, y: 0, width: 100, height: 80, jamdeck: { folderId: "color-folder", unrelated: "member-meta" } }],
-]);
-const colorItems = [...colorData.keys()].map((id) => ({
-  id,
-  node: { id },
-  get data() { return colorData.get(id); },
-  get rect() { const data = colorData.get(id); return { x: data.x, y: data.y, width: data.width, height: data.height }; },
-  kind: "image",
-}));
-const colorGroup = { ...ungroupGroup, id: "color-folder", anchor: colorItems[0], anchorId: "color-a", members: colorItems, memberIds: colorItems.map((item) => item.id), color: folderGeometry.colors[0], representativeIds: colorItems.map((item) => item.id), representativeColumns: 2 };
-const colorAtomic = createAtomicCanvasFixture(colorData);
-folderController.canvas = colorAtomic.canvas;
-folderController.groupFromId = () => colorGroup;
-folderController.reconcile = () => {};
-assert(folderController.updateFolder(colorGroup, { color: folderGeometry.colors[4] }), "folder color selection must commit through the aggregate transaction");
-assert.strictEqual(colorData.get("color-a").jamdeck.folder.color, folderGeometry.colors[4], "folder color must persist on the canonical anchor record");
-assert.strictEqual(colorData.get("color-a").jamdeck.unrelated, "anchor-meta", "color updates must preserve unrelated anchor metadata");
-assert.strictEqual(colorData.get("color-b").jamdeck.unrelated, "member-meta", "color updates must preserve unrelated member metadata");
-assert.strictEqual(colorAtomic.historyPushes, 1, "one color selection must create one native history state");
-assert.strictEqual(colorAtomic.saves, 1, "one color selection must request one low-level save");
-
+// Folder creation/grid/color/drop/ungroup and full native topology rollback
+// are covered with live data-backed nodes in canvas-folders-test.js.
 assert(pluginSource.includes("entry.folderController = new CanvasFolderController(this, entry)"), "Canvas runtime mount must create a folder controller");
 assert(pluginSource.includes("entry.folderController.install()"), "Canvas runtime mount must install the folder controller after Canvas open");
 assert(pluginSource.includes("if (entry.folderController)"), "Canvas runtime destroy must own folder controller cleanup");
@@ -2427,7 +2203,8 @@ assert(pluginSource.includes("notifyFolderPreview(cluster, \"opening\"") && plug
 assert(pluginSource.includes("addEventListener(\"pointerup\", up, true)") && pluginSource.includes("removeEventListener(\"pointerup\", up, true)"), "stack pointerup handling must stay in capture phase for Canvas release races");
 assert(pluginSource.includes("previewCluster: this.previewCluster") && pluginSource.includes("press.previewCluster || this.clusterByNodeId.get(press.nodeId)"), "preview drag cancellation must restore the saved explicit folder cluster after viewport changes");
 assert(styleSource.includes("top: 73.333333%") && styleSource.includes("top: 82.666667%") && styleSource.includes("count baseline sits at y=110") && styleSource.includes("label top sits at y=124"), "folder count and label must keep the NZS4 Figma vertical spacing");
-assert(styleSource.includes("transform: translateY(20px)") && /is-expanded\.is-native-folder \.jam-deck-canvas-folder-meta \{[\s\S]*?transform: none;/.test(styleSource), "collapsed folder metadata must move down together by 20px without shifting the expanded toolbar");
+assert(styleSource.includes("transform: translateY(20px)"), "collapsed folder metadata must retain its authored 20px offset");
+assert(/is-expanded\.is-native-folder\[hidden\] \{\s*display: none !important;/.test(styleSource) && !/is-expanded\.is-native-folder \{\s*display: block/.test(styleSource), "in-place expansion must show only the native frame, without an obsolete shell toolbar");
 assert(styleSource.includes("opacity: 0") && styleSource.includes("visibility: hidden") && styleSource.includes("pointer-events: none !important") && styleSource.includes(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)") && styleSource.includes("display: grid !important"), "folder hover toolbar must be inert while hidden and expose the ungroup control when shown");
 const folderControlShowIdx = styleSource.indexOf(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)");
 assert(folderControlShowIdx > 0 && styleSource.indexOf(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)") === styleSource.lastIndexOf(".jam-deck-canvas-folder-controls > :not(.jam-deck-canvas-folder-color)"), "folder non-color control rule must exist exactly once after the final-cascade merge");
@@ -2571,27 +2348,22 @@ for (const layer of [folderDomView.backboard, folderDomView.representatives, fol
 }
 folderDomView.shell.dispatchEvent({ type: "click", target: folderDomView.shell, preventDefault() {}, stopPropagation() {} });
 assert.strictEqual(folderDomClickCount, 1, "folder root click must retain the legacy stack preview proxy");
-assert.strictEqual(folderDomView.controls.children.length, 3, "folder hover toolbar must expose color, ungroup and rename actions");
+assert.strictEqual(folderDomView.controls.children.length, 4, "folder hover toolbar must expose color, in-place expansion, ungroup and rename actions");
 assert.strictEqual(folderDomView.controls.children[0], folderDomView.color, "folder toolbar keyboard order must start with color");
-assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar order must keep ungroup second");
-assert.strictEqual(folderDomView.controls.children[2], folderDomView.rename, "folder toolbar order must place rename last");
+assert.strictEqual(folderDomView.controls.children[2], folderDomView.ungroup, "folder toolbar order must keep ungroup second");
+assert.strictEqual(folderDomView.controls.children[3], folderDomView.rename, "folder toolbar order must place rename last");
 assert(styleSource.includes("perspective(420px) rotateX(-18deg)") && styleSource.includes("transform-origin: 50% 100%;") && styleSource.includes(":is(:hover, :focus-within) > .jam-deck-canvas-folder-front"), "folder hover lift must use the reduced 18-degree hinge amplitude");
 assert((styleSource.match(/rotateX\(-48deg\)/g) || []).length === 4 && !styleSource.includes("rotateX(-80deg)"), "folder preview CSS fallback and header must share the reduced 48-degree endpoint");
-assert(styleSource.includes(".canvas-node-group") && styleSource.includes("visibility: hidden !important"), "Jam Deck must keep native group frames data-only (shell is the only visible grouping surface)");
-assert(folderControllerSource.includes("JAM_DECK_NATIVE_GROUP_BASE_HEIGHT"), "native group frame must use the explicit 200×180 baseline");
+assert(styleSource.includes(".canvas-node-group.is-jam-deck-folder-group-hidden"), "only owned folded groups may hide their native frame");
 assert(folderControllerSource.includes('data.type === "group"') && !folderControllerSource.includes('nodeType === "group"'), "native group lookup must match by id + serialized type because 1.13 minifies nodeType");
-assert(folderControllerSource.includes("nativeExpandTargets") === false && folderControllerSource.includes("expandNativeFolder") === false && folderControllerSource.includes("collapseNativeFolder") === false, "native folders must not un-bury real members; the preview is the only expand path");
-assert(folderControllerSource.includes("hiddenEdges") && folderControllerSource.includes("edgeChanges"), "native folders must park member edges into the payload instead of leaving phantom connectors");
 assert(folderControllerSource.includes("nativeFolderShellBounds(group)") && folderControllerSource.includes("findDropTarget(source, groups, pointer)"), "native drop targeting must judge collapsed folders against the visible shell bounds");
 assert(folderControllerSource.includes("folderShellPointerHit") && folderControllerSource.includes("jamDeckCanvasFolderShellDropRatio"), "collapsed folder drop must hit from pointer-on-shell or folder-centre-under-image, not area ratio alone");
 assert(pluginSource.includes("shellCenterInside") && pluginSource.includes("rect.width / 2"), "collapsed folder drop must also hit when the folder centre lands under a larger image");
-assert(folderControllerSource.includes("(anchorStacked.width - width) / 2"), "joining a collapsed folder must fold the member onto the anchor slot while preserving its own width/height (no anchor-size crop)");
 assert(styleSource.includes("object-fit: contain !important") && !styleSource.includes("object-fit: cover !important"), "folder shell thumbnails must show the full frame (contain) instead of cropping to the slot aspect (cover)");
 assert(styleSource.includes(":has(.jam-deck-canvas-folder:is(:hover, :focus-within)) .canvas-node-connection-point"), "hovering a folder shell must suppress every canvas connection point (folded members keep oversized rects at the anchor)");
 assert(folderControllerSource.includes("patchNodeInteractionLayer") && folderControllerSource.includes("nodeInteractionLayer") && folderControllerSource.includes("isFolderOwnedNode"), "the interaction layer must be patched so folder-owned nodes never become its target (Obsidian renders connection points in a single overlay, not inside nodes)");
-assert(folderControllerSource.includes("folderGroupId"), "native group node data must carry a self-describing jamdeck marker for folder-owned detection");
 assert(pluginSource.includes("getStackItems(false).filter((item) => item.id !== currentItem.id)"), "legacy auto-snap must exclude explicit folder members from its stack candidates");
-assert.strictEqual(folderDomView.controls.children[1], folderDomView.ungroup, "folder toolbar keyboard order must end with ungroup");
+assert.strictEqual(folderDomView.controls.children[2], folderDomView.ungroup, "folder toolbar keyboard order must end with ungroup");
 let folderDomUngroupCalls = 0;
 folderDomController.ungroup = () => { folderDomUngroupCalls += 1; };
 folderDomView.ungroup.dispatchEvent({ type: "click", target: folderDomView.ungroup, preventDefault() {}, stopPropagation() {} });

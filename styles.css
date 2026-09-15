@@ -3443,86 +3443,15 @@
 }
 /* Marker only: collapsed paper must stay visible and clickable even when
  * the scaled shell overlaps Canvas zoom controls. */
-/* Native Canvas group frames are data-only in Jam Deck: the authored folder
-   shell is the only visible grouping surface, so hide the group box/label
-   (the group node still exists in Canvas data for native parity).  Obsidian
-   1.13 renders groups as canvas-node canvas-node-group, not .canvas-group. */
-.jam-deck-canvas-leaf .canvas-node-group {
+/* Ordinary sections retain their native frame. Only a folded folder's own
+   group and connections yield to its shell; the Canvas data stays complete. */
+.jam-deck-canvas-leaf .canvas-node-group.is-jam-deck-folder-group-hidden,
+.jam-deck-canvas-leaf .is-jam-deck-folder-edge-hidden {
   visibility: hidden !important;
   pointer-events: none !important;
 }
-/* Native expanded: the shell becomes a compact floating control bar (close,
-   color, ungroup) anchored above the expanded bounds. */
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder {
-  display: block !important;
-  background: color-mix(in srgb, var(--jd-folder-panel) 92%, #fff 8%);
-  border: 1px solid var(--jd-folder-panel-edge);
-  border-radius: 12px;
-  box-shadow: var(--jd-folder-shadow);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
-  backdrop-filter: blur(12px) saturate(160%);
-  pointer-events: auto !important;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-backboard,
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-representatives,
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-front {
+.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder[hidden] {
   display: none !important;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder > .jam-deck-canvas-folder-header {
-  z-index: 15 !important;
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 0 6px;
-  pointer-events: none;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-meta {
-  position: static !important;
-  top: auto !important;
-  bottom: auto !important;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  transform: none;
-  pointer-events: auto;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--jd-folder-panel-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 96px;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-count {
-  display: none;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-controls {
-  position: static !important;
-  top: auto !important;
-  bottom: auto !important;
-  left: auto !important;
-  right: auto !important;
-  display: inline-flex;
-  gap: 2px;
-  height: 24px;
-  padding: 2px;
-  opacity: 1;
-  visibility: visible;
-  transform: none;
-  pointer-events: auto !important;
-}
-.jam-deck-canvas-leaf .jam-deck-canvas-folder.is-expanded.is-native-folder .jam-deck-canvas-folder-close {
-  display: grid !important;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-backboard {
   z-index: 0 !important;
