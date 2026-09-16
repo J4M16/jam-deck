@@ -3940,3 +3940,16 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
 @container jd-shortcut (max-width: 360px) {
   body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-shortcut-fields { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* One explicit title color across Jam Deck-owned surfaces. */
+.jam-deck-root :is(.jam-deck-title-main, .jam-deck-widget-title, .jam-deck-widget-icon,
+  .jam-deck-ai-chat-title, .jam-deck-ai-empty-title, .jam-deck-calendar-month,
+  .jam-deck-music-title, .jam-deck-task-title, .jam-deck-launcher-name,
+  .jam-deck-canvas-embed-state-title),
+:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) :is(h1, h2, h3, h4, h5, h6),
+.jam-deck-shortcut-section-heading > span,
+.jam-deck-settings .setting-item-heading .setting-item-name {
+  color: #5c5c5c;
+}

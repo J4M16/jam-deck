@@ -1202,6 +1202,7 @@ class FolderRenameModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass("jam-deck-folder-rename-modal");
     contentEl.createEl("h3", { text: "重命名文件夹" });
     const input = contentEl.createEl("input", {
       type: "text",
@@ -8900,7 +8901,7 @@ class IslandModeController {
       padding: 0; box-sizing: border-box;
     }
     .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: #b8ff3d; box-shadow: 0 0 0 2px rgba(184, 255, 61, .28); flex: 0 0 auto; }
-    .brand-label { font-size: var(--jd-font-input, 13px); font-weight: 720; letter-spacing: .08em; }
+    .brand-label { color: #5c5c5c; font-size: var(--jd-font-input, 13px); font-weight: 720; letter-spacing: .08em; }
     .rail { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; padding: 0; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
     .rail::-webkit-scrollbar { display: none; }
     .empty { color: #777d82; font-size: var(--jd-font-body, 12px); padding: 0 6px; white-space: nowrap; }
