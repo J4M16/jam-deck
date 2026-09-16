@@ -1,11 +1,11 @@
 {
   "name": "jam-deck",
-  "version": "0.32.9",
+  "version": "0.32.10",
   "private": true,
   "description": "Jam 的 Obsidian 副屏工作台插件：待办、时钟、音乐、剪贴板与画布组件的自适应网格。",
   "scripts": {
     "check": "node --check main.js && node --check caption-wall.js && node --check caption-host.js && node --check scripts/setup-captions.js && node --check scripts/run-python.js",
-    "test": "node tests/jam-deck-test.js && node tests/canvas-folders-test.js && node tests/canvas-download-test.js && node tests/canvas-picker-test.js && node tests/caption-wall-test.js && node tests/caption-distribution-test.js && node tests/caption-source-test.js && node scripts/run-python.js tests/caption-package-test.py && node scripts/run-python.js tests/caption-macos-test.py",
+    "test": "node tests/jam-deck-test.js && node tests/canvas-folders-test.js && node tests/canvas-download-test.js && node tests/canvas-picker-test.js && node tests/shortcut-appearance-test.js && node tests/caption-wall-test.js && node tests/caption-distribution-test.js && node tests/caption-source-test.js && node scripts/run-python.js tests/caption-package-test.py && node scripts/run-python.js tests/caption-macos-test.py",
     "package": "node scripts/run-python.js scripts/package-release.py",
     "setup:captions": "node scripts/setup-captions.js",
     "verify": "npm run check && npm test",

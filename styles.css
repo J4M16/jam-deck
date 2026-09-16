@@ -1812,11 +1812,46 @@
 .jam-deck-launcher-item:focus-within .jam-deck-launcher-edit { opacity: 1; }
 .jam-deck-launcher-edit.is-danger:hover { color: var(--text-error); border-color: var(--text-error); }
 
-.jam-deck-shortcut-modal { padding: 18px; }
-.jam-deck-shortcut-modal h2 { margin: 0 0 12px; }
-.jam-deck-shortcut-form { display: grid; gap: 10px; }
-.jam-deck-shortcut-form input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); font-size: 12px; }
-.jam-deck-shortcut-hint { color: var(--text-muted); font-size: 11px; }
+.jam-deck-shortcut-editor-modal .jam-deck-shortcut-modal { padding: 0; margin: 0; overflow-y: auto; }
+.jam-deck-shortcut-modal h2 { margin: 0 0 6px; font-size: 21px; font-weight: 650; letter-spacing: -.4px; }
+.jam-deck-shortcut-subtitle { margin: 0 0 24px; color: var(--jd-muted); font-size: 12px; }
+.jam-deck-shortcut-form { display: grid; gap: 18px; }
+.jam-deck-shortcut-identity { display: flex; align-items: center; gap: 24px; }
+.jam-deck-shortcut-preview { flex: 0 0 80px; display: grid; justify-items: center; gap: 9px; }
+.jam-deck-shortcut-preview > span { font-size: 10px; color: var(--jd-muted); }
+.jam-deck-shortcut-preview .jam-deck-launcher-icon { width: 64px; height: 64px; border-radius: 16px; background: var(--background-secondary); box-shadow: 0 5px 16px rgb(15 20 18 / .08); }
+.jam-deck-shortcut-preview .jam-deck-launcher-icon span { font-size: 28px; }
+.jam-deck-shortcut-fields { flex: 1; min-width: 0; }
+.jam-deck-shortcut-field { display: grid; min-width: 0; gap: 8px; font-size: 12px; color: var(--jd-muted); }
+.jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: 9px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: 13px; }
+.jam-deck-shortcut-form input:focus-visible, .jam-deck-shortcut-form button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 3px; }
+.jam-deck-shortcut-appearance { padding: 18px 0; border-top: 1px solid var(--jd-line); border-bottom: 1px solid var(--jd-line); display: grid; gap: 18px; }
+.jam-deck-shortcut-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 600; }
+.jam-deck-shortcut-modes { display: flex; gap: 4px; }
+.jam-deck-shortcut-modes button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 999px; box-shadow: none; background: transparent; color: var(--jd-muted); font-size: 12px; }
+.jam-deck-shortcut-modes button[aria-pressed="true"] { color: var(--jd-ink); background: var(--jd-hover); border-color: var(--jd-line); }
+.jam-deck-shortcut-character-controls { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 14px; }
+.jam-deck-shortcut-form input[type="color"] { cursor: pointer; padding: 5px; }
+.jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.jam-deck-shortcut-folder-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--jd-muted); }
+.jam-deck-shortcut-palette { display: flex; gap: 8px; }
+.jam-deck-shortcut-palette button { width: 30px; height: 30px; padding: 5px; border: 1px solid transparent; border-radius: 50%; background: var(--jd-swatch); background-clip: content-box; box-shadow: none; }
+.jam-deck-shortcut-palette button[aria-pressed="true"] { border-color: var(--jd-ink); }
+.jam-deck-shortcut-hint { color: var(--jd-muted); font-size: 11px; line-height: 1.6; }
+.jam-deck-shortcut-error { color: var(--text-error); font-size: 12px; }
+.jam-deck-shortcut-modal [hidden] { display: none !important; }
+.jam-deck-shortcut-modal .jam-deck-modal-actions { margin: 0; gap: 10px; }
+.jam-deck-shortcut-modal .jam-deck-modal-actions button { height: 38px; min-width: 76px; border: 1px solid var(--jd-line); border-radius: 999px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: 12px; }
+.jam-deck-shortcut-modal .jam-deck-modal-actions .jam-deck-shortcut-save { background: var(--jd-ink); color: var(--background-primary); border-color: transparent; font-weight: 650; }
+.jam-deck-shortcut-modal button { cursor: pointer; }
+.jam-deck-shortcut-modal button:hover { filter: brightness(.96); }
+.jam-deck-shortcut-modal button:disabled { opacity: .5; cursor: wait; }
+@media (max-width: 440px) {
+  .jam-deck-shortcut-section-heading { align-items: flex-start; flex-direction: column; }
+  .jam-deck-shortcut-folder-controls { align-items: flex-start; flex-direction: column; }
+  .jam-deck-shortcut-character-controls { gap: 8px; }
+}
 
 .jam-deck-picker { padding: 18px; }
 .jam-deck-picker h2 { margin: 0 0 4px; }
@@ -1827,7 +1862,8 @@
 .jam-deck-picker-icon { font-size: 18px; color: var(--text-accent); }
 .jam-deck-picker-label { font-size: 12px; }
 
-.modal.jam-deck-canvas-picker-modal {
+.modal.jam-deck-canvas-picker-modal,
+.modal.jam-deck-shortcut-editor-modal {
   --jd-paper: color-mix(in srgb, var(--background-primary) 96%, #f7f6f1);
   --jd-ink: var(--text-normal); --jd-muted: var(--text-muted);
   --jd-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
@@ -1836,7 +1872,9 @@
   padding: 32px 24px 18px; border: 1px solid var(--jd-line); border-radius: 18px;
   background: var(--jd-paper); color: var(--jd-ink); box-shadow: 0 14px 48px rgb(15 20 18 / .16);
 }
-.theme-dark .modal.jam-deck-canvas-picker-modal { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
+.theme-dark .modal.jam-deck-canvas-picker-modal,
+.theme-dark .modal.jam-deck-shortcut-editor-modal { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
+.modal.jam-deck-shortcut-editor-modal { width: min(500px, calc(100vw - 32px)); padding: 32px 24px 24px; }
 .jam-deck-canvas-picker-modal .jam-deck-canvas-picker { padding: 0; margin: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; gap: 16px; }
 .jam-deck-canvas-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
 .jam-deck-canvas-picker h2 { margin: 0 0 6px; font-size: 21px; line-height: 1.3; font-weight: 650; letter-spacing: -.4px; }
@@ -2594,13 +2632,25 @@
 .jam-deck-root .jam-deck-launcher-item:focus-within { border-color: var(--jd-accent); box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-launcher-item:focus-visible { outline: none; border-color: color-mix(in srgb, var(--jd-accent) 72%, var(--jd-line)); box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-launcher-icon { width: 40px; height: 40px; border-radius: var(--jd-radius-sm); background: var(--jd-paper); box-shadow: 0 3px 10px rgb(15 20 18 / 0.07); }
-.jam-deck-root .jam-deck-launcher-icon.is-domain { color: color-mix(in srgb, var(--jd-ink) 78%, #526074); background: color-mix(in srgb, var(--jd-paper) 82%, #aebac7); }
-.jam-deck-root .jam-deck-launcher-icon.is-domain.is-tone-1 { color: color-mix(in srgb, var(--jd-ink) 76%, #5e7290); background: color-mix(in srgb, var(--jd-paper) 84%, #9fb2c9); }
-.jam-deck-root .jam-deck-launcher-icon.is-domain.is-tone-2 { color: color-mix(in srgb, var(--jd-ink) 76%, #746486); background: color-mix(in srgb, var(--jd-paper) 84%, #baa9c5); }
-.jam-deck-root .jam-deck-launcher-icon.is-domain.is-tone-3 { color: color-mix(in srgb, var(--jd-ink) 76%, #4e7370); background: color-mix(in srgb, var(--jd-paper) 84%, #9dbdb8); }
-.jam-deck-root .jam-deck-launcher-icon.is-domain.is-tone-4 { color: color-mix(in srgb, var(--jd-ink) 76%, #77685d); background: color-mix(in srgb, var(--jd-paper) 84%, #c2b09f); }
-.jam-deck-root .jam-deck-launcher-icon.is-domain.is-tone-5 { color: color-mix(in srgb, var(--jd-ink) 76%, #606879); background: color-mix(in srgb, var(--jd-paper) 84%, #abb0bc); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain { color: color-mix(in srgb, var(--jd-ink) 78%, #526074); background: color-mix(in srgb, var(--jd-paper) 82%, #aebac7); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-1 { color: color-mix(in srgb, var(--jd-ink) 76%, #5e7290); background: color-mix(in srgb, var(--jd-paper) 84%, #9fb2c9); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-2 { color: color-mix(in srgb, var(--jd-ink) 76%, #746486); background: color-mix(in srgb, var(--jd-paper) 84%, #baa9c5); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-3 { color: color-mix(in srgb, var(--jd-ink) 76%, #4e7370); background: color-mix(in srgb, var(--jd-paper) 84%, #9dbdb8); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-4 { color: color-mix(in srgb, var(--jd-ink) 76%, #77685d); background: color-mix(in srgb, var(--jd-paper) 84%, #c2b09f); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-5 { color: color-mix(in srgb, var(--jd-ink) 76%, #606879); background: color-mix(in srgb, var(--jd-paper) 84%, #abb0bc); }
 .jam-deck-root .jam-deck-launcher-name { color: var(--jd-muted); font-size: 9px; }
+
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-character {
+  background: linear-gradient(135deg, var(--jd-cover-start), var(--jd-cover-end)); color: var(--jd-cover-ink);
+}
+.jam-deck-launcher-character { font-weight: 650; line-height: 1; text-shadow: 0 1px 5px rgb(255 255 255 / .12); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-folder { background: transparent; box-shadow: none; overflow: visible; }
+.jam-deck-shortcut-folder { width: 100%; aspect-ratio: 4 / 3; position: relative; color: color-mix(in srgb, var(--jd-shortcut-folder-color) 85%, #fff); filter: drop-shadow(0 3px 4px rgb(0 0 0 / .10)); }
+.jam-deck-shortcut-folder > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.jam-deck-shortcut-folder-paper { position: absolute; top: 24%; left: 13%; width: 70%; height: 60%; border-radius: 2px; transform: rotate(-7deg); background: linear-gradient(135deg, #fff, #f1f0ed); box-shadow: 0 -1px 3px rgb(0 0 0 / .04); }
+.jam-deck-shortcut-folder-front { position: absolute; inset: 33.333% 0 0; border-radius: 3px; background: linear-gradient(to bottom, color-mix(in srgb, var(--jd-shortcut-folder-color) 55%, transparent), var(--jd-shortcut-folder-color)); backdrop-filter: blur(3px) saturate(140%); box-shadow: 0 -1px 3px rgb(0 0 0 / .05); }
+.jam-deck-shortcut-folder-front::before, .jam-deck-shortcut-folder-front::after { content: ""; position: absolute; right: 10%; bottom: 24%; width: 17%; height: 2px; border-radius: 2px; box-shadow: inset 0 1px 2px rgb(0 0 0 / .16); }
+.jam-deck-shortcut-folder-front::after { bottom: 11%; }
 
 
 .jam-deck-root .jam-deck-canvas-list { gap: 7px; }
@@ -3123,7 +3173,9 @@
 .jam-deck-root::-webkit-scrollbar,
 .jam-deck-root *::-webkit-scrollbar,
 .jam-deck-canvas-picker-modal::-webkit-scrollbar,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar {
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar {
   width: 6px !important;
   height: 6px !important;
   background: transparent !important;
@@ -3136,7 +3188,11 @@
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-track,
 .jam-deck-canvas-picker-modal *::-webkit-scrollbar-track,
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-corner,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-corner {
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-corner,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-track,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-track,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-corner,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 
@@ -3147,7 +3203,11 @@
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-button,
 .jam-deck-canvas-picker-modal *::-webkit-scrollbar-button,
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-button:single-button,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-button:single-button {
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-button:single-button,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-button,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-button,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-button:single-button,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-button:single-button {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
@@ -3159,7 +3219,9 @@
 .jam-deck-root::-webkit-scrollbar-thumb,
 .jam-deck-root *::-webkit-scrollbar-thumb,
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb {
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-thumb {
   min-width: 6px !important;
   min-height: 18px !important;
   border: 2px solid transparent !important;
@@ -3171,7 +3233,9 @@
 .jam-deck-root::-webkit-scrollbar-thumb:hover,
 .jam-deck-root *::-webkit-scrollbar-thumb:hover,
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb:hover,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb:hover {
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-thumb:hover {
   border-width: 0 !important;
   background: color-mix(in srgb, var(--text-muted) 40%, transparent) !important;
   background-clip: border-box !important;

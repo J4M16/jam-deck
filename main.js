@@ -1504,6 +1504,77 @@ class ArchiveViewerModal extends Modal {
   }
 }
 
+function jamDeckShortcutCharacter(value) {
+  const text = String(value || "").trim().normalize("NFC");
+  return new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)[Symbol.iterator]().next().value?.segment || "";
+}
+
+function jamDeckShortcutAppearance(raw = {}) {
+  const color = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value.toUpperCase() : fallback;
+  return {
+    mode: raw?.mode === "character" ? "character" : "auto",
+    character: jamDeckShortcutCharacter(raw?.character),
+    start: color(raw?.start, "#AFD0E0"),
+    end: color(raw?.end, "#F0C5DA"),
+    folderColor: jamDeckCanvasFolderNormalizeColor(raw?.folderColor || "#EDD0AE"),
+  };
+}
+
+function jamDeckShortcutInk(start, end) {
+  const luminance = (hex) => {
+    const rgb = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+      .map((channel) => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+    return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+  };
+  const low = Math.min(luminance(start), luminance(end)), high = Math.max(luminance(start), luminance(end));
+  return (low + .05) / .05 >= 1.05 / (high + .05) ? "#171A18" : "#FFFFFF";
+}
+
+const JAM_DECK_FOLDER_SHELL_PATH = "M97.3066 32.0191C98.9497 35.5397 102.483 37.7896 106.368 37.7896H210C215.523 37.7896 220 42.2668 220 47.7896V147.79C220 153.312 215.523 157.79 210 157.79H30C24.4772 157.79 20 153.312 20 147.79V29.2077C20 23.9174 24.1203 19.5424 29.4011 19.2256L82.8629 16.018C86.9583 15.7723 90.7882 18.053 92.5234 21.7708L97.3066 32.0191Z";
+
+function jamDeckRenderShortcutIcon(plugin, element, shortcut) {
+  element.empty();
+  element.className = "jam-deck-launcher-icon";
+  element.removeAttribute("style");
+  element.setAttribute("aria-hidden", "true");
+  const appearance = jamDeckShortcutAppearance(shortcut.appearance);
+  if (appearance.mode === "character") {
+    element.addClass("is-character");
+    element.style.setProperty("--jd-cover-start", appearance.start);
+    element.style.setProperty("--jd-cover-end", appearance.end);
+    element.style.setProperty("--jd-cover-ink", jamDeckShortcutInk(appearance.start, appearance.end));
+    element.createSpan({ text: appearance.character || jamDeckShortcutCharacter(shortcut.name) || "?", cls: "jam-deck-launcher-character" });
+  } else if (shortcut.isFolder && !plugin.isUrlShortcut(shortcut)) {
+    element.addClass("is-folder");
+    element.style.setProperty("--jd-shortcut-folder-color", appearance.folderColor);
+    const shell = element.createDiv({ cls: "jam-deck-shortcut-folder" });
+    const svg = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "20 8 200 150");
+    const path = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", JAM_DECK_FOLDER_SHELL_PATH);
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+    shell.appendChild(svg);
+    shell.createDiv({ cls: "jam-deck-shortcut-folder-paper" });
+    shell.createDiv({ cls: "jam-deck-shortcut-folder-front" });
+  } else if (plugin.isUrlShortcut(shortcut)) {
+    const visual = plugin.getUrlShortcutVisual(shortcut);
+    element.addClass("is-domain", `is-tone-${visual.tone}`);
+    if (visual.label) element.createSpan({ text: visual.label, cls: "jam-deck-launcher-domain-letter" });
+    else setIcon(element.createSpan({ cls: "jam-deck-launcher-domain-fallback" }), "globe-2");
+  } else {
+    const iconPath = plugin.resolveShortcutIconPath(shortcut);
+    if (iconPath) {
+      const image = element.createEl("img", { attr: { src: plugin.app.vault.adapter.getResourcePath(iconPath), loading: "lazy", decoding: "async", alt: "" } });
+      image.addEventListener("error", () => {
+        if (image.parentElement !== element) return;
+        image.remove();
+        element.createSpan({ text: "📦", cls: "jam-deck-launcher-fallback" });
+      }, { once: true });
+    } else element.createSpan({ text: "📦", cls: "jam-deck-launcher-fallback" });
+  }
+}
+
 class ShortcutEditorModal extends Modal {
   constructor(app, plugin, widgetId, existing) {
     super(app);
@@ -1515,31 +1586,120 @@ class ShortcutEditorModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.modalEl.addClass("jam-deck-shortcut-editor-modal");
     contentEl.addClass("jam-deck-shortcut-modal");
     contentEl.createEl("h2", { text: this.existing ? "编辑快捷方式" : "添加快捷方式" });
-
-    const form = contentEl.createDiv({ cls: "jam-deck-shortcut-form" });
-    const nameInput = form.createEl("input", { type: "text", attr: { placeholder: "显示名称" } });
+    contentEl.createEl("p", { text: "给常用入口一个好认的样子。", cls: "jam-deck-shortcut-subtitle" });
+    this.draft = jamDeckShortcutAppearance(this.existing?.appearance);
+    const form = contentEl.createEl("form", { cls: "jam-deck-shortcut-form" });
+    const identity = form.createDiv({ cls: "jam-deck-shortcut-identity" });
+    const preview = identity.createDiv({ cls: "jam-deck-shortcut-preview" });
+    const previewIcon = preview.createDiv();
+    preview.createSpan({ text: "实时预览" });
+    const fields = identity.createDiv({ cls: "jam-deck-shortcut-fields" });
+    const field = (parent, title, type, placeholder = "") => {
+      const label = parent.createEl("label", { cls: "jam-deck-shortcut-field" });
+      label.createSpan({ text: title });
+      return label.createEl("input", { type, attr: { placeholder } });
+    };
+    const nameInput = field(fields, "名称", "text", "显示名称");
     nameInput.value = (this.existing && this.existing.name) || "";
-
-    const pathInput = form.createEl("input", { type: "text", attr: { placeholder: "完整路径，或 https:// 网页链接" } });
+    const pathInput = field(form, "链接或路径", "text", "https:// 网页链接，或本地完整路径");
     pathInput.value = (this.existing && (this.existing.url || this.existing.path)) || "";
-
+    pathInput.spellcheck = false;
+    const appearance = form.createDiv({ cls: "jam-deck-shortcut-appearance" });
+    const heading = appearance.createDiv({ cls: "jam-deck-shortcut-section-heading" });
+    heading.createSpan({ text: "图标外观" });
+    const modes = heading.createDiv({ cls: "jam-deck-shortcut-modes", attr: { role: "group", "aria-label": "图标样式" } });
+    const modeButtons = [ ["auto", "默认图标"], ["character", "字符封面"] ].map(([mode, text]) => {
+      const button = modes.createEl("button", { text, attr: { type: "button" } });
+      button.addEventListener("click", () => { this.draft.mode = mode; refresh(); });
+      return { mode, button };
+    });
+    const characterControls = appearance.createDiv({ cls: "jam-deck-shortcut-character-controls" });
+    const characterInput = field(characterControls, "封面字符", "text", "字 / A / ✨");
+    characterInput.value = this.draft.character;
+    characterInput.autocomplete = "off";
+    characterInput.addEventListener("input", (event) => {
+      if (event.isComposing) return;
+      this.draft.character = jamDeckShortcutCharacter(characterInput.value);
+      characterInput.value = this.draft.character;
+      refresh();
+    });
+    characterInput.addEventListener("compositionend", () => {
+      this.draft.character = jamDeckShortcutCharacter(characterInput.value);
+      characterInput.value = this.draft.character;
+      refresh();
+    });
+    for (const [key, title] of [["start", "渐变起点"], ["end", "渐变终点"]]) {
+      const input = field(characterControls, title, "color");
+      input.value = this.draft[key];
+      input.addEventListener("input", () => { this.draft[key] = input.value; refresh(); });
+    }
+    const folderControls = appearance.createDiv({ cls: "jam-deck-shortcut-folder-controls" });
+    folderControls.createSpan({ text: "文件夹配色" });
+    const palette = folderControls.createDiv({ cls: "jam-deck-shortcut-palette", attr: { role: "group", "aria-label": "文件夹配色" } });
+    const colorNames = ["雾灰", "珊瑚", "浅粉", "杏色", "草绿", "天蓝"];
+    const swatches = JAM_DECK_CANVAS_FOLDER_COLORS.map((color, index) => {
+      const button = palette.createEl("button", { attr: { type: "button", "aria-label": colorNames[index], title: colorNames[index] } });
+      button.style.setProperty("--jd-swatch", color);
+      button.addEventListener("click", () => { this.draft.folderColor = color; refresh(); });
+      return { color, button };
+    });
+    const autoHint = appearance.createDiv({ cls: "jam-deck-shortcut-hint", text: "沿用应用图标或网页域名首字母。" });
+    const refresh = () => {
+      const target = pathInput.value.trim();
+      const url = this.plugin.normalizeHttpUrl(target);
+      const sameTarget = target === (this.existing?.url || this.existing?.path || "");
+      const shortcut = { ...(sameTarget ? this.existing : {}), name: nameInput.value, path: target,
+        kind: url ? "url" : undefined, url: url?.url,
+        isFolder: !url && !!target && (sameTarget ? !!this.existing?.isFolder : !/\.(exe|lnk|bat|cmd|app)$/i.test(target)), appearance: this.draft };
+      jamDeckRenderShortcutIcon(this.plugin, previewIcon, shortcut);
+      characterControls.hidden = this.draft.mode !== "character";
+      folderControls.hidden = this.draft.mode !== "auto" || !shortcut.isFolder;
+      autoHint.hidden = this.draft.mode !== "auto" || shortcut.isFolder;
+      modeButtons.forEach(({ mode, button }) => button.setAttribute("aria-pressed", String(this.draft.mode === mode)));
+      swatches.forEach(({ color, button }) => button.setAttribute("aria-pressed", String(this.draft.folderColor === color)));
+    };
+    nameInput.addEventListener("input", refresh);
+    pathInput.addEventListener("input", refresh);
+    refresh();
     jamDeckShieldModalTyping(this);
     setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (error) {} }, 0);
-    const hint = form.createDiv({ text: "支持应用、文件夹和 http / https 网页链接。本地项目会在库内保存一份 .lnk 记录，原快捷方式被挪走后仍可打开。", cls: "jam-deck-shortcut-hint" });
-
+    form.createDiv({ text: "支持网页、应用和文件夹；更换封面不影响打开目标。", cls: "jam-deck-shortcut-hint" });
+    const errorEl = form.createDiv({ cls: "jam-deck-shortcut-error", attr: { role: "alert" } });
+    errorEl.hidden = true;
     const actions = form.createDiv({ cls: "jam-deck-modal-actions" });
-    const save = actions.createEl("button", { text: "保存", cls: "mod-cta" });
-    save.addEventListener("click", async () => {
+    const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+    cancel.addEventListener("click", () => this.close());
+    const save = actions.createEl("button", { text: "保存", cls: "jam-deck-shortcut-save", attr: { type: "submit" } });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (this.busy) return;
       const name = nameInput.value.trim();
       const path = pathInput.value.trim();
       if (!name || !path) {
-        new Notice("Jam Deck：名称和路径不能为空");
+        errorEl.textContent = "请填写名称和链接或路径。";
+        errorEl.hidden = false;
+        (!name ? nameInput : pathInput).focus();
         return;
       }
-      await this.plugin.saveShortcut(this.widgetId, this.existing && this.existing.id, name, path);
-      this.close();
+      this.busy = true;
+      save.disabled = true;
+      save.textContent = "保存中…";
+      errorEl.hidden = true;
+      try {
+        const saved = await this.plugin.saveShortcut(this.widgetId, this.existing?.id, name, path, { ...this.draft });
+        if (saved) this.close();
+        else { errorEl.textContent = "未能保存，请检查重复链接后重试。"; errorEl.hidden = false; }
+      } catch (error) {
+        errorEl.textContent = "保存失败，请稍后重试。";
+        errorEl.hidden = false;
+      } finally {
+        this.busy = false;
+        save.disabled = false;
+        save.textContent = "保存";
+      }
     });
   }
 
@@ -7552,7 +7712,7 @@ class CanvasFolderController {
     const backboardPath = createSvgElement("path");
     backboardPath.setAttribute(
       "d",
-      "M97.3066 32.0191C98.9497 35.5397 102.483 37.7896 106.368 37.7896H210C215.523 37.7896 220 42.2668 220 47.7896V147.79C220 153.312 215.523 157.79 210 157.79H30C24.4772 157.79 20 153.312 20 147.79V29.2077C20 23.9174 24.1203 19.5424 29.4011 19.2256L82.8629 16.018C86.9583 15.7723 90.7882 18.053 92.5234 21.7708L97.3066 32.0191Z",
+      JAM_DECK_FOLDER_SHELL_PATH,
     );
     backboardPath.setAttribute("fill", "currentColor");
     backboardSvg.appendChild(backboardPath);
@@ -13617,28 +13777,7 @@ class JamDeckView extends ItemView {
       item.dataset.shortcutId = shortcut.id;
 
       const iconWrap = item.createDiv({ cls: "jam-deck-launcher-icon" });
-      if (isUrl) {
-        const visual = this.plugin.getUrlShortcutVisual(shortcut);
-        iconWrap.addClass("is-domain");
-        iconWrap.addClass(`is-tone-${visual.tone}`);
-        if (visual.label) iconWrap.createSpan({ text: visual.label, cls: "jam-deck-launcher-domain-letter", attr: { "aria-hidden": "true" } });
-        else {
-          const globe = iconWrap.createSpan({ cls: "jam-deck-launcher-domain-fallback", attr: { "aria-hidden": "true" } });
-          setIcon(globe, "globe-2");
-        }
-      } else {
-        const resolvedIconPath = this.plugin.resolveShortcutIconPath(shortcut);
-        if (resolvedIconPath) {
-          const src = this.app.vault.adapter.getResourcePath(resolvedIconPath);
-          const image = iconWrap.createEl("img", { attr: { src, loading: "lazy", decoding: "async", alt: "" } });
-          image.addEventListener("error", () => {
-            image.remove();
-            if (!iconWrap.querySelector(".jam-deck-launcher-fallback")) iconWrap.createSpan({ text: shortcut.isFolder ? "📁" : "📦", cls: "jam-deck-launcher-fallback" });
-          }, { once: true });
-        } else {
-          iconWrap.createSpan({ text: shortcut.isFolder ? "📁" : "📦", cls: "jam-deck-launcher-fallback" });
-        }
-      }
+      jamDeckRenderShortcutIcon(this.plugin, iconWrap, shortcut);
 
       item.createSpan({ text: shortcut.name, cls: "jam-deck-launcher-name" });
 
@@ -18914,7 +19053,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     });
   }
 
-  async saveShortcut(widgetId, existingId, name, path) {
+  async saveShortcut(widgetId, existingId, name, path, appearance) {
     const normalizedUrl = this.normalizeHttpUrl(path);
     return this.enqueueShortcutMutation(async () => {
       const widget = this.settings.widgets.find((item) => item.id === widgetId);
@@ -18948,6 +19087,8 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
         delete next.url;
         if (!existing) widget.config.shortcuts.push(next);
       }
+      const savedShortcut = widget.config.shortcuts.find((shortcut) => shortcut.id === id);
+      if (appearance !== undefined) savedShortcut.appearance = jamDeckShortcutAppearance(appearance);
       this.renderAllViews();
       try {
         await this.saveSettings();
@@ -19417,6 +19558,10 @@ class JamDeckSettingTab extends PluginSettingTab {
 
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
+JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
+JamDeckPlugin.shortcutAppearance = jamDeckShortcutAppearance;
+JamDeckPlugin.shortcutCharacter = jamDeckShortcutCharacter;
+JamDeckPlugin.renderShortcutIcon = jamDeckRenderShortcutIcon;
 JamDeckPlugin.canonicalWindowsPath = jamDeckCanonicalWindowsPath;
 JamDeckPlugin.localWorkspacePath = jamDeckLocalWorkspacePath;
 JamDeckPlugin.dshValue = jamDeckDshValue;
