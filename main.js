@@ -880,8 +880,33 @@ const WIDGET_DEFS = {
   music: { label: "音乐播放器", icon: "♫", w: 13, h: 14, minDisplayW: 2, minDisplayH: 4 },
 };
 
+// Role-based type scale. The first column preserves the existing compact UI.
+const JAM_DECK_TYPE_SCALE = {
+  micro: [7, 10, 12], badge: [8, 11, 13], caption: [9, 12, 14], meta: [10, 12, 14],
+  label: [11, 13, 15], body: [12, 14, 16], "body-compact": [11, 14, 16],
+  input: [13, 15, 17], lead: [14, 16, 18], subtitle: [15, 17, 19],
+  heading: [16, 18, 20], section: [17, 19, 21], "title-small": [18, 20, 22],
+  title: [20, 22, 24], "dialog-title": [21, 23, 25], "component-title": [10, 13, 15],
+};
+
+function jamDeckTextSize(value, defaultSize = "small") {
+  return ["small", "medium", "large"].includes(value) ? value : defaultSize;
+}
+
+function jamDeckTypographyValues(settings = {}) {
+  const size = jamDeckTextSize(settings.textSize);
+  const index = ["small", "medium", "large"].indexOf(size);
+  const values = Object.fromEntries(Object.entries(JAM_DECK_TYPE_SCALE).map(([role, sizes]) => [`--jd-font-${role}`, `${sizes[index]}px`]));
+  const captionSize = jamDeckTextSize(settings.captionTextSize, size);
+  values["--jd-caption-font-size"] = `${{ small: 17, medium: 20, large: 24 }[captionSize]}px`;
+  values["--jd-type-step"] = `${index * 2}px`;
+  return values;
+}
+
 const DEFAULT_SETTINGS = {
   dataVersion: 4,
+  textSize: "medium",
+  captionTextSize: "follow",
   editMode: false,
   savedLayout: null,
   animationsEnabled: true,
@@ -8779,6 +8804,7 @@ class IslandModeController {
       peekTight: !!(this.collapsed && this.peekTight),
       dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
+      typography: jamDeckTypographyValues(this.plugin.settings),
       leaveMs: this.getLeaveMs(),
       items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
@@ -8874,10 +8900,10 @@ class IslandModeController {
       padding: 0; box-sizing: border-box;
     }
     .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: #b8ff3d; box-shadow: 0 0 0 2px rgba(184, 255, 61, .28); flex: 0 0 auto; }
-    .brand-label { font-size: 13px; font-weight: 720; letter-spacing: .08em; }
+    .brand-label { font-size: var(--jd-font-input, 13px); font-weight: 720; letter-spacing: .08em; }
     .rail { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; padding: 0; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
     .rail::-webkit-scrollbar { display: none; }
-    .empty { color: #777d82; font-size: 12px; padding: 0 6px; white-space: nowrap; }
+    .empty { color: #777d82; font-size: var(--jd-font-body, 12px); padding: 0 6px; white-space: nowrap; }
     body.is-dark .empty { color: #a8ada9; }
     .chip {
       flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
@@ -8893,8 +8919,8 @@ class IslandModeController {
     .thumb { object-fit: cover; background: rgba(32, 37, 43, .08); pointer-events: none; }
     .kind { display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #777d82; background: rgba(32, 37, 43, .07); }
     body.is-dark .kind { color: #b5bab6; background: rgba(255, 255, 255, .07); }
-    .chip-text { min-width: 0; font-size: 12px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .chip-time { font-size: 11px; color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
+    .chip-text { min-width: 0; font-size: var(--jd-font-body, 12px); font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chip-time { font-size: var(--jd-font-label, 11px); color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
     body.is-dark .chip-time { color: #a8ada9; }
     .timer { display: inline-flex; align-items: center; gap: 8px; height: ${ISLAND_CONTROL_HEIGHT}px; padding: 0 12px 0 8px; border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .13); background: rgba(32, 37, 43, .035); }
     body.is-dark .timer { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .045); }
@@ -8909,12 +8935,12 @@ class IslandModeController {
       height: ${ISLAND_CONTROL_HEIGHT}px; margin: 0; padding: 0 12px; box-sizing: border-box;
       display: inline-flex; align-items: center; justify-content: center;
       border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .14);
-      background: rgba(32, 37, 43, .05); color: inherit; font-size: 13px; font-weight: 680;
+      background: rgba(32, 37, 43, .05); color: inherit; font-size: var(--jd-font-input, 13px); font-weight: 680;
       cursor: pointer; white-space: nowrap;
     }
     body.is-dark .restore { border-color: rgba(255, 255, 255, .11); background: rgba(255, 255, 255, .055); }
     .restore:hover { border-color: rgba(112, 160, 66, .58); background: rgba(143, 209, 79, .12); }
-    .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: 10px; opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
+    .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: var(--jd-font-meta, 10px); opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
     .toast.is-visible { opacity: 1; translate: -50% 0; }
     body.no-motion .toast { transition: none; }
   </style>
@@ -9080,6 +9106,7 @@ class IslandModeController {
 
     function render(next) {
       state = next || state;
+      for (const [name, value] of Object.entries(state.typography || {})) document.body.style.setProperty(name, value);
       document.body.classList.toggle("is-dark", !!state.dark);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
       app.classList.toggle("is-collapsed", !!state.collapsed);
@@ -12024,6 +12051,7 @@ class JamDeckView extends ItemView {
   }
 
   render() {
+    this.plugin.applyTypography(this.contentEl.ownerDocument);
     if (this.plugin.islandMode && this.plugin.islandMode.active) {
       this.plugin.islandMode.refresh();
       return;
@@ -14696,6 +14724,8 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictDisposed = false;
     this.islandMode = new IslandModeController(this);
     await this.loadSettings();
+    this.applyTypography();
+    this.register(() => this.clearTypography());
     const captionDirectory = nodePath.join(jamDeckVaultBasePath(this.app), this.manifest.dir);
     const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
     if (require("fs").existsSync(captionHostPath)) {
@@ -14740,7 +14770,7 @@ class JamDeckPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("create", (file) => {
       if (file && file.extension === "canvas" && this.hasCanvasEmbedPath(file.path)) this.renderAllViews();
     }));
-    const reconcileCanvasConflicts = () => this.scheduleCanvasNativeConflictReconcile();
+    const reconcileCanvasConflicts = () => { this.applyTypography(); this.scheduleCanvasNativeConflictReconcile(); };
     this.registerEvent(this.app.workspace.on("layout-change", reconcileCanvasConflicts));
     this.registerEvent(this.app.workspace.on("active-leaf-change", reconcileCanvasConflicts));
 
@@ -14790,6 +14820,8 @@ class JamDeckPlugin extends Plugin {
   async loadSettings() {
     const saved = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved || {});
+    this.settings.textSize = jamDeckTextSize(saved?.textSize, saved ? "small" : "medium");
+    this.settings.captionTextSize = jamDeckTextSize(saved?.captionTextSize, "follow");
     this.settings.widgets = Array.isArray(this.settings.widgets) ? this.settings.widgets : DEFAULT_SETTINGS.widgets;
     this.settings.savedLayout = Array.isArray(this.settings.savedLayout) && this.settings.savedLayout.length
       ? jamDeckSnapshotWidgetLayout(this.settings.savedLayout)
@@ -14888,6 +14920,54 @@ class JamDeckPlugin extends Plugin {
         root.toggleClass("jam-deck-no-motion", !this.settings.animationsEnabled);
       }
     }
+  }
+
+  applyTypography(extraDocument) {
+    if (!this.settings) return;
+    const documents = this.typographyDocuments || (this.typographyDocuments = new Set());
+    if (typeof document !== "undefined") documents.add(document);
+    if (extraDocument) documents.add(extraDocument);
+    this.app.workspace.iterateAllLeaves(leaf => {
+      const doc = leaf.view?.containerEl?.ownerDocument || leaf.view?.contentEl?.ownerDocument;
+      if (doc) documents.add(doc);
+    });
+    const values = jamDeckTypographyValues(this.settings);
+    for (const doc of documents) {
+      if (doc.defaultView?.closed) { documents.delete(doc); continue; }
+      if (!doc.body) continue;
+      doc.body.dataset.jamDeckTextSize = jamDeckTextSize(this.settings.textSize);
+      for (const [name, value] of Object.entries(values)) doc.body.style.setProperty(name, value);
+    }
+    if (this.islandMode?.active) this.islandMode.sendState();
+  }
+
+  clearTypography() {
+    for (const doc of this.typographyDocuments || []) {
+      if (!doc.body) continue;
+      delete doc.body.dataset.jamDeckTextSize;
+      for (const name of Object.keys(jamDeckTypographyValues())) doc.body.style.removeProperty(name);
+    }
+    this.typographyDocuments?.clear();
+  }
+
+  setTypography(key, value) {
+    if (!["textSize", "captionTextSize"].includes(key)) return Promise.resolve(false);
+    const next = jamDeckTextSize(value, key === "captionTextSize" ? "follow" : "small");
+    const operation = (this.typographyUpdateQueue || Promise.resolve()).then(async () => {
+      const previous = this.settings[key];
+      this.settings[key] = next;
+      try { await this.saveSettings(); }
+      catch (error) {
+        this.settings[key] = previous;
+        new Notice("Jam Deck：字号保存失败，请重试");
+        return false;
+      }
+      // Update CSS in place: preserve focus, scroll, live transcription and Canvas ownership.
+      this.applyTypography();
+      return true;
+    });
+    this.typographyUpdateQueue = operation.catch(() => {});
+    return operation;
   }
 
   normalizeDeckTask(task) {
@@ -19391,8 +19471,30 @@ class JamDeckSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("jam-deck-settings");
     containerEl.createEl("h2", { text: "Jam Deck" });
     containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / GLM）", cls: "jam-deck-setting-hint" });
+
+    new Setting(containerEl)
+      .setName("界面字号")
+      .setDesc("小：原有紧凑字号；中：日常阅读；大：更容易看清。同步工作台、弹窗和灵动岛，保持图标、时钟与原生 Canvas 内容尺寸。")
+      .addDropdown(dropdown => {
+        dropdown.addOptions({ small: "小", medium: "中", large: "大" }).setValue(this.plugin.settings.textSize);
+        dropdown.onChange(async value => {
+          await this.plugin.setTypography("textSize", value);
+          dropdown.setValue(this.plugin.settings.textSize);
+        });
+      });
+    new Setting(containerEl)
+      .setName("字幕与跟读字号")
+      .setDesc("仅调整字幕正文；默认跟随界面字号，也可单独放大以便远距离阅读。")
+      .addDropdown(dropdown => {
+        dropdown.addOptions({ follow: "跟随全局", small: "小", medium: "中", large: "大" }).setValue(this.plugin.settings.captionTextSize);
+        dropdown.onChange(async value => {
+          await this.plugin.setTypography("captionTextSize", value);
+          dropdown.setValue(this.plugin.settings.captionTextSize);
+        });
+      });
 
     new Setting(containerEl)
       .setName("动画效果")
@@ -19576,6 +19678,9 @@ class JamDeckSettingTab extends PluginSettingTab {
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
+JamDeckPlugin.textSize = jamDeckTextSize;
+JamDeckPlugin.typographyValues = jamDeckTypographyValues;
+JamDeckPlugin.SettingTab = JamDeckSettingTab;
 JamDeckPlugin.shortcutAppearance = jamDeckShortcutAppearance;
 JamDeckPlugin.shortcutCharacter = jamDeckShortcutCharacter;
 JamDeckPlugin.renderShortcutIcon = jamDeckRenderShortcutIcon;
