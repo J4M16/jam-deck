@@ -3121,7 +3121,9 @@
 
 /* Jam Deck ultra-light scrollbars: WebKit-only so exact pixel sizing is preserved. */
 .jam-deck-root::-webkit-scrollbar,
-.jam-deck-root *::-webkit-scrollbar {
+.jam-deck-root *::-webkit-scrollbar,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar {
   width: 6px !important;
   height: 6px !important;
   background: transparent !important;
@@ -3130,14 +3132,22 @@
 .jam-deck-root::-webkit-scrollbar-track,
 .jam-deck-root *::-webkit-scrollbar-track,
 .jam-deck-root::-webkit-scrollbar-corner,
-.jam-deck-root *::-webkit-scrollbar-corner {
+.jam-deck-root *::-webkit-scrollbar-corner,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-track,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-track,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-corner,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 
 .jam-deck-root::-webkit-scrollbar-button,
 .jam-deck-root *::-webkit-scrollbar-button,
 .jam-deck-root::-webkit-scrollbar-button:single-button,
-.jam-deck-root *::-webkit-scrollbar-button:single-button {
+.jam-deck-root *::-webkit-scrollbar-button:single-button,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-button,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-button,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-button:single-button,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-button:single-button {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
@@ -3147,7 +3157,9 @@
 }
 
 .jam-deck-root::-webkit-scrollbar-thumb,
-.jam-deck-root *::-webkit-scrollbar-thumb {
+.jam-deck-root *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb {
   min-width: 6px !important;
   min-height: 18px !important;
   border: 2px solid transparent !important;
@@ -3157,7 +3169,9 @@
 }
 
 .jam-deck-root::-webkit-scrollbar-thumb:hover,
-.jam-deck-root *::-webkit-scrollbar-thumb:hover {
+.jam-deck-root *::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb:hover {
   border-width: 0 !important;
   background: color-mix(in srgb, var(--text-muted) 40%, transparent) !important;
   background-clip: border-box !important;
