@@ -1812,45 +1812,49 @@
 .jam-deck-launcher-item:focus-within .jam-deck-launcher-edit { opacity: 1; }
 .jam-deck-launcher-edit.is-danger:hover { color: var(--text-error); border-color: var(--text-error); }
 
-.jam-deck-shortcut-editor-modal .jam-deck-shortcut-modal { padding: 0; margin: 0; overflow-y: auto; }
-.jam-deck-shortcut-modal h2 { margin: 0 0 6px; font-size: 21px; font-weight: 650; letter-spacing: -.4px; }
-.jam-deck-shortcut-subtitle { margin: 0 0 24px; color: var(--jd-muted); font-size: 12px; }
-.jam-deck-shortcut-form { display: grid; gap: 18px; }
-.jam-deck-shortcut-identity { display: flex; align-items: center; gap: 24px; }
-.jam-deck-shortcut-preview { flex: 0 0 80px; display: grid; justify-items: center; gap: 9px; }
+.jam-deck-shortcut-editor-modal .jam-deck-shortcut-modal { padding: 0; margin: 0; overflow-y: auto; container: jd-shortcut / inline-size; }
+.jam-deck-shortcut-modal h2 { margin: 0 0 24px; font-size: 21px; font-weight: 650; letter-spacing: -.4px; }
+.jam-deck-shortcut-form { display: grid; gap: 24px; }
+.jam-deck-shortcut-identity { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--jd-line); }
+.jam-deck-shortcut-preview { display: grid; justify-items: center; gap: 9px; }
 .jam-deck-shortcut-preview > span { font-size: 10px; color: var(--jd-muted); }
 .jam-deck-shortcut-preview .jam-deck-launcher-icon { width: 64px; height: 64px; border-radius: 16px; background: var(--background-secondary); box-shadow: 0 5px 16px rgb(15 20 18 / .08); }
 .jam-deck-shortcut-preview .jam-deck-launcher-icon span { font-size: 28px; }
-.jam-deck-shortcut-fields { flex: 1; min-width: 0; }
-.jam-deck-shortcut-field { display: grid; min-width: 0; gap: 8px; font-size: 12px; color: var(--jd-muted); }
+.jam-deck-shortcut-fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 18px; min-width: 0; }
+.jam-deck-shortcut-field { display: grid; min-width: 0; gap: 10px; font-size: 12px; color: var(--jd-muted); }
 .jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: 9px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: 13px; }
-.jam-deck-shortcut-form input:focus-visible, .jam-deck-shortcut-form button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 3px; }
-.jam-deck-shortcut-appearance { padding: 18px 0; border-top: 1px solid var(--jd-line); border-bottom: 1px solid var(--jd-line); display: grid; gap: 18px; }
-.jam-deck-shortcut-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 600; }
+.jam-deck-shortcut-modal .jam-deck-shortcut-form input:focus { border-color: var(--jd-line); box-shadow: none; }
+.jam-deck-shortcut-form input:focus-visible, .jam-deck-shortcut-form button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: -1px; }
+.jam-deck-shortcut-appearance { min-width: 0; display: grid; gap: 20px; }
+.jam-deck-shortcut-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; }
 .jam-deck-shortcut-modes { display: flex; gap: 4px; }
 .jam-deck-shortcut-modes button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 999px; box-shadow: none; background: transparent; color: var(--jd-muted); font-size: 12px; }
 .jam-deck-shortcut-modes button[aria-pressed="true"] { color: var(--jd-ink); background: var(--jd-hover); border-color: var(--jd-line); }
-.jam-deck-shortcut-character-controls { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 14px; }
+.jam-deck-shortcut-character-controls { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.jam-deck-shortcut-character-controls input[type="text"] { text-align: center; }
 .jam-deck-shortcut-form input[type="color"] { cursor: pointer; padding: 5px; }
 .jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 4px; }
-.jam-deck-shortcut-folder-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--jd-muted); }
-.jam-deck-shortcut-palette { display: flex; gap: 8px; }
+.jam-deck-shortcut-folder-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--jd-muted); }
+.jam-deck-shortcut-palette { display: flex; gap: 4px; }
 .jam-deck-shortcut-palette button { width: 30px; height: 30px; padding: 5px; border: 1px solid transparent; border-radius: 50%; background: var(--jd-swatch); background-clip: content-box; box-shadow: none; }
 .jam-deck-shortcut-palette button[aria-pressed="true"] { border-color: var(--jd-ink); }
 .jam-deck-shortcut-hint { color: var(--jd-muted); font-size: 11px; line-height: 1.6; }
 .jam-deck-shortcut-error { color: var(--text-error); font-size: 12px; }
 .jam-deck-shortcut-modal [hidden] { display: none !important; }
-.jam-deck-shortcut-modal .jam-deck-modal-actions { margin: 0; gap: 10px; }
+.jam-deck-shortcut-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 20px; border-top: 1px solid var(--jd-line); }
+.jam-deck-shortcut-footer > .jam-deck-shortcut-hint { flex: 1; min-width: 140px; }
+.jam-deck-shortcut-modal .jam-deck-modal-actions { flex-shrink: 0; margin: 0 0 0 auto; gap: 10px; }
 .jam-deck-shortcut-modal .jam-deck-modal-actions button { height: 38px; min-width: 76px; border: 1px solid var(--jd-line); border-radius: 999px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: 12px; }
 .jam-deck-shortcut-modal .jam-deck-modal-actions .jam-deck-shortcut-save { background: var(--jd-ink); color: var(--background-primary); border-color: transparent; font-weight: 650; }
 .jam-deck-shortcut-modal button { cursor: pointer; }
 .jam-deck-shortcut-modal button:hover { filter: brightness(.96); }
 .jam-deck-shortcut-modal button:disabled { opacity: .5; cursor: wait; }
-@media (max-width: 440px) {
-  .jam-deck-shortcut-section-heading { align-items: flex-start; flex-direction: column; }
-  .jam-deck-shortcut-folder-controls { align-items: flex-start; flex-direction: column; }
-  .jam-deck-shortcut-character-controls { gap: 8px; }
+@container jd-shortcut (max-width: 360px) {
+  .jam-deck-shortcut-identity { grid-template-columns: 64px minmax(0, 1fr); gap: 16px; }
+  .jam-deck-shortcut-fields { grid-template-columns: minmax(0, 1fr); }
+  .jam-deck-shortcut-fields > :first-child { max-width: 200px; }
+  .jam-deck-shortcut-character-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 }
 
 .jam-deck-picker { padding: 18px; }
@@ -1874,7 +1878,8 @@
 }
 .theme-dark .modal.jam-deck-canvas-picker-modal,
 .theme-dark .modal.jam-deck-shortcut-editor-modal { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
-.modal.jam-deck-shortcut-editor-modal { width: min(500px, calc(100vw - 32px)); padding: 32px 24px 24px; }
+.modal.jam-deck-shortcut-editor-modal { width: min(500px, calc(100vw - 32px)); padding: 24px; }
+.jam-deck-shortcut-editor-modal > .modal-header { display: none; }
 .jam-deck-canvas-picker-modal .jam-deck-canvas-picker { padding: 0; margin: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; gap: 16px; }
 .jam-deck-canvas-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
 .jam-deck-canvas-picker h2 { margin: 0 0 6px; font-size: 21px; line-height: 1.3; font-weight: 650; letter-spacing: -.4px; }

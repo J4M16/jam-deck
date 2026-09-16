@@ -1589,14 +1589,13 @@ class ShortcutEditorModal extends Modal {
     this.modalEl.addClass("jam-deck-shortcut-editor-modal");
     contentEl.addClass("jam-deck-shortcut-modal");
     contentEl.createEl("h2", { text: this.existing ? "编辑快捷方式" : "添加快捷方式" });
-    contentEl.createEl("p", { text: "给常用入口一个好认的样子。", cls: "jam-deck-shortcut-subtitle" });
     this.draft = jamDeckShortcutAppearance(this.existing?.appearance);
     const form = contentEl.createEl("form", { cls: "jam-deck-shortcut-form" });
     const identity = form.createDiv({ cls: "jam-deck-shortcut-identity" });
     const preview = identity.createDiv({ cls: "jam-deck-shortcut-preview" });
     const previewIcon = preview.createDiv();
     preview.createSpan({ text: "实时预览" });
-    const fields = identity.createDiv({ cls: "jam-deck-shortcut-fields" });
+    const fields = form.createDiv({ cls: "jam-deck-shortcut-fields" });
     const field = (parent, title, type, placeholder = "") => {
       const label = parent.createEl("label", { cls: "jam-deck-shortcut-field" });
       label.createSpan({ text: title });
@@ -1604,10 +1603,10 @@ class ShortcutEditorModal extends Modal {
     };
     const nameInput = field(fields, "名称", "text", "显示名称");
     nameInput.value = (this.existing && this.existing.name) || "";
-    const pathInput = field(form, "链接或路径", "text", "https:// 网页链接，或本地完整路径");
+    const pathInput = field(fields, "链接或路径", "text", "https:// 网页链接，或本地完整路径");
     pathInput.value = (this.existing && (this.existing.url || this.existing.path)) || "";
     pathInput.spellcheck = false;
-    const appearance = form.createDiv({ cls: "jam-deck-shortcut-appearance" });
+    const appearance = identity.createDiv({ cls: "jam-deck-shortcut-appearance" });
     const heading = appearance.createDiv({ cls: "jam-deck-shortcut-section-heading" });
     heading.createSpan({ text: "图标外观" });
     const modes = heading.createDiv({ cls: "jam-deck-shortcut-modes", attr: { role: "group", "aria-label": "图标样式" } });
@@ -1666,10 +1665,11 @@ class ShortcutEditorModal extends Modal {
     refresh();
     jamDeckShieldModalTyping(this);
     setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (error) {} }, 0);
-    form.createDiv({ text: "支持网页、应用和文件夹；更换封面不影响打开目标。", cls: "jam-deck-shortcut-hint" });
     const errorEl = form.createDiv({ cls: "jam-deck-shortcut-error", attr: { role: "alert" } });
     errorEl.hidden = true;
-    const actions = form.createDiv({ cls: "jam-deck-modal-actions" });
+    const footer = form.createDiv({ cls: "jam-deck-shortcut-footer" });
+    footer.createDiv({ text: "支持网页、应用和文件夹。", cls: "jam-deck-shortcut-hint" });
+    const actions = footer.createDiv({ cls: "jam-deck-modal-actions" });
     const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
     cancel.addEventListener("click", () => this.close());
     const save = actions.createEl("button", { text: "保存", cls: "jam-deck-shortcut-save", attr: { type: "submit" } });
