@@ -999,45 +999,116 @@ class CanvasFilePickerModal extends Modal {
     super(app);
     this.plugin = plugin;
     this.widgetId = widgetId || null;
+    this.busy = false;
+    this.closed = false;
+    this.createdFilePath = null;
   }
 
   onOpen() {
     const { contentEl } = this;
+    this.closed = false;
     contentEl.empty();
+    this.modalEl.addClass("jam-deck-canvas-picker-modal");
     contentEl.addClass("jam-deck-canvas-picker");
-    contentEl.createEl("h2", { text: this.widgetId ? "更换原生 Canvas" : "插入原生 Canvas" });
-    contentEl.createEl("p", { text: "选择知识库中的 Canvas 文件；画布仍由 Obsidian 原生功能渲染和保存。" });
-    const search = contentEl.createEl("input", { type: "search", attr: { placeholder: "搜索 Canvas 名称或路径…" } });
-    const list = contentEl.createDiv({ cls: "jam-deck-canvas-picker-list" });
-    const files = this.app.vault.getFiles()
-      .filter((file) => file.extension === "canvas")
-      .sort((a, b) => b.stat.mtime - a.stat.mtime);
+    const header = contentEl.createDiv({ cls: "jam-deck-canvas-picker-heading" });
+    const heading = header.createDiv();
+    heading.createEl("h2", { text: this.widgetId ? "更换原生 Canvas" : "插入原生 Canvas" });
+    heading.createEl("p", { text: "选一张画布，或从空白开始。" });
+    const create = header.createEl("button", { cls: "jam-deck-canvas-picker-create", attr: { type: "button" } });
+    setIcon(create.createSpan({ attr: { "aria-hidden": "true" } }), "plus");
+    create.createSpan({ text: "新建 Canvas" });
+    create.addEventListener("click", () => void this.selectFile(null, true));
+    const searchBox = contentEl.createDiv({ cls: "jam-deck-canvas-picker-search" });
+    setIcon(searchBox.createSpan({ attr: { "aria-hidden": "true" } }), "search");
+    const search = searchBox.createEl("input", { type: "search", attr: { placeholder: "搜索名称或路径…", "aria-label": "搜索 Canvas 名称或路径" } });
+    const summary = contentEl.createDiv({ cls: "jam-deck-canvas-picker-summary" });
+    const count = summary.createSpan({ attr: { "role": "status", "aria-live": "polite" } });
+    summary.createSpan({ text: "最近编辑优先" });
+    const list = contentEl.createDiv({ cls: "jam-deck-canvas-picker-list", attr: { "aria-label": "Canvas 文件" } });
+    contentEl.createDiv({ cls: "jam-deck-canvas-picker-footer", text: "新建画布保存在知识库根目录，可稍后重命名或移动。" });
     const renderList = () => {
       list.empty();
+      const files = this.app.vault.getFiles().filter(file => file.extension === "canvas").sort((a, b) => b.stat.mtime - a.stat.mtime);
       const query = search.value.trim().toLowerCase();
       const visible = files.filter((file) => !query || file.path.toLowerCase().includes(query));
+      const currentPath = this.plugin.settings.widgets.find(widget => widget.id === this.widgetId)?.config?.filePath;
+      count.textContent = query ? `找到 ${visible.length} 张画布` : `${files.length} 张画布`;
       if (!visible.length) {
-        list.createDiv({ cls: "jam-deck-empty", text: query ? "没有匹配的 Canvas" : "知识库中还没有 Canvas 文件" });
+        const empty = list.createDiv({ cls: "jam-deck-canvas-picker-empty" });
+        setIcon(empty.createDiv({ attr: { "aria-hidden": "true" } }), "layout-dashboard");
+        empty.createEl("p", { text: query ? "没有找到这张画布" : "还没有画布，从第一张开始吧" });
+        empty.createSpan({ text: query ? "试试其他关键词，或新建一张 Canvas。" : "点击右上方「新建 Canvas」即可开始。" });
         return;
       }
       for (const file of visible) {
-        const button = list.createEl("button", { cls: "jam-deck-canvas-picker-item" });
-        button.createSpan({ cls: "jam-deck-canvas-picker-name", text: file.basename });
-        button.createSpan({ cls: "jam-deck-canvas-picker-path", text: file.path });
-        button.addEventListener("click", async () => {
-          if (this.widgetId) await this.plugin.setCanvasEmbedFile(this.widgetId, file.path);
-          else await this.plugin.addCanvasEmbedWidget(file.path);
-          this.close();
-        });
+        const current = file.path === currentPath;
+        const button = list.createEl("button", { cls: "jam-deck-canvas-picker-item", attr: { type: "button", title: file.path, "aria-current": String(current) } });
+        button.disabled = this.busy;
+        setIcon(button.createSpan({ cls: "jam-deck-canvas-picker-icon", attr: { "aria-hidden": "true" } }), "layout-dashboard");
+        const text = button.createSpan({ cls: "jam-deck-canvas-picker-text" });
+        text.createSpan({ cls: "jam-deck-canvas-picker-name", text: file.basename });
+        text.createSpan({ cls: "jam-deck-canvas-picker-path", text: file.path });
+        if (current) button.createSpan({ cls: "jam-deck-canvas-picker-current", text: "当前" });
+        button.addEventListener("click", () => void this.selectFile(file.path));
       }
     };
+    this.renderList = renderList;
     search.addEventListener("input", renderList);
+    search.addEventListener("keydown", event => {
+      if (event.key !== "ArrowDown") return;
+      event.preventDefault(); list.querySelector("button:not(:disabled)")?.focus();
+    });
+    list.addEventListener("keydown", event => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      const buttons = [...list.querySelectorAll("button:not(:disabled)")];
+      const index = buttons.indexOf(event.target);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : index + (event.key === "ArrowDown" ? 1 : -1);
+      if (next < 0) search.focus(); else buttons[Math.min(next, buttons.length - 1)]?.focus();
+    });
     renderList();
     jamDeckShieldModalTyping(this);
-    setTimeout(() => { try { search.focus(); } catch (error) {} }, 0);
+    setTimeout(() => { if (!this.closed) search.focus(); }, 0);
+  }
+
+  async selectFile(filePath, create = false) {
+    if (this.busy || this.closed) return;
+    this.busy = true;
+    this.contentEl.setAttribute("aria-busy", "true");
+    this.contentEl.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
+    try {
+      if (create) {
+        if (!this.createdFilePath) {
+          const path = jamDeckNextCanvasFileName(candidate => !!this.app.vault.getAbstractFileByPath(candidate));
+          const file = await this.app.vault.create(path, '{"nodes":[],"edges":[]}');
+          this.createdFilePath = file.path;
+        }
+        filePath = this.createdFilePath;
+      }
+      if (this.closed) {
+        if (create) new Notice(`Jam Deck：画布已保存到 ${filePath}`);
+        return;
+      }
+      const success = this.widgetId
+        ? await this.plugin.setCanvasEmbedFile(this.widgetId, filePath)
+        : await this.plugin.addCanvasEmbedWidget(filePath);
+      if (success) this.close();
+      else if (create) new Notice(`Jam Deck：画布已保存到 ${filePath}，尚未放入工作台`);
+    } catch (error) {
+      new Notice(`Jam Deck：${this.createdFilePath ? `画布已保存到 ${this.createdFilePath}，切换失败` : create ? "新建 Canvas 失败" : "更换 Canvas 失败"} · ${error.message || error}`);
+    } finally {
+      this.busy = false;
+      if (!this.closed) {
+        this.contentEl.setAttribute("aria-busy", "false");
+        this.contentEl.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
+        this.renderList();
+      }
+    }
   }
 
   onClose() {
+    this.closed = true;
     this.contentEl.empty();
   }
 }
@@ -19345,6 +19416,7 @@ class JamDeckSettingTab extends PluginSettingTab {
 }
 
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
+JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.canonicalWindowsPath = jamDeckCanonicalWindowsPath;
 JamDeckPlugin.localWorkspacePath = jamDeckLocalWorkspacePath;
 JamDeckPlugin.dshValue = jamDeckDshValue;

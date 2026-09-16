@@ -1827,15 +1827,50 @@
 .jam-deck-picker-icon { font-size: 18px; color: var(--text-accent); }
 .jam-deck-picker-label { font-size: 12px; }
 
-.jam-deck-canvas-picker { padding: 18px; }
-.jam-deck-canvas-picker h2 { margin: 0 0 5px; }
-.jam-deck-canvas-picker p { margin: 0 0 12px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.jam-deck-canvas-picker input[type="search"] { width: 100%; min-height: 34px; margin: 0 0 10px; padding: 6px 9px; box-sizing: border-box; }
-.jam-deck-canvas-picker-list { max-height: min(52vh, 440px); display: grid; gap: 5px; overflow-y: auto; }
-.jam-deck-canvas-picker-item { min-width: 0; width: 100%; margin: 0; padding: 8px 10px; display: grid; gap: 2px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); box-shadow: none; text-align: left; cursor: pointer; }
-.jam-deck-canvas-picker-item:hover { border-color: var(--interactive-accent); background: var(--background-modifier-hover); }
-.jam-deck-canvas-picker-name { font-size: 12px; font-weight: 650; }
-.jam-deck-canvas-picker-path { min-width: 0; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal.jam-deck-canvas-picker-modal {
+  --jd-paper: color-mix(in srgb, var(--background-primary) 96%, #f7f6f1);
+  --jd-ink: var(--text-normal); --jd-muted: var(--text-muted);
+  --jd-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+  --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent); --jd-accent: #b8ff3d;
+  width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
+  padding: 32px 24px 18px; border: 1px solid var(--jd-line); border-radius: 18px;
+  background: var(--jd-paper); color: var(--jd-ink); box-shadow: 0 14px 48px rgb(15 20 18 / .16);
+}
+.theme-dark .modal.jam-deck-canvas-picker-modal { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
+.jam-deck-canvas-picker-modal .jam-deck-canvas-picker { padding: 0; margin: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; gap: 16px; }
+.jam-deck-canvas-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
+.jam-deck-canvas-picker h2 { margin: 0 0 6px; font-size: 21px; line-height: 1.3; font-weight: 650; letter-spacing: -.4px; }
+.jam-deck-canvas-picker-heading p { margin: 0; color: var(--jd-muted); font-size: 12px; line-height: 1.5; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-create { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; height: 38px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: 12px; font-weight: 650; cursor: pointer; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-create:hover { opacity: .86; }
+.jam-deck-canvas-picker-create span { display: inline-flex; }
+.jam-deck-canvas-picker-create svg, .jam-deck-canvas-picker-search svg { width: 16px; height: 16px; }
+.jam-deck-canvas-picker-search { display: flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--jd-line); border-radius: 10px; padding: 0 12px; color: var(--jd-muted); }
+.jam-deck-canvas-picker-search > span { display: flex; }
+.jam-deck-canvas-picker input[type="search"] { min-width: 0; width: 100%; height: 40px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: 13px; }
+.jam-deck-canvas-picker-search:focus-within { border-color: var(--jd-muted); box-shadow: 0 0 0 2px color-mix(in srgb, var(--jd-accent) 28%, transparent); }
+.jam-deck-canvas-picker-summary { display: flex; justify-content: space-between; gap: 12px; flex-shrink: 0; color: var(--jd-muted); font-size: 11px; }
+.jam-deck-canvas-picker-list { min-height: 0; max-height: min(48vh, 430px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px; margin-top: -8px; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-item { min-width: 0; width: 100%; height: auto; min-height: 64px; margin: 0; padding: 11px 10px; display: flex; align-items: center; justify-content: flex-start; gap: 12px; border: 0; border-bottom: 1px solid var(--jd-line); border-radius: 0; background: transparent; color: var(--jd-ink); box-shadow: none; text-align: left; white-space: normal; cursor: pointer; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-item:last-child { border-bottom-color: transparent; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-item:hover { background: var(--jd-hover); }
+.jam-deck-canvas-picker-icon { flex: 0 0 20px; display: flex; color: var(--jd-muted); }
+.jam-deck-canvas-picker-icon svg { width: 20px; height: 20px; stroke-width: 1.4; }
+.jam-deck-canvas-picker-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.jam-deck-canvas-picker-name { font-size: 14px; font-weight: 550; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jam-deck-canvas-picker-path { min-width: 0; color: var(--jd-muted); font-size: 11px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jam-deck-canvas-picker-current { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11px; color: var(--jd-muted); }
+.jam-deck-canvas-picker-current::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--jd-ink); }
+.jam-deck-canvas-picker-footer { flex-shrink: 0; padding-top: 12px; border-top: 1px solid var(--jd-line); color: var(--jd-muted); font-size: 11px; line-height: 1.5; }
+.jam-deck-canvas-picker-empty { padding: 34px 12px; text-align: center; color: var(--jd-muted); }
+.jam-deck-canvas-picker-empty p { margin: 12px 0 6px; color: var(--jd-ink); font-size: 14px; }
+.jam-deck-canvas-picker-empty > span { font-size: 12px; }
+.jam-deck-canvas-picker button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: -2px; }
+.jam-deck-canvas-picker [disabled] { opacity: .5; cursor: wait; }
+@media (max-width: 480px) {
+  .modal.jam-deck-canvas-picker-modal { padding: 32px 16px 16px; }
+  .jam-deck-canvas-picker-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+}
 
 .jam-deck-browser-modal { padding: 18px; }
 .jam-deck-browser-modal h2 { margin: 0 0 6px; }
