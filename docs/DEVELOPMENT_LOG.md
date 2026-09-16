@@ -1,5 +1,10 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-16 — 0.32.12 快捷方式默认图标配色整体换新
+
+- 动机：0.32.10/0.32.11 补齐封面能力后，默认外观仍是旧配色——网页域名六个色调槽全部近灰难以区分，无图标应用兜底是 📦 emoji，与整体纸面语言脱节。本次只动默认视觉：新增 `JAM_DECK_SHORTCUT_FOLDER_COLORS` 六色（暖灰 #C8C2B8、珊瑚 #F0B5A2、藕粉 #E9C2CC、杏色 #EFCF9E、鼠尾草 #AECBA4、雾蓝 #A5C6D8）与 `jamDeckShortcutFolderColor()` 校验，旧 Canvas 六色经 legacy 映射保持色相迁入，Canvas 文件夹调色板 `JAM_DECK_CANVAS_FOLDER_COLORS` 原样保留不受影响；域名色调槽改为六个可区分的低饱和色相（雾蓝/鼠尾草/丁香/沙杏/绯陶/青瓷），基础与 color-mix 两套 CSS 同步更换，字色取同色相深色；字符封面默认渐变 #AFD0E0→#F0C5DA 改为杏 #EFD3A6→藕粉 #E9BFCB；兜底 📦 换成 Lucide `app-window`（无图标与图片加载失败两条路径），预览弹窗同步放大到 30px。工具：WorkBuddy；处理模型签名：GLM-5.3-Flash（Designer + Executor）。
+- 验证：快速级。npm run verify 全绿（check + 全部测试，含 shortcut-appearance 新增旧色映射与未知色回退两条断言，测试原六色断言已随新调色板更新）；Canvas 文件夹调色板未动，Canvas 既有颜色与画布不受影响。已部署热重载（0.32.12），Windows 实机查看工作台快捷方式网格与编辑弹窗；Mac M5 未实机验证（纯 DOM/CSS/常量改动，无新增平台依赖）。工具：WorkBuddy；处理模型签名：GLM-5.3-Flash（Designer + Executor）。
+
 ## 2026-09-16 — 0.32.11 快捷方式弹窗排版与间距
 
 - 按 baoyu-design 的关联分组、对齐、视觉密度与实机预览检查重排：外观设置移至预览右侧；名称采用 120px 短字段，与占剩余宽度的链接并列；提示与取消/保存同排垂直居中。移除本弹窗不用的原生空标题栏（额外占位约 11px）及重复副标题，外边距统一 24px，主要分区间距 24px、外观内部间距 20px；按容器宽度响应换行，焦点环收进控件边界避免裁切。工具：Codex；处理模型签名：具体模型标识不可见（主代理、实现与验证）。

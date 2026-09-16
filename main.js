@@ -1504,6 +1504,23 @@ class ArchiveViewerModal extends Modal {
   }
 }
 
+const JAM_DECK_SHORTCUT_FOLDER_COLORS = ["#C8C2B8", "#F0B5A2", "#E9C2CC", "#EFCF9E", "#AECBA4", "#A5C6D8"];
+const JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS = new Map([
+  ["#C1C1C1", "#C8C2B8"],
+  ["#F7BDB1", "#F0B5A2"],
+  ["#F0C5DA", "#E9C2CC"],
+  ["#EDD0AE", "#EFCF9E"],
+  ["#BBE0AF", "#AECBA4"],
+  ["#AFD0E0", "#A5C6D8"],
+]);
+
+function jamDeckShortcutFolderColor(value) {
+  const color = String(value || "").trim().toUpperCase();
+  if (JAM_DECK_SHORTCUT_FOLDER_COLORS.includes(color)) return color;
+  if (JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS.has(color)) return JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS.get(color);
+  return JAM_DECK_SHORTCUT_FOLDER_COLORS[0];
+}
+
 function jamDeckShortcutCharacter(value) {
   const text = String(value || "").trim().normalize("NFC");
   return new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)[Symbol.iterator]().next().value?.segment || "";
@@ -1514,9 +1531,9 @@ function jamDeckShortcutAppearance(raw = {}) {
   return {
     mode: raw?.mode === "character" ? "character" : "auto",
     character: jamDeckShortcutCharacter(raw?.character),
-    start: color(raw?.start, "#AFD0E0"),
-    end: color(raw?.end, "#F0C5DA"),
-    folderColor: jamDeckCanvasFolderNormalizeColor(raw?.folderColor || "#EDD0AE"),
+    start: color(raw?.start, "#EFD3A6"),
+    end: color(raw?.end, "#E9BFCB"),
+    folderColor: jamDeckShortcutFolderColor(raw?.folderColor || "#EFCF9E"),
   };
 }
 
@@ -1569,9 +1586,9 @@ function jamDeckRenderShortcutIcon(plugin, element, shortcut) {
       image.addEventListener("error", () => {
         if (image.parentElement !== element) return;
         image.remove();
-        element.createSpan({ text: "📦", cls: "jam-deck-launcher-fallback" });
+        setIcon(element.createSpan({ cls: "jam-deck-launcher-fallback" }), "app-window");
       }, { once: true });
-    } else element.createSpan({ text: "📦", cls: "jam-deck-launcher-fallback" });
+    } else setIcon(element.createSpan({ cls: "jam-deck-launcher-fallback" }), "app-window");
   }
 }
 
@@ -1638,8 +1655,8 @@ class ShortcutEditorModal extends Modal {
     const folderControls = appearance.createDiv({ cls: "jam-deck-shortcut-folder-controls" });
     folderControls.createSpan({ text: "文件夹配色" });
     const palette = folderControls.createDiv({ cls: "jam-deck-shortcut-palette", attr: { role: "group", "aria-label": "文件夹配色" } });
-    const colorNames = ["雾灰", "珊瑚", "浅粉", "杏色", "草绿", "天蓝"];
-    const swatches = JAM_DECK_CANVAS_FOLDER_COLORS.map((color, index) => {
+    const colorNames = ["暖灰", "珊瑚", "藕粉", "杏色", "鼠尾草", "雾蓝"];
+    const swatches = JAM_DECK_SHORTCUT_FOLDER_COLORS.map((color, index) => {
       const button = palette.createEl("button", { attr: { type: "button", "aria-label": colorNames[index], title: colorNames[index] } });
       button.style.setProperty("--jd-swatch", color);
       button.addEventListener("click", () => { this.draft.folderColor = color; refresh(); });

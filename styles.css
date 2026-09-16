@@ -1795,15 +1795,17 @@
 .jam-deck-launcher-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; overflow: hidden; }
 .jam-deck-launcher-icon img { width: 100%; height: 100%; object-fit: contain; }
 .jam-deck-launcher-icon span { font-size: 24px; }
-.jam-deck-launcher-icon.is-domain { color: #3f4651; background: #e5e8ec; box-shadow: 0 4px 12px rgb(29 34 40 / 0.1); }
-.jam-deck-launcher-icon.is-domain.is-tone-1 { color: #48556a; background: #e2e8f0; }
-.jam-deck-launcher-icon.is-domain.is-tone-2 { color: #554d68; background: #e8e3ed; }
-.jam-deck-launcher-icon.is-domain.is-tone-3 { color: #435b60; background: #e0e9e8; }
-.jam-deck-launcher-icon.is-domain.is-tone-4 { color: #5d554e; background: #ebe6df; }
-.jam-deck-launcher-icon.is-domain.is-tone-5 { color: #4d5361; background: #e4e6eb; }
+.jam-deck-launcher-icon.is-domain { color: #33475a; background: #c6d4e0; box-shadow: 0 4px 12px rgb(29 34 40 / 0.1); }
+.jam-deck-launcher-icon.is-domain.is-tone-1 { color: #3c5237; background: #cad6c1; }
+.jam-deck-launcher-icon.is-domain.is-tone-2 { color: #4a3f63; background: #d3cadb; }
+.jam-deck-launcher-icon.is-domain.is-tone-3 { color: #5c4a22; background: #e1d3b1; }
+.jam-deck-launcher-icon.is-domain.is-tone-4 { color: #5e3b38; background: #e3c9c5; }
+.jam-deck-launcher-icon.is-domain.is-tone-5 { color: #2f4e49; background: #c2d5d0; }
 .jam-deck-launcher-icon .jam-deck-launcher-domain-letter { font-size: 17px; font-weight: 720; line-height: 1; }
 .jam-deck-launcher-icon .jam-deck-launcher-domain-fallback { width: 18px; height: 18px; display: grid; place-items: center; }
 .jam-deck-launcher-icon .jam-deck-launcher-domain-fallback svg { width: 18px; height: 18px; }
+.jam-deck-launcher-icon .jam-deck-launcher-fallback { width: 20px; height: 20px; display: grid; place-items: center; color: #6d7378; }
+.jam-deck-launcher-icon .jam-deck-launcher-fallback svg { width: 20px; height: 20px; }
 .jam-deck-launcher-name { font-size: 10px; text-align: center; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-normal); }
 .jam-deck-launcher-live { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .jam-deck-launcher-edit { position: absolute; top: 2px; right: 2px; min-width: 19px; height: 19px; margin: 0; padding: 0 4px; display: grid; place-items: center; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-muted); box-shadow: none; font-size: 9px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
@@ -1820,6 +1822,8 @@
 .jam-deck-shortcut-preview > span { font-size: 10px; color: var(--jd-muted); }
 .jam-deck-shortcut-preview .jam-deck-launcher-icon { width: 64px; height: 64px; border-radius: 16px; background: var(--background-secondary); box-shadow: 0 5px 16px rgb(15 20 18 / .08); }
 .jam-deck-shortcut-preview .jam-deck-launcher-icon span { font-size: 28px; }
+.jam-deck-shortcut-preview .jam-deck-launcher-icon .jam-deck-launcher-fallback { width: 30px; height: 30px; }
+.jam-deck-shortcut-preview .jam-deck-launcher-icon .jam-deck-launcher-fallback svg { width: 30px; height: 30px; }
 .jam-deck-shortcut-fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 18px; min-width: 0; }
 .jam-deck-shortcut-field { display: grid; min-width: 0; gap: 10px; font-size: 12px; color: var(--jd-muted); }
 .jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: 9px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: 13px; }
@@ -2637,12 +2641,13 @@
 .jam-deck-root .jam-deck-launcher-item:focus-within { border-color: var(--jd-accent); box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-launcher-item:focus-visible { outline: none; border-color: color-mix(in srgb, var(--jd-accent) 72%, var(--jd-line)); box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-launcher-icon { width: 40px; height: 40px; border-radius: var(--jd-radius-sm); background: var(--jd-paper); box-shadow: 0 3px 10px rgb(15 20 18 / 0.07); }
-:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain { color: color-mix(in srgb, var(--jd-ink) 78%, #526074); background: color-mix(in srgb, var(--jd-paper) 82%, #aebac7); }
-:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-1 { color: color-mix(in srgb, var(--jd-ink) 76%, #5e7290); background: color-mix(in srgb, var(--jd-paper) 84%, #9fb2c9); }
-:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-2 { color: color-mix(in srgb, var(--jd-ink) 76%, #746486); background: color-mix(in srgb, var(--jd-paper) 84%, #baa9c5); }
-:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-3 { color: color-mix(in srgb, var(--jd-ink) 76%, #4e7370); background: color-mix(in srgb, var(--jd-paper) 84%, #9dbdb8); }
-:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-4 { color: color-mix(in srgb, var(--jd-ink) 76%, #77685d); background: color-mix(in srgb, var(--jd-paper) 84%, #c2b09f); }
-:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-5 { color: color-mix(in srgb, var(--jd-ink) 76%, #606879); background: color-mix(in srgb, var(--jd-paper) 84%, #abb0bc); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain { color: color-mix(in srgb, var(--jd-ink) 78%, #3d5a78); background: color-mix(in srgb, var(--jd-paper) 82%, #9db3c8); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-1 { color: color-mix(in srgb, var(--jd-ink) 76%, #46603f); background: color-mix(in srgb, var(--jd-paper) 84%, #adc2a2); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-2 { color: color-mix(in srgb, var(--jd-ink) 76%, #544a75); background: color-mix(in srgb, var(--jd-paper) 84%, #b7abc9); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-3 { color: color-mix(in srgb, var(--jd-ink) 76%, #6e5a2e); background: color-mix(in srgb, var(--jd-paper) 84%, #ccb98d); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-4 { color: color-mix(in srgb, var(--jd-ink) 76%, #744843); background: color-mix(in srgb, var(--jd-paper) 84%, #ccaaa5); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-domain.is-tone-5 { color: color-mix(in srgb, var(--jd-ink) 76%, #3a5f59); background: color-mix(in srgb, var(--jd-paper) 84%, #a8c2bb); }
+:is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon .jam-deck-launcher-fallback { color: color-mix(in srgb, var(--jd-ink) 60%, transparent); }
 .jam-deck-root .jam-deck-launcher-name { color: var(--jd-muted); font-size: 9px; }
 
 :is(.jam-deck-root, .jam-deck-shortcut-preview) .jam-deck-launcher-icon.is-character {

@@ -27,12 +27,14 @@ const items = plugin => plugin.settings.widgets[0].config.shortcuts;
   for (const [input, expected] of [["字幕", "字"], [" 👩🏽‍💻 工作", "👩🏽‍💻"], ["🇨🇳ABC", "🇨🇳"], ["e\u0301xy", "é"], ["", ""]]) {
     assert.equal(Plugin.shortcutCharacter(input), expected, "one complete grapheme, not one UTF-16 code unit");
   }
-  const raw = {mode:"character", character:"✨更多", start:"#112233", end:"#fedcba", folderColor:"#BBE0AF"};
+  const raw = {mode:"character", character:"✨更多", start:"#112233", end:"#fedcba", folderColor:"#AECBA4"};
   const appearance = Plugin.shortcutAppearance(raw);
   assert.equal(appearance.character,"✨"); assert.equal(appearance.end,"#FEDCBA");
   const malformed = Plugin.shortcutAppearance({start:"url(https://example.com)",end:"#f",mode:"unknown"});
-  assert.equal(malformed.start,"#AFD0E0"); assert.equal(malformed.end,"#F0C5DA"); assert.equal(malformed.mode,"auto");
+  assert.equal(malformed.start,"#EFD3A6"); assert.equal(malformed.end,"#E9BFCB"); assert.equal(malformed.mode,"auto");
   assert.equal(Plugin.shortcutAppearance(null).mode,"auto");
+  assert.equal(Plugin.shortcutAppearance({folderColor:"#EDD0AE"}).folderColor,"#EFCF9E","legacy canvas color maps to the matching shortcut hue");
+  assert.equal(Plugin.shortcutAppearance({folderColor:"#123456"}).folderColor,"#C8C2B8","unknown colors fall back to the neutral swatch");
   const preview = {
     children: [], style: {setProperty() {}}, addClass() {}, removeAttribute() {}, setAttribute() {},
     empty() { for (const child of this.children) child.parentElement=null; this.children=[]; },
@@ -69,7 +71,7 @@ const items = plugin => plugin.settings.widgets[0].config.shortcuts;
     const local=setup([{id:"folder",name:"作品",path:target,isFolder:true,localPath:"managed/link"}]);
     assert(await local.saveShortcut("launcher","folder","作品",target,{...appearance,mode:"auto"}));
     assert.equal(items(local)[0].path,target); assert.equal(items(local)[0].localPath,"managed/link");
-    assert.equal(items(local)[0].isFolder,true); assert.equal(items(local)[0].appearance.folderColor,"#BBE0AF");
+    assert.equal(items(local)[0].isFolder,true); assert.equal(items(local)[0].appearance.folderColor,"#AECBA4");
   }
   for (const target of ["C:\\Apps\\Design.exe", "/Applications/Design.app"]) {
     const app=setup([{id:"app",name:"应用",path:target,isFolder:false,iconPath:"icons/app.png",localPath:"managed/app"}]);
