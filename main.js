@@ -868,7 +868,7 @@ function jamDeckCountdownState(widget, now = Date.now()) {
 }
 
 const WIDGET_DEFS = {
-  captions: { label: "字幕墙", icon: "≋", w: 18, h: 18, minDisplayW: 10, minDisplayH: 14 },
+  captions: { label: "字幕墙", icon: "≋", w: 10, h: 9, minDisplayW: 6, minDisplayH: 8 },
   clock: { label: "时钟", icon: "◷", w: 13, h: 8, minDisplayW: 4, minDisplayH: 4 },
   clipboard: { label: "剪贴板", icon: "▣", w: 13, h: 18, minDisplayW: 4, minDisplayH: 5 },
   tasks: { label: "最近待办", icon: "✓", w: 13, h: 14, minDisplayW: 4, minDisplayH: 4 },
@@ -880,8 +880,33 @@ const WIDGET_DEFS = {
   music: { label: "音乐播放器", icon: "♫", w: 13, h: 14, minDisplayW: 2, minDisplayH: 4 },
 };
 
+// Role-based type scale. The first column preserves the existing compact UI.
+const JAM_DECK_TYPE_SCALE = {
+  micro: [7, 10, 12], badge: [8, 11, 13], caption: [9, 12, 14], meta: [10, 12, 14],
+  label: [11, 13, 15], body: [12, 14, 16], "body-compact": [11, 14, 16],
+  input: [13, 15, 17], lead: [14, 16, 18], subtitle: [15, 17, 19],
+  heading: [16, 18, 20], section: [17, 19, 21], "title-small": [18, 20, 22],
+  title: [20, 22, 24], "dialog-title": [21, 23, 25], "component-title": [10, 13, 15],
+};
+
+function jamDeckTextSize(value, defaultSize = "small") {
+  return ["small", "medium", "large"].includes(value) ? value : defaultSize;
+}
+
+function jamDeckTypographyValues(settings = {}) {
+  const size = jamDeckTextSize(settings.textSize);
+  const index = ["small", "medium", "large"].indexOf(size);
+  const values = Object.fromEntries(Object.entries(JAM_DECK_TYPE_SCALE).map(([role, sizes]) => [`--jd-font-${role}`, `${sizes[index]}px`]));
+  const captionSize = jamDeckTextSize(settings.captionTextSize, size);
+  values["--jd-caption-font-size"] = `${{ small: 17, medium: 20, large: 24 }[captionSize]}px`;
+  values["--jd-type-step"] = `${index * 2}px`;
+  return values;
+}
+
 const DEFAULT_SETTINGS = {
   dataVersion: 4,
+  textSize: "medium",
+  captionTextSize: "follow",
   editMode: false,
   savedLayout: null,
   animationsEnabled: true,
@@ -959,6 +984,19 @@ function jamDeckShieldModalTyping(modal) {
   }
 }
 
+function jamDeckObserveLauncherLayout(grid) {
+  const items = Array.from(grid.children).filter(item => item.classList.contains("jam-deck-launcher-item"));
+  const update = () => {
+    const firstTop = items[0]?.offsetTop;
+    grid.classList.toggle("is-multirow", items.some(item => Math.abs(item.offsetTop - firstTop) > 1));
+  };
+  const observer = new grid.ownerDocument.defaultView.ResizeObserver(update);
+  observer.observe(grid);
+  for (const item of items) observer.observe(item);
+  update();
+  return () => observer.disconnect();
+}
+
 class WidgetPickerModal extends Modal {
   constructor(app, plugin) {
     super(app);
@@ -999,45 +1037,116 @@ class CanvasFilePickerModal extends Modal {
     super(app);
     this.plugin = plugin;
     this.widgetId = widgetId || null;
+    this.busy = false;
+    this.closed = false;
+    this.createdFilePath = null;
   }
 
   onOpen() {
     const { contentEl } = this;
+    this.closed = false;
     contentEl.empty();
+    this.modalEl.addClass("jam-deck-canvas-picker-modal");
     contentEl.addClass("jam-deck-canvas-picker");
-    contentEl.createEl("h2", { text: this.widgetId ? "更换原生 Canvas" : "插入原生 Canvas" });
-    contentEl.createEl("p", { text: "选择知识库中的 Canvas 文件；画布仍由 Obsidian 原生功能渲染和保存。" });
-    const search = contentEl.createEl("input", { type: "search", attr: { placeholder: "搜索 Canvas 名称或路径…" } });
-    const list = contentEl.createDiv({ cls: "jam-deck-canvas-picker-list" });
-    const files = this.app.vault.getFiles()
-      .filter((file) => file.extension === "canvas")
-      .sort((a, b) => b.stat.mtime - a.stat.mtime);
+    const header = contentEl.createDiv({ cls: "jam-deck-canvas-picker-heading" });
+    const heading = header.createDiv();
+    heading.createEl("h2", { text: this.widgetId ? "更换原生 Canvas" : "插入原生 Canvas" });
+    heading.createEl("p", { text: "选一张画布，或从空白开始。" });
+    const create = header.createEl("button", { cls: "jam-deck-canvas-picker-create", attr: { type: "button" } });
+    setIcon(create.createSpan({ attr: { "aria-hidden": "true" } }), "plus");
+    create.createSpan({ text: "新建 Canvas" });
+    create.addEventListener("click", () => void this.selectFile(null, true));
+    const searchBox = contentEl.createDiv({ cls: "jam-deck-canvas-picker-search" });
+    setIcon(searchBox.createSpan({ attr: { "aria-hidden": "true" } }), "search");
+    const search = searchBox.createEl("input", { type: "search", attr: { placeholder: "搜索名称或路径…", "aria-label": "搜索 Canvas 名称或路径" } });
+    const summary = contentEl.createDiv({ cls: "jam-deck-canvas-picker-summary" });
+    const count = summary.createSpan({ attr: { "role": "status", "aria-live": "polite" } });
+    summary.createSpan({ text: "最近编辑优先" });
+    const list = contentEl.createDiv({ cls: "jam-deck-canvas-picker-list", attr: { "aria-label": "Canvas 文件" } });
+    contentEl.createDiv({ cls: "jam-deck-canvas-picker-footer", text: "新建画布保存在知识库根目录，可稍后重命名或移动。" });
     const renderList = () => {
       list.empty();
+      const files = this.app.vault.getFiles().filter(file => file.extension === "canvas").sort((a, b) => b.stat.mtime - a.stat.mtime);
       const query = search.value.trim().toLowerCase();
       const visible = files.filter((file) => !query || file.path.toLowerCase().includes(query));
+      const currentPath = this.plugin.settings.widgets.find(widget => widget.id === this.widgetId)?.config?.filePath;
+      count.textContent = query ? `找到 ${visible.length} 张画布` : `${files.length} 张画布`;
       if (!visible.length) {
-        list.createDiv({ cls: "jam-deck-empty", text: query ? "没有匹配的 Canvas" : "知识库中还没有 Canvas 文件" });
+        const empty = list.createDiv({ cls: "jam-deck-canvas-picker-empty" });
+        setIcon(empty.createDiv({ attr: { "aria-hidden": "true" } }), "layout-dashboard");
+        empty.createEl("p", { text: query ? "没有找到这张画布" : "还没有画布，从第一张开始吧" });
+        empty.createSpan({ text: query ? "试试其他关键词，或新建一张 Canvas。" : "点击右上方「新建 Canvas」即可开始。" });
         return;
       }
       for (const file of visible) {
-        const button = list.createEl("button", { cls: "jam-deck-canvas-picker-item" });
-        button.createSpan({ cls: "jam-deck-canvas-picker-name", text: file.basename });
-        button.createSpan({ cls: "jam-deck-canvas-picker-path", text: file.path });
-        button.addEventListener("click", async () => {
-          if (this.widgetId) await this.plugin.setCanvasEmbedFile(this.widgetId, file.path);
-          else await this.plugin.addCanvasEmbedWidget(file.path);
-          this.close();
-        });
+        const current = file.path === currentPath;
+        const button = list.createEl("button", { cls: "jam-deck-canvas-picker-item", attr: { type: "button", title: file.path, "aria-current": String(current) } });
+        button.disabled = this.busy;
+        setIcon(button.createSpan({ cls: "jam-deck-canvas-picker-icon", attr: { "aria-hidden": "true" } }), "layout-dashboard");
+        const text = button.createSpan({ cls: "jam-deck-canvas-picker-text" });
+        text.createSpan({ cls: "jam-deck-canvas-picker-name", text: file.basename });
+        text.createSpan({ cls: "jam-deck-canvas-picker-path", text: file.path });
+        if (current) button.createSpan({ cls: "jam-deck-canvas-picker-current", text: "当前" });
+        button.addEventListener("click", () => void this.selectFile(file.path));
       }
     };
+    this.renderList = renderList;
     search.addEventListener("input", renderList);
+    search.addEventListener("keydown", event => {
+      if (event.key !== "ArrowDown") return;
+      event.preventDefault(); list.querySelector("button:not(:disabled)")?.focus();
+    });
+    list.addEventListener("keydown", event => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      const buttons = [...list.querySelectorAll("button:not(:disabled)")];
+      const index = buttons.indexOf(event.target);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : index + (event.key === "ArrowDown" ? 1 : -1);
+      if (next < 0) search.focus(); else buttons[Math.min(next, buttons.length - 1)]?.focus();
+    });
     renderList();
     jamDeckShieldModalTyping(this);
-    setTimeout(() => { try { search.focus(); } catch (error) {} }, 0);
+    setTimeout(() => { if (!this.closed) search.focus(); }, 0);
+  }
+
+  async selectFile(filePath, create = false) {
+    if (this.busy || this.closed) return;
+    this.busy = true;
+    this.contentEl.setAttribute("aria-busy", "true");
+    this.contentEl.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
+    try {
+      if (create) {
+        if (!this.createdFilePath) {
+          const path = jamDeckNextCanvasFileName(candidate => !!this.app.vault.getAbstractFileByPath(candidate));
+          const file = await this.app.vault.create(path, '{"nodes":[],"edges":[]}');
+          this.createdFilePath = file.path;
+        }
+        filePath = this.createdFilePath;
+      }
+      if (this.closed) {
+        if (create) new Notice(`Jam Deck：画布已保存到 ${filePath}`);
+        return;
+      }
+      const success = this.widgetId
+        ? await this.plugin.setCanvasEmbedFile(this.widgetId, filePath)
+        : await this.plugin.addCanvasEmbedWidget(filePath);
+      if (success) this.close();
+      else if (create) new Notice(`Jam Deck：画布已保存到 ${filePath}，尚未放入工作台`);
+    } catch (error) {
+      new Notice(`Jam Deck：${this.createdFilePath ? `画布已保存到 ${this.createdFilePath}，切换失败` : create ? "新建 Canvas 失败" : "更换 Canvas 失败"} · ${error.message || error}`);
+    } finally {
+      this.busy = false;
+      if (!this.closed) {
+        this.contentEl.setAttribute("aria-busy", "false");
+        this.contentEl.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
+        this.renderList();
+      }
+    }
   }
 
   onClose() {
+    this.closed = true;
     this.contentEl.empty();
   }
 }
@@ -1106,6 +1215,7 @@ class FolderRenameModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass("jam-deck-folder-rename-modal");
     contentEl.createEl("h3", { text: "重命名文件夹" });
     const input = contentEl.createEl("input", {
       type: "text",
@@ -1433,6 +1543,94 @@ class ArchiveViewerModal extends Modal {
   }
 }
 
+const JAM_DECK_SHORTCUT_FOLDER_COLORS = ["#C8C2B8", "#F0B5A2", "#E9C2CC", "#EFCF9E", "#AECBA4", "#A5C6D8"];
+const JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS = new Map([
+  ["#C1C1C1", "#C8C2B8"],
+  ["#F7BDB1", "#F0B5A2"],
+  ["#F0C5DA", "#E9C2CC"],
+  ["#EDD0AE", "#EFCF9E"],
+  ["#BBE0AF", "#AECBA4"],
+  ["#AFD0E0", "#A5C6D8"],
+]);
+
+function jamDeckShortcutFolderColor(value) {
+  const color = String(value || "").trim().toUpperCase();
+  if (JAM_DECK_SHORTCUT_FOLDER_COLORS.includes(color)) return color;
+  if (JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS.has(color)) return JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS.get(color);
+  return JAM_DECK_SHORTCUT_FOLDER_COLORS[0];
+}
+
+function jamDeckShortcutCharacter(value) {
+  const text = String(value || "").trim().normalize("NFC");
+  return new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)[Symbol.iterator]().next().value?.segment || "";
+}
+
+function jamDeckShortcutAppearance(raw = {}) {
+  const color = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value.toUpperCase() : fallback;
+  return {
+    mode: raw?.mode === "character" ? "character" : "auto",
+    character: jamDeckShortcutCharacter(raw?.character),
+    start: color(raw?.start, "#EFD3A6"),
+    end: color(raw?.end, "#E9BFCB"),
+    folderColor: jamDeckShortcutFolderColor(raw?.folderColor || "#EFCF9E"),
+  };
+}
+
+function jamDeckShortcutInk(start, end) {
+  const luminance = (hex) => {
+    const rgb = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+      .map((channel) => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+    return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+  };
+  const low = Math.min(luminance(start), luminance(end)), high = Math.max(luminance(start), luminance(end));
+  return (low + .05) / .05 >= 1.05 / (high + .05) ? "#171A18" : "#FFFFFF";
+}
+
+const JAM_DECK_FOLDER_SHELL_PATH = "M97.3066 32.0191C98.9497 35.5397 102.483 37.7896 106.368 37.7896H210C215.523 37.7896 220 42.2668 220 47.7896V147.79C220 153.312 215.523 157.79 210 157.79H30C24.4772 157.79 20 153.312 20 147.79V29.2077C20 23.9174 24.1203 19.5424 29.4011 19.2256L82.8629 16.018C86.9583 15.7723 90.7882 18.053 92.5234 21.7708L97.3066 32.0191Z";
+
+function jamDeckRenderShortcutIcon(plugin, element, shortcut) {
+  element.empty();
+  element.className = "jam-deck-launcher-icon";
+  element.removeAttribute("style");
+  element.setAttribute("aria-hidden", "true");
+  const appearance = jamDeckShortcutAppearance(shortcut.appearance);
+  if (appearance.mode === "character") {
+    element.addClass("is-character");
+    element.style.setProperty("--jd-cover-start", appearance.start);
+    element.style.setProperty("--jd-cover-end", appearance.end);
+    element.style.setProperty("--jd-cover-ink", jamDeckShortcutInk(appearance.start, appearance.end));
+    element.createSpan({ text: appearance.character || jamDeckShortcutCharacter(shortcut.name) || "?", cls: "jam-deck-launcher-character" });
+  } else if (shortcut.isFolder && !plugin.isUrlShortcut(shortcut)) {
+    element.addClass("is-folder");
+    element.style.setProperty("--jd-shortcut-folder-color", appearance.folderColor);
+    const shell = element.createDiv({ cls: "jam-deck-shortcut-folder" });
+    const svg = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "20 8 200 150");
+    const path = element.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", JAM_DECK_FOLDER_SHELL_PATH);
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+    shell.appendChild(svg);
+    shell.createDiv({ cls: "jam-deck-shortcut-folder-paper" });
+    shell.createDiv({ cls: "jam-deck-shortcut-folder-front" });
+  } else if (plugin.isUrlShortcut(shortcut)) {
+    const visual = plugin.getUrlShortcutVisual(shortcut);
+    element.addClass("is-domain", `is-tone-${visual.tone}`);
+    if (visual.label) element.createSpan({ text: visual.label, cls: "jam-deck-launcher-domain-letter" });
+    else setIcon(element.createSpan({ cls: "jam-deck-launcher-domain-fallback" }), "globe-2");
+  } else {
+    const iconPath = plugin.resolveShortcutIconPath(shortcut);
+    if (iconPath) {
+      const image = element.createEl("img", { attr: { src: plugin.app.vault.adapter.getResourcePath(iconPath), loading: "lazy", decoding: "async", alt: "" } });
+      image.addEventListener("error", () => {
+        if (image.parentElement !== element) return;
+        image.remove();
+        setIcon(element.createSpan({ cls: "jam-deck-launcher-fallback" }), "app-window");
+      }, { once: true });
+    } else setIcon(element.createSpan({ cls: "jam-deck-launcher-fallback" }), "app-window");
+  }
+}
+
 class ShortcutEditorModal extends Modal {
   constructor(app, plugin, widgetId, existing) {
     super(app);
@@ -1444,31 +1642,120 @@ class ShortcutEditorModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.modalEl.addClass("jam-deck-shortcut-editor-modal");
     contentEl.addClass("jam-deck-shortcut-modal");
     contentEl.createEl("h2", { text: this.existing ? "编辑快捷方式" : "添加快捷方式" });
-
-    const form = contentEl.createDiv({ cls: "jam-deck-shortcut-form" });
-    const nameInput = form.createEl("input", { type: "text", attr: { placeholder: "显示名称" } });
+    this.draft = jamDeckShortcutAppearance(this.existing?.appearance);
+    const form = contentEl.createEl("form", { cls: "jam-deck-shortcut-form" });
+    const identity = form.createDiv({ cls: "jam-deck-shortcut-identity" });
+    const preview = identity.createDiv({ cls: "jam-deck-shortcut-preview" });
+    const previewIcon = preview.createDiv();
+    preview.createSpan({ text: "实时预览" });
+    const fields = form.createDiv({ cls: "jam-deck-shortcut-fields" });
+    const field = (parent, title, type, placeholder = "") => {
+      const label = parent.createEl("label", { cls: "jam-deck-shortcut-field" });
+      label.createSpan({ text: title });
+      return label.createEl("input", { type, attr: { placeholder } });
+    };
+    const nameInput = field(fields, "名称", "text", "显示名称");
     nameInput.value = (this.existing && this.existing.name) || "";
-
-    const pathInput = form.createEl("input", { type: "text", attr: { placeholder: "完整路径，或 https:// 网页链接" } });
+    const pathInput = field(fields, "链接或路径", "text", "https:// 网页链接，或本地完整路径");
     pathInput.value = (this.existing && (this.existing.url || this.existing.path)) || "";
-
+    pathInput.spellcheck = false;
+    const appearance = identity.createDiv({ cls: "jam-deck-shortcut-appearance" });
+    const heading = appearance.createDiv({ cls: "jam-deck-shortcut-section-heading" });
+    heading.createSpan({ text: "图标外观" });
+    const modes = heading.createDiv({ cls: "jam-deck-shortcut-modes", attr: { role: "group", "aria-label": "图标样式" } });
+    const modeButtons = [ ["auto", "默认图标"], ["character", "字符封面"] ].map(([mode, text]) => {
+      const button = modes.createEl("button", { text, attr: { type: "button" } });
+      button.addEventListener("click", () => { this.draft.mode = mode; refresh(); });
+      return { mode, button };
+    });
+    const characterControls = appearance.createDiv({ cls: "jam-deck-shortcut-character-controls" });
+    const characterInput = field(characterControls, "封面字符", "text", "字 / A / ✨");
+    characterInput.value = this.draft.character;
+    characterInput.autocomplete = "off";
+    characterInput.addEventListener("input", (event) => {
+      if (event.isComposing) return;
+      this.draft.character = jamDeckShortcutCharacter(characterInput.value);
+      characterInput.value = this.draft.character;
+      refresh();
+    });
+    characterInput.addEventListener("compositionend", () => {
+      this.draft.character = jamDeckShortcutCharacter(characterInput.value);
+      characterInput.value = this.draft.character;
+      refresh();
+    });
+    for (const [key, title] of [["start", "渐变起点"], ["end", "渐变终点"]]) {
+      const input = field(characterControls, title, "color");
+      input.value = this.draft[key];
+      input.addEventListener("input", () => { this.draft[key] = input.value; refresh(); });
+    }
+    const folderControls = appearance.createDiv({ cls: "jam-deck-shortcut-folder-controls" });
+    folderControls.createSpan({ text: "文件夹配色" });
+    const palette = folderControls.createDiv({ cls: "jam-deck-shortcut-palette", attr: { role: "group", "aria-label": "文件夹配色" } });
+    const colorNames = ["暖灰", "珊瑚", "藕粉", "杏色", "鼠尾草", "雾蓝"];
+    const swatches = JAM_DECK_SHORTCUT_FOLDER_COLORS.map((color, index) => {
+      const button = palette.createEl("button", { attr: { type: "button", "aria-label": colorNames[index], title: colorNames[index] } });
+      button.style.setProperty("--jd-swatch", color);
+      button.addEventListener("click", () => { this.draft.folderColor = color; refresh(); });
+      return { color, button };
+    });
+    const autoHint = appearance.createDiv({ cls: "jam-deck-shortcut-hint", text: "沿用应用图标或网页域名首字母。" });
+    const refresh = () => {
+      const target = pathInput.value.trim();
+      const url = this.plugin.normalizeHttpUrl(target);
+      const sameTarget = target === (this.existing?.url || this.existing?.path || "");
+      const shortcut = { ...(sameTarget ? this.existing : {}), name: nameInput.value, path: target,
+        kind: url ? "url" : undefined, url: url?.url,
+        isFolder: !url && !!target && (sameTarget ? !!this.existing?.isFolder : !/\.(exe|lnk|bat|cmd|app)$/i.test(target)), appearance: this.draft };
+      jamDeckRenderShortcutIcon(this.plugin, previewIcon, shortcut);
+      characterControls.hidden = this.draft.mode !== "character";
+      folderControls.hidden = this.draft.mode !== "auto" || !shortcut.isFolder;
+      autoHint.hidden = this.draft.mode !== "auto" || shortcut.isFolder;
+      modeButtons.forEach(({ mode, button }) => button.setAttribute("aria-pressed", String(this.draft.mode === mode)));
+      swatches.forEach(({ color, button }) => button.setAttribute("aria-pressed", String(this.draft.folderColor === color)));
+    };
+    nameInput.addEventListener("input", refresh);
+    pathInput.addEventListener("input", refresh);
+    refresh();
     jamDeckShieldModalTyping(this);
     setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (error) {} }, 0);
-    const hint = form.createDiv({ text: "支持应用、文件夹和 http / https 网页链接。本地项目会在库内保存一份 .lnk 记录，原快捷方式被挪走后仍可打开。", cls: "jam-deck-shortcut-hint" });
-
-    const actions = form.createDiv({ cls: "jam-deck-modal-actions" });
-    const save = actions.createEl("button", { text: "保存", cls: "mod-cta" });
-    save.addEventListener("click", async () => {
+    const errorEl = form.createDiv({ cls: "jam-deck-shortcut-error", attr: { role: "alert" } });
+    errorEl.hidden = true;
+    const footer = form.createDiv({ cls: "jam-deck-shortcut-footer" });
+    footer.createDiv({ text: "支持网页、应用和文件夹。", cls: "jam-deck-shortcut-hint" });
+    const actions = footer.createDiv({ cls: "jam-deck-modal-actions" });
+    const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+    cancel.addEventListener("click", () => this.close());
+    const save = actions.createEl("button", { text: "保存", cls: "jam-deck-shortcut-save", attr: { type: "submit" } });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (this.busy) return;
       const name = nameInput.value.trim();
       const path = pathInput.value.trim();
       if (!name || !path) {
-        new Notice("Jam Deck：名称和路径不能为空");
+        errorEl.textContent = "请填写名称和链接或路径。";
+        errorEl.hidden = false;
+        (!name ? nameInput : pathInput).focus();
         return;
       }
-      await this.plugin.saveShortcut(this.widgetId, this.existing && this.existing.id, name, path);
-      this.close();
+      this.busy = true;
+      save.disabled = true;
+      save.textContent = "保存中…";
+      errorEl.hidden = true;
+      try {
+        const saved = await this.plugin.saveShortcut(this.widgetId, this.existing?.id, name, path, { ...this.draft });
+        if (saved) this.close();
+        else { errorEl.textContent = "未能保存，请检查重复链接后重试。"; errorEl.hidden = false; }
+      } catch (error) {
+        errorEl.textContent = "保存失败，请稍后重试。";
+        errorEl.hidden = false;
+      } finally {
+        this.busy = false;
+        save.disabled = false;
+        save.textContent = "保存";
+      }
     });
   }
 
@@ -7481,7 +7768,7 @@ class CanvasFolderController {
     const backboardPath = createSvgElement("path");
     backboardPath.setAttribute(
       "d",
-      "M97.3066 32.0191C98.9497 35.5397 102.483 37.7896 106.368 37.7896H210C215.523 37.7896 220 42.2668 220 47.7896V147.79C220 153.312 215.523 157.79 210 157.79H30C24.4772 157.79 20 153.312 20 147.79V29.2077C20 23.9174 24.1203 19.5424 29.4011 19.2256L82.8629 16.018C86.9583 15.7723 90.7882 18.053 92.5234 21.7708L97.3066 32.0191Z",
+      JAM_DECK_FOLDER_SHELL_PATH,
     );
     backboardPath.setAttribute("fill", "currentColor");
     backboardSvg.appendChild(backboardPath);
@@ -8531,6 +8818,7 @@ class IslandModeController {
       peekTight: !!(this.collapsed && this.peekTight),
       dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
+      typography: jamDeckTypographyValues(this.plugin.settings),
       leaveMs: this.getLeaveMs(),
       items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
@@ -8626,10 +8914,10 @@ class IslandModeController {
       padding: 0; box-sizing: border-box;
     }
     .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: #b8ff3d; box-shadow: 0 0 0 2px rgba(184, 255, 61, .28); flex: 0 0 auto; }
-    .brand-label { font-size: 13px; font-weight: 720; letter-spacing: .08em; }
+    .brand-label { color: #5c5c5c; font-size: var(--jd-font-input, 13px); font-weight: 720; letter-spacing: .08em; }
     .rail { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; padding: 0; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%); }
     .rail::-webkit-scrollbar { display: none; }
-    .empty { color: #777d82; font-size: 12px; padding: 0 6px; white-space: nowrap; }
+    .empty { color: #777d82; font-size: var(--jd-font-body, 12px); padding: 0 6px; white-space: nowrap; }
     body.is-dark .empty { color: #a8ada9; }
     .chip {
       flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
@@ -8645,8 +8933,8 @@ class IslandModeController {
     .thumb { object-fit: cover; background: rgba(32, 37, 43, .08); pointer-events: none; }
     .kind { display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #777d82; background: rgba(32, 37, 43, .07); }
     body.is-dark .kind { color: #b5bab6; background: rgba(255, 255, 255, .07); }
-    .chip-text { min-width: 0; font-size: 12px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .chip-time { font-size: 11px; color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
+    .chip-text { min-width: 0; font-size: var(--jd-font-body, 12px); font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chip-time { font-size: var(--jd-font-label, 11px); color: #777d82; letter-spacing: .02em; flex: 0 0 auto; }
     body.is-dark .chip-time { color: #a8ada9; }
     .timer { display: inline-flex; align-items: center; gap: 8px; height: ${ISLAND_CONTROL_HEIGHT}px; padding: 0 12px 0 8px; border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .13); background: rgba(32, 37, 43, .035); }
     body.is-dark .timer { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .045); }
@@ -8661,12 +8949,12 @@ class IslandModeController {
       height: ${ISLAND_CONTROL_HEIGHT}px; margin: 0; padding: 0 12px; box-sizing: border-box;
       display: inline-flex; align-items: center; justify-content: center;
       border-radius: ${Math.round(ISLAND_CONTROL_HEIGHT / 2)}px; border: 1px solid rgba(32, 37, 43, .14);
-      background: rgba(32, 37, 43, .05); color: inherit; font-size: 13px; font-weight: 680;
+      background: rgba(32, 37, 43, .05); color: inherit; font-size: var(--jd-font-input, 13px); font-weight: 680;
       cursor: pointer; white-space: nowrap;
     }
     body.is-dark .restore { border-color: rgba(255, 255, 255, .11); background: rgba(255, 255, 255, .055); }
     .restore:hover { border-color: rgba(112, 160, 66, .58); background: rgba(143, 209, 79, .12); }
-    .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: 10px; opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
+    .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: var(--jd-font-meta, 10px); opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
     .toast.is-visible { opacity: 1; translate: -50% 0; }
     body.no-motion .toast { transition: none; }
   </style>
@@ -8832,6 +9120,7 @@ class IslandModeController {
 
     function render(next) {
       state = next || state;
+      for (const [name, value] of Object.entries(state.typography || {})) document.body.style.setProperty(name, value);
       document.body.classList.toggle("is-dark", !!state.dark);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
       app.classList.toggle("is-collapsed", !!state.collapsed);
@@ -11701,6 +11990,8 @@ class JamDeckView extends ItemView {
   async onClose() {
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
+    for (const dispose of this.launcherLayoutDisposers || []) dispose();
+    this.launcherLayoutDisposers = [];
     this.plugin.captions?.stopUnused();
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
@@ -11776,6 +12067,7 @@ class JamDeckView extends ItemView {
   }
 
   render() {
+    this.plugin.applyTypography(this.contentEl.ownerDocument);
     if (this.plugin.islandMode && this.plugin.islandMode.active) {
       this.plugin.islandMode.refresh();
       return;
@@ -11783,6 +12075,8 @@ class JamDeckView extends ItemView {
     const root = this.contentEl;
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
+    for (const dispose of this.launcherLayoutDisposers || []) dispose();
+    this.launcherLayoutDisposers = [];
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
@@ -13529,6 +13823,7 @@ class JamDeckView extends ItemView {
       return;
     }
 
+    body.addClass("jam-deck-launcher-body");
     const grid = body.createDiv({ cls: "jam-deck-launcher-grid" });
     const live = body.createDiv({ cls: "jam-deck-launcher-live", attr: { "aria-live": "polite", "aria-atomic": "true" } });
     for (const shortcut of shortcuts) {
@@ -13546,28 +13841,7 @@ class JamDeckView extends ItemView {
       item.dataset.shortcutId = shortcut.id;
 
       const iconWrap = item.createDiv({ cls: "jam-deck-launcher-icon" });
-      if (isUrl) {
-        const visual = this.plugin.getUrlShortcutVisual(shortcut);
-        iconWrap.addClass("is-domain");
-        iconWrap.addClass(`is-tone-${visual.tone}`);
-        if (visual.label) iconWrap.createSpan({ text: visual.label, cls: "jam-deck-launcher-domain-letter", attr: { "aria-hidden": "true" } });
-        else {
-          const globe = iconWrap.createSpan({ cls: "jam-deck-launcher-domain-fallback", attr: { "aria-hidden": "true" } });
-          setIcon(globe, "globe-2");
-        }
-      } else {
-        const resolvedIconPath = this.plugin.resolveShortcutIconPath(shortcut);
-        if (resolvedIconPath) {
-          const src = this.app.vault.adapter.getResourcePath(resolvedIconPath);
-          const image = iconWrap.createEl("img", { attr: { src, loading: "lazy", decoding: "async", alt: "" } });
-          image.addEventListener("error", () => {
-            image.remove();
-            if (!iconWrap.querySelector(".jam-deck-launcher-fallback")) iconWrap.createSpan({ text: shortcut.isFolder ? "📁" : "📦", cls: "jam-deck-launcher-fallback" });
-          }, { once: true });
-        } else {
-          iconWrap.createSpan({ text: shortcut.isFolder ? "📁" : "📦", cls: "jam-deck-launcher-fallback" });
-        }
-      }
+      jamDeckRenderShortcutIcon(this.plugin, iconWrap, shortcut);
 
       item.createSpan({ text: shortcut.name, cls: "jam-deck-launcher-name" });
 
@@ -13596,6 +13870,7 @@ class JamDeckView extends ItemView {
       }
     }
     this.enableLauncherGridEndDrop(grid, live, widget);
+    (this.launcherLayoutDisposers ||= []).push(jamDeckObserveLauncherLayout(grid));
   }
 
   renderMusicPlayer(body, widget) {
@@ -14469,6 +14744,8 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictDisposed = false;
     this.islandMode = new IslandModeController(this);
     await this.loadSettings();
+    this.applyTypography();
+    this.register(() => this.clearTypography());
     const captionDirectory = nodePath.join(jamDeckVaultBasePath(this.app), this.manifest.dir);
     const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
     if (require("fs").existsSync(captionHostPath)) {
@@ -14513,7 +14790,7 @@ class JamDeckPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("create", (file) => {
       if (file && file.extension === "canvas" && this.hasCanvasEmbedPath(file.path)) this.renderAllViews();
     }));
-    const reconcileCanvasConflicts = () => this.scheduleCanvasNativeConflictReconcile();
+    const reconcileCanvasConflicts = () => { this.applyTypography(); this.scheduleCanvasNativeConflictReconcile(); };
     this.registerEvent(this.app.workspace.on("layout-change", reconcileCanvasConflicts));
     this.registerEvent(this.app.workspace.on("active-leaf-change", reconcileCanvasConflicts));
 
@@ -14563,6 +14840,8 @@ class JamDeckPlugin extends Plugin {
   async loadSettings() {
     const saved = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved || {});
+    this.settings.textSize = jamDeckTextSize(saved?.textSize, saved ? "small" : "medium");
+    this.settings.captionTextSize = jamDeckTextSize(saved?.captionTextSize, "follow");
     this.settings.widgets = Array.isArray(this.settings.widgets) ? this.settings.widgets : DEFAULT_SETTINGS.widgets;
     this.settings.savedLayout = Array.isArray(this.settings.savedLayout) && this.settings.savedLayout.length
       ? jamDeckSnapshotWidgetLayout(this.settings.savedLayout)
@@ -14661,6 +14940,54 @@ class JamDeckPlugin extends Plugin {
         root.toggleClass("jam-deck-no-motion", !this.settings.animationsEnabled);
       }
     }
+  }
+
+  applyTypography(extraDocument) {
+    if (!this.settings) return;
+    const documents = this.typographyDocuments || (this.typographyDocuments = new Set());
+    if (typeof document !== "undefined") documents.add(document);
+    if (extraDocument) documents.add(extraDocument);
+    this.app.workspace.iterateAllLeaves(leaf => {
+      const doc = leaf.view?.containerEl?.ownerDocument || leaf.view?.contentEl?.ownerDocument;
+      if (doc) documents.add(doc);
+    });
+    const values = jamDeckTypographyValues(this.settings);
+    for (const doc of documents) {
+      if (doc.defaultView?.closed) { documents.delete(doc); continue; }
+      if (!doc.body) continue;
+      doc.body.dataset.jamDeckTextSize = jamDeckTextSize(this.settings.textSize);
+      for (const [name, value] of Object.entries(values)) doc.body.style.setProperty(name, value);
+    }
+    if (this.islandMode?.active) this.islandMode.sendState();
+  }
+
+  clearTypography() {
+    for (const doc of this.typographyDocuments || []) {
+      if (!doc.body) continue;
+      delete doc.body.dataset.jamDeckTextSize;
+      for (const name of Object.keys(jamDeckTypographyValues())) doc.body.style.removeProperty(name);
+    }
+    this.typographyDocuments?.clear();
+  }
+
+  setTypography(key, value) {
+    if (!["textSize", "captionTextSize"].includes(key)) return Promise.resolve(false);
+    const next = jamDeckTextSize(value, key === "captionTextSize" ? "follow" : "small");
+    const operation = (this.typographyUpdateQueue || Promise.resolve()).then(async () => {
+      const previous = this.settings[key];
+      this.settings[key] = next;
+      try { await this.saveSettings(); }
+      catch (error) {
+        this.settings[key] = previous;
+        new Notice("Jam Deck：字号保存失败，请重试");
+        return false;
+      }
+      // Update CSS in place: preserve focus, scroll, live transcription and Canvas ownership.
+      this.applyTypography();
+      return true;
+    });
+    this.typographyUpdateQueue = operation.catch(() => {});
+    return operation;
   }
 
   normalizeDeckTask(task) {
@@ -18843,7 +19170,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     });
   }
 
-  async saveShortcut(widgetId, existingId, name, path) {
+  async saveShortcut(widgetId, existingId, name, path, appearance) {
     const normalizedUrl = this.normalizeHttpUrl(path);
     return this.enqueueShortcutMutation(async () => {
       const widget = this.settings.widgets.find((item) => item.id === widgetId);
@@ -18877,6 +19204,8 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
         delete next.url;
         if (!existing) widget.config.shortcuts.push(next);
       }
+      const savedShortcut = widget.config.shortcuts.find((shortcut) => shortcut.id === id);
+      if (appearance !== undefined) savedShortcut.appearance = jamDeckShortcutAppearance(appearance);
       this.renderAllViews();
       try {
         await this.saveSettings();
@@ -19162,8 +19491,30 @@ class JamDeckSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("jam-deck-settings");
     containerEl.createEl("h2", { text: "Jam Deck" });
     containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / GLM）", cls: "jam-deck-setting-hint" });
+
+    new Setting(containerEl)
+      .setName("界面字号")
+      .setDesc("小：原有紧凑字号；中：日常阅读；大：更容易看清。同步工作台、弹窗和灵动岛，保持图标、时钟与原生 Canvas 内容尺寸。")
+      .addDropdown(dropdown => {
+        dropdown.addOptions({ small: "小", medium: "中", large: "大" }).setValue(this.plugin.settings.textSize);
+        dropdown.onChange(async value => {
+          await this.plugin.setTypography("textSize", value);
+          dropdown.setValue(this.plugin.settings.textSize);
+        });
+      });
+    new Setting(containerEl)
+      .setName("字幕与跟读字号")
+      .setDesc("仅调整字幕正文；默认跟随界面字号，也可单独放大以便远距离阅读。")
+      .addDropdown(dropdown => {
+        dropdown.addOptions({ follow: "跟随全局", small: "小", medium: "中", large: "大" }).setValue(this.plugin.settings.captionTextSize);
+        dropdown.onChange(async value => {
+          await this.plugin.setTypography("captionTextSize", value);
+          dropdown.setValue(this.plugin.settings.captionTextSize);
+        });
+      });
 
     new Setting(containerEl)
       .setName("动画效果")
@@ -19345,6 +19696,15 @@ class JamDeckSettingTab extends PluginSettingTab {
 }
 
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
+JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
+JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
+JamDeckPlugin.textSize = jamDeckTextSize;
+JamDeckPlugin.typographyValues = jamDeckTypographyValues;
+JamDeckPlugin.SettingTab = JamDeckSettingTab;
+JamDeckPlugin.observeLauncherLayout = jamDeckObserveLauncherLayout;
+JamDeckPlugin.shortcutAppearance = jamDeckShortcutAppearance;
+JamDeckPlugin.shortcutCharacter = jamDeckShortcutCharacter;
+JamDeckPlugin.renderShortcutIcon = jamDeckRenderShortcutIcon;
 JamDeckPlugin.canonicalWindowsPath = jamDeckCanonicalWindowsPath;
 JamDeckPlugin.localWorkspacePath = jamDeckLocalWorkspacePath;
 JamDeckPlugin.dshValue = jamDeckDshValue;
