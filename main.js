@@ -984,6 +984,19 @@ function jamDeckShieldModalTyping(modal) {
   }
 }
 
+function jamDeckObserveLauncherLayout(grid) {
+  const items = Array.from(grid.children).filter(item => item.classList.contains("jam-deck-launcher-item"));
+  const update = () => {
+    const firstTop = items[0]?.offsetTop;
+    grid.classList.toggle("is-multirow", items.some(item => Math.abs(item.offsetTop - firstTop) > 1));
+  };
+  const observer = new grid.ownerDocument.defaultView.ResizeObserver(update);
+  observer.observe(grid);
+  for (const item of items) observer.observe(item);
+  update();
+  return () => observer.disconnect();
+}
+
 class WidgetPickerModal extends Modal {
   constructor(app, plugin) {
     super(app);
@@ -11977,6 +11990,8 @@ class JamDeckView extends ItemView {
   async onClose() {
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
+    for (const dispose of this.launcherLayoutDisposers || []) dispose();
+    this.launcherLayoutDisposers = [];
     this.plugin.captions?.stopUnused();
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
@@ -12060,6 +12075,8 @@ class JamDeckView extends ItemView {
     const root = this.contentEl;
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
+    for (const dispose of this.launcherLayoutDisposers || []) dispose();
+    this.launcherLayoutDisposers = [];
     this.cleanupLayoutSashes();
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
@@ -13806,6 +13823,7 @@ class JamDeckView extends ItemView {
       return;
     }
 
+    body.addClass("jam-deck-launcher-body");
     const grid = body.createDiv({ cls: "jam-deck-launcher-grid" });
     const live = body.createDiv({ cls: "jam-deck-launcher-live", attr: { "aria-live": "polite", "aria-atomic": "true" } });
     for (const shortcut of shortcuts) {
@@ -13852,6 +13870,7 @@ class JamDeckView extends ItemView {
       }
     }
     this.enableLauncherGridEndDrop(grid, live, widget);
+    (this.launcherLayoutDisposers ||= []).push(jamDeckObserveLauncherLayout(grid));
   }
 
   renderMusicPlayer(body, widget) {
@@ -19682,6 +19701,7 @@ JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
 JamDeckPlugin.textSize = jamDeckTextSize;
 JamDeckPlugin.typographyValues = jamDeckTypographyValues;
 JamDeckPlugin.SettingTab = JamDeckSettingTab;
+JamDeckPlugin.observeLauncherLayout = jamDeckObserveLauncherLayout;
 JamDeckPlugin.shortcutAppearance = jamDeckShortcutAppearance;
 JamDeckPlugin.shortcutCharacter = jamDeckShortcutCharacter;
 JamDeckPlugin.renderShortcutIcon = jamDeckRenderShortcutIcon;

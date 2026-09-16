@@ -2635,8 +2635,14 @@
 .jam-deck-root .jam-deck-calendar-foot,
 .jam-deck-root .jam-deck-clipboard-drag-hint { color: var(--jd-faint); }
 
-.jam-deck-root .jam-deck-launcher-grid { grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 9px; }
-.jam-deck-root .jam-deck-launcher-item { padding: 8px 5px; border: 1px solid transparent; border-radius: var(--jd-radius-md); }
+.jam-deck-root .jam-deck-launcher-body { display: flex; flex-direction: column; }
+.jam-deck-root .jam-deck-launcher-grid {
+  flex: 0 0 auto; width: 100%; margin-block: auto;
+  grid-template-columns: repeat(auto-fit, minmax(0, min(100%, calc(80px + var(--jd-type-step, 0px) * 6))));
+  justify-content: center; align-content: start; gap: 16px 12px;
+}
+.jam-deck-root .jam-deck-launcher-grid.is-multirow { margin-block: 0; }
+.jam-deck-root .jam-deck-launcher-item { gap: 10px; padding: 8px 5px; border: 1px solid transparent; border-radius: var(--jd-radius-md); }
 .jam-deck-root .jam-deck-launcher-item:hover { border-color: var(--jd-line); background: var(--jd-surface-raised); box-shadow: 0 8px 18px rgb(15 20 18 / 0.08); transform: none; }
 .jam-deck-root .jam-deck-launcher-item:focus-within { border-color: var(--jd-accent); box-shadow: var(--jd-focus-ring); }
 .jam-deck-root .jam-deck-launcher-item:focus-visible { outline: none; border-color: color-mix(in srgb, var(--jd-accent) 72%, var(--jd-line)); box-shadow: var(--jd-focus-ring); }
@@ -3923,7 +3929,6 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 
 /* Larger text reflows owned controls; never scale the board or embedded documents. */
 body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-root .jam-deck-widget-action { height: auto; min-height: 26px; padding-block: 4px; }
-body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-root .jam-deck-launcher-grid { grid-template-columns: repeat(auto-fill, minmax(calc(62px + var(--jd-type-step) * 6), 1fr)); }
 body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-launcher-name { max-width: 100%; line-height: 1.5; }
 body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-task-title { white-space: normal; overflow-wrap: anywhere; }
 body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-task-main { flex-wrap: wrap; }

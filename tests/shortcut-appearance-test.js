@@ -11,6 +11,24 @@ Module._load = function(request, parent, isMain) {
 };
 const Plugin = require("../main.js");
 Module._load = originalLoad;
+// Layout reacts to actual wrapped rows and releases every observed node on teardown.
+{
+  let callback, disconnected = false, multirow;
+  const observed = [];
+  class Observer {
+    constructor(fn) { callback = fn; }
+    observe(node) { observed.push(node); }
+    disconnect() { disconnected = true; }
+  }
+  const children = [0, 0, 0].map(offsetTop => ({offsetTop, classList:{contains:()=>true}}));
+  const grid = {children, ownerDocument:{defaultView:{ResizeObserver:Observer}}, classList:{toggle:(_, value)=>{multirow=value;}}};
+  const dispose = Plugin.observeLauncherLayout(grid);
+  assert.equal(multirow, false);
+  assert.equal(observed.length, 4);
+  children[2].offsetTop = 96; callback(); assert.equal(multirow, true);
+  children.forEach(item => { item.offsetTop = 120; }); callback(); assert.equal(multirow, false);
+  dispose(); assert.equal(disconnected, true);
+}
 const clone = value => JSON.parse(JSON.stringify(value));
 function setup(shortcuts = []) {
   const plugin = Object.create(Plugin.prototype);
