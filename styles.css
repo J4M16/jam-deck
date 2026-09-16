@@ -2140,7 +2140,7 @@
   box-shadow: var(--jd-shadow-toolbar);
 }
 
-.jam-deck-root .jam-deck-title-main { color: var(--jd-ink); font-size: var(--jd-font-heading, 16px); font-weight: 720; letter-spacing: -0.02em; }
+.jam-deck-root .jam-deck-title-main { color: var(--jd-muted); font-size: var(--jd-font-heading, 16px); font-weight: 720; letter-spacing: -0.02em; }
 
 .jam-deck-root .jam-deck-actions { gap: 4px; }
 .jam-deck-root .jam-deck-action {
@@ -2592,8 +2592,8 @@
   border-bottom-color: color-mix(in srgb, var(--jd-line) 70%, transparent);
   background: transparent;
 }
-.jam-deck-root .jam-deck-widget-icon { color: var(--jd-muted); font-size: 11px; }
-.jam-deck-root .jam-deck-widget-title { color: var(--jd-ink); font-size: var(--jd-font-component-title, 10px); font-weight: 680; letter-spacing: 0.045em; }
+.jam-deck-root .jam-deck-widget-icon { color: color-mix(in srgb, var(--jd-muted) 85%, var(--jd-surface)); font-size: 11px; }
+.jam-deck-root .jam-deck-widget-title { color: var(--jd-muted); font-size: var(--jd-font-component-title, 10px); font-weight: 680; letter-spacing: 0.045em; }
 .jam-deck-root .jam-deck-widget-action {
   min-width: 16px;
   height: 16px;
