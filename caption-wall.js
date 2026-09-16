@@ -451,7 +451,8 @@ function mountCaption(body, session, host) {
     state.textContent = reading ? `${session.status} · ${session.positionStatus}` : session.status;
     state.classList.toggle("is-listening", !!session.source);
     state.title = session.device || ""; error.textContent = session.error; error.hidden = !session.error;
-    spoken.hidden = !reading; spoken.textContent = session.spoken ? `听到：${session.spoken}` : "麦克风 → 本地跟读；离稿时由 DeepSeek 定位";
+    spoken.hidden = !reading || !session.spoken; spoken.textContent = session.spoken ? `听到：${session.spoken}` : "";
+    spoken.title = spoken.textContent;
     follow.hidden = autoScroll;
     if (lastMode !== session.mode || (reading && lastNote !== session.noteText)) { content.replaceChildren(); rows.clear(); lastMode = session.mode; lastNote = session.noteText; lastActive = -1; }
     const items = reading ? session.note : session.entries;

@@ -3741,8 +3741,8 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 
 /* Caption wall: one Spatial paper surface, text-first transcript and reading position. */
 .jam-deck-root .jam-deck-caption {
-  display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden;
-  color: var(--jd-ink); padding: 4px 14px 14px;
+  display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden;
+  color: var(--jd-ink); padding: 4px 10px 6px;
 }
 .jam-deck-root .is-captions > .jam-deck-widget-header { height: 36px; }
 .jam-deck-caption-tabs { display: flex; align-self: stretch; flex: 0 0 auto; gap: 4px; }
@@ -3756,9 +3756,9 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 .jam-deck-caption-toolbar, .jam-deck-caption-meta, .jam-deck-caption-note-controls {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; flex-shrink: 0;
 }
-.jam-deck-caption-toolbar { padding-top: 4px; }
-.jam-deck-caption-primary, .jam-deck-caption-utilities { display: flex; align-items: center; gap: 6px; }
-.jam-deck-caption-utilities { margin-left: auto; padding-left: 10px; border-left: 1px solid var(--jd-line); }
+.jam-deck-caption-toolbar { padding-top: 0; }
+.jam-deck-caption-primary, .jam-deck-caption-utilities { display: flex; align-items: center; gap: 4px; }
+.jam-deck-caption-utilities { margin-left: auto; padding-left: 8px; border-left: 1px solid var(--jd-line); }
 .jam-deck-root .jam-deck-caption-action {
   min-height: 32px; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
   border: 1px solid color-mix(in srgb, var(--jd-muted) 35%, transparent); border-radius: 999px; box-shadow: none;
@@ -3781,19 +3781,19 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 .jam-deck-caption-state { font-size: 11px; color: var(--jd-muted); }
 .jam-deck-caption-state::before { content: ''; display: inline-block; width: 4px; height: 4px; margin-right: 6px; border-radius: 50%; background: var(--jd-muted); }
 .jam-deck-caption-state.is-listening::before { background: var(--jd-accent); }
-.jam-deck-caption-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 8px 4px 24px; user-select: text; -webkit-user-select: text; }
+.jam-deck-caption-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 0; user-select: text; -webkit-user-select: text; }
 .jam-deck-root .jam-deck-caption-line {
-  display: flex; gap: 12px; width: 100%; margin: 0; padding: 8px 6px; border: 0;
+  display: flex; gap: 8px; width: 100%; margin: 0; padding: 4px 2px; border: 0;
   border-left: 2px solid transparent; border-radius: 0; box-shadow: none; background: transparent;
-  font: inherit; font-size: 17px; line-height: 1.8; text-align: left; white-space: pre-wrap;
+  font: inherit; font-size: 17px; line-height: 1.6; text-align: left; white-space: pre-wrap;
   color: var(--jd-ink); height: auto; user-select: text; -webkit-user-select: text;
 }
 .jam-deck-root .jam-deck-caption-line.is-current { border-left-color: var(--jd-accent); font-weight: 650; }
 .jam-deck-caption-line.is-partial { opacity: .55; }
-.jam-deck-caption-time { flex: 0 0 auto; font: 10px/3 monospace; color: var(--jd-muted); }
+.jam-deck-caption-time { flex: 0 0 auto; font: 10px/2.72 monospace; color: var(--jd-muted); }
 .jam-deck-caption-time:empty { display: none; }
 .jam-deck-caption-text { min-width: 0; overflow-wrap: anywhere; }
-.jam-deck-caption-spoken { flex-shrink: 0; max-height: 68px; overflow: auto; border-top: 1px solid var(--jd-line); padding-top: 8px; font-size: 12px; color: var(--jd-muted); user-select: text; }
+.jam-deck-caption-spoken { flex-shrink: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-top: 1px solid var(--jd-line); padding-top: 4px; font-size: 12px; line-height: 18px; color: var(--jd-muted); user-select: text; }
 .jam-deck-caption-error { font-size: 12px; color: var(--text-error); overflow-wrap: anywhere; }
-.jam-deck-caption-empty { color: var(--jd-muted); font-size: 14px; line-height: 1.8; }
+.jam-deck-caption-empty { margin: 4px 0; color: var(--jd-muted); font-size: 14px; line-height: 1.8; }
 .jam-deck-caption :is(button, select, .jam-deck-caption-content):focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }

@@ -868,7 +868,7 @@ function jamDeckCountdownState(widget, now = Date.now()) {
 }
 
 const WIDGET_DEFS = {
-  captions: { label: "字幕墙", icon: "≋", w: 18, h: 18, minDisplayW: 10, minDisplayH: 14 },
+  captions: { label: "字幕墙", icon: "≋", w: 10, h: 9, minDisplayW: 6, minDisplayH: 8 },
   clock: { label: "时钟", icon: "◷", w: 13, h: 8, minDisplayW: 4, minDisplayH: 4 },
   clipboard: { label: "剪贴板", icon: "▣", w: 13, h: 18, minDisplayW: 4, minDisplayH: 5 },
   tasks: { label: "最近待办", icon: "✓", w: 13, h: 14, minDisplayW: 4, minDisplayH: 4 },
