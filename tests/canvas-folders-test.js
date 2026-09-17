@@ -244,4 +244,39 @@ for (const blocked of [false, true]) {
   assert.strictEqual(!!actual.jamdeck?.stackImageNormalization, blocked);
   assert.deepStrictEqual(f.canvas.getData().edges, edges);
 }
+// The visible folder button handles both loose selection and a native group.
+{
+  const f = fixture();
+  const buttons = new Map();
+  f.ctrl.getToolbarMenu = () => ({});
+  f.ctrl.ensureToolbarButton = (_, id, label, icon, click) => {
+    if (!buttons.has(id)) buttons.set(id, {click, setAttribute(key,value){this[key]=value;}});
+    return buttons.get(id);
+  };
+  const sync = () => Plugin.CanvasFolderController.prototype.syncToolbar.call(f.ctrl);
+  const before = f.canvas.getData();
+  f.canvas.selection = new Set([f.node("a"),f.node("b")]); sync();
+  assert.strictEqual(buttons.get("folder").hidden, false);
+  assert.strictEqual(buttons.get("folder")["aria-label"], "新建文件夹");
+  buttons.get("folder").click();
+  assert.deepStrictEqual(groupOf(f).memberIds, ["a","b"]);
+  assert.deepStrictEqual(f.canvas.getData().edges, edges);
+  assert.strictEqual(f.canvas.history.current, 1);
+  f.canvas.undo(); assert.deepStrictEqual(f.canvas.getData(), before);
+  f.canvas.selection = new Set([f.node("section")]); sync();
+  assert.strictEqual(buttons.get("folder")["aria-label"], "收起为文件夹");
+  assert.strictEqual(buttons.has("stack"), false);
+  assert.strictEqual(buttons.get("grid").hidden, true);
+  buttons.get("folder").click(); assert.strictEqual(groupOf(f).nativeGroupId, "section");
+  f.canvas.undo();
+  f.canvas.selection = new Set([f.node("a")]); sync();
+  assert.strictEqual(buttons.get("folder").hidden, true);
+  buttons.get("folder").click(); assert.deepStrictEqual(f.canvas.getData(), before);
+  f.canvas.selection = new Set([f.node("a"),f.node("b")]); f.canvas.readonly=true; sync();
+  assert.strictEqual(buttons.get("folder").disabled,true);
+  buttons.get("folder").click(); assert.deepStrictEqual(f.canvas.getData(), before);
+  f.canvas.readonly=false; f.ctrl.stack={previewWrapper:{}};sync();
+  assert.strictEqual(buttons.get("folder").hidden,true);
+  buttons.get("folder").click(); assert.deepStrictEqual(f.canvas.getData(),before);
+}
 console.log("Canvas folder round-trip and transaction tests passed");

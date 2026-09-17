@@ -6540,25 +6540,30 @@ class CanvasFolderController {
     const selected = this.getSelectedItems();
     const nativeSelection = this.canvas && this.canvas.selection ? [...this.canvas.selection] : [];
     const selectedGroup = nativeSelection.length === 1 && nativeSelection[0].getData().type === "group" ? nativeSelection[0] : null;
-    const sectionButton = this.ensureToolbarButton(menu, "folder", "收起为文件夹", "folder-closed", () => {
-      try { const node = [...this.canvas.selection][0]; if (node) this.foldNativeGroup(node); } catch (error) { new Notice(`Jam Deck：${error.message}`); }
-    });
-    if (sectionButton) { sectionButton.hidden = !selectedGroup; sectionButton.disabled = !!this.canvas.readonly; }
     const stackBlocked = !!(this.stack && (this.stack.previewWrapper || this.stack.imageFocus || this.stack.drag));
     const available = !stackBlocked && selected.length >= 2 && selected.every((item) => item && item.kind);
-    const stackButton = this.ensureToolbarButton(menu, "stack", "堆叠编组", "layers", () => this.performToolbarAction("stack"));
+    const sectionButton = this.ensureToolbarButton(menu, "folder", "新建文件夹", "folder-closed", () => this.performToolbarAction("folder"));
+    if (sectionButton) {
+      sectionButton.hidden = stackBlocked || (!selectedGroup && !available);
+      sectionButton.disabled = !!this.canvas.readonly;
+      sectionButton.setAttribute("aria-label", selectedGroup ? "收起为文件夹" : "新建文件夹");
+    }
     const gridButton = this.ensureToolbarButton(menu, "grid", "网格排列", "layout-grid", () => this.performToolbarAction("grid"));
-    for (const button of [stackButton, gridButton]) {
-      if (!button) continue;
-      button.hidden = !available;
-      button.disabled = !!(this.canvas && this.canvas.readonly);
+    if (gridButton) {
+      gridButton.hidden = !available;
+      gridButton.disabled = !!(this.canvas && this.canvas.readonly);
     }
   }
 
   performToolbarAction(action) {
-    const selected = this.getSelectedItems();
-    if (selected.length < 2 || selected.some((item) => !item.kind)) return;
+    if (this.canvas.readonly || (this.stack && (this.stack.previewWrapper || this.stack.imageFocus || this.stack.drag))) return;
     try {
+      const nativeSelection = [...this.canvas.selection];
+      if (action === "folder" && nativeSelection.length === 1 && nativeSelection[0].getData().type === "group") {
+        return this.foldNativeGroup(nativeSelection[0]);
+      }
+      const selected = this.getSelectedItems();
+      if (selected.length < 2 || selected.some((item) => !item.kind)) return;
       if (action === "grid") this.layoutSelectionGrid(selected);
       else this.createFolder(selected);
     } catch (error) {

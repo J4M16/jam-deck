@@ -1627,6 +1627,7 @@
   right: 7px;
   bottom: calc(100% + 7px);
 }
+.jam-deck-canvas-leaf .jam-deck-canvas-folder-toolbar[hidden],
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-color-menu[hidden],
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-popover[hidden] {
   display: none !important;

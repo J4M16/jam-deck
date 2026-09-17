@@ -1909,7 +1909,7 @@ assert(folderControllerSource.includes("this.createFolder(selected)"), "selectio
 assert(folderControllerSource.includes("this.layoutSelectionGrid(selected)"), "selection toolbar grid action must use the shared folder geometry service");
 assert(folderControllerSource.includes("jamDeckCanvasFolderExpansionColumns"), "expanded folder layout must use the independent expansion column policy");
 const toolbarActions = [...folderControllerSource.matchAll(/ensureToolbarButton\(menu, "([^"]+)"/g)].map((match) => match[1]);
-assert.deepStrictEqual(toolbarActions, ["folder", "stack", "grid"], "Canvas toolbar must expose native section folding and node layout actions");
+assert.deepStrictEqual(toolbarActions, ["folder", "grid"], "Canvas toolbar must expose one folder action and grid layout without duplicate stacking");
 assert(folderControllerSource.includes('ensureToolbarButton(menu, "grid", "网格排列", "layout-grid"'), "Canvas grid action must use an Obsidian-supported Lucide icon");
 assert(folderControllerSource.includes('data-folder-action="${id}"'), "folder toolbar buttons must carry a stable action data attribute");
 assert(folderControllerSource.includes("selection.length > 1 && selection.some"), "multi-selection must yield to native Canvas selection drag behavior");

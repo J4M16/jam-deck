@@ -5,7 +5,7 @@
 - 每次收到 Jam 的新需求，第一条回复必须给出预计耗时范围，并简要说明采用“快速 / 标准 / 深度”哪一级验证，让 Jam 先判断是否值得继续。
 - 非大型功能、非顽固 Bug、非生命周期/持久化等高风险修改默认走快速验证：一次差异审查、项目强制测试、一次部署与必要视觉检查；没有发现异常时不得反复检查同一细节。只有测试失败、实机结果不符或风险确实较高时才升级验证级别，并及时说明新增耗时。
 - `D:\Project\JamDeck` 是唯一开发源；不要直接在 Vault 插件目录开发。
-- Obsidian 运行副本位于 `D:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
+- Obsidian 运行副本位于 `X:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
 - 修改后至少运行 `npm run verify`。
 - 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），`npm run deploy`（部署目标 = 环境变量 `JAM_DECK_TARGET_PLUGIN_DIR`，未设置则需 `npm run deploy -- -TargetPluginDir <目录>` 显式传参；脚本拒绝无目标静默执行）；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
