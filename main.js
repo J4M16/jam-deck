@@ -6548,12 +6548,10 @@ class CanvasFolderController {
       sectionButton.disabled = !!this.canvas.readonly;
       sectionButton.setAttribute("aria-label", selectedGroup ? "收起为文件夹" : "新建文件夹");
     }
-    const stackButton = this.ensureToolbarButton(menu, "stack", "堆叠编组", "layers", () => this.performToolbarAction("stack"));
     const gridButton = this.ensureToolbarButton(menu, "grid", "网格排列", "layout-grid", () => this.performToolbarAction("grid"));
-    for (const button of [stackButton, gridButton]) {
-      if (!button) continue;
-      button.hidden = !available;
-      button.disabled = !!(this.canvas && this.canvas.readonly);
+    if (gridButton) {
+      gridButton.hidden = !available;
+      gridButton.disabled = !!(this.canvas && this.canvas.readonly);
     }
   }
 

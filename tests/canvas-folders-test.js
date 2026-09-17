@@ -265,7 +265,8 @@ for (const blocked of [false, true]) {
   f.canvas.undo(); assert.deepStrictEqual(f.canvas.getData(), before);
   f.canvas.selection = new Set([f.node("section")]); sync();
   assert.strictEqual(buttons.get("folder")["aria-label"], "收起为文件夹");
-  assert.strictEqual(buttons.get("stack").hidden, true);
+  assert.strictEqual(buttons.has("stack"), false);
+  assert.strictEqual(buttons.get("grid").hidden, true);
   buttons.get("folder").click(); assert.strictEqual(groupOf(f).nativeGroupId, "section");
   f.canvas.undo();
   f.canvas.selection = new Set([f.node("a")]); sync();
