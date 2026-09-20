@@ -4069,6 +4069,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-canvas-embed:not(.is-editing, .is-collision):focus-within { border-color: var(--jd-line); }
 /* A sibling material layer lets native toolbar glass sample the wallpaper instead
    of hitting an ancestor backdrop root (which paints SVG refraction opaque). */
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-canvas-glass-material {
@@ -4195,7 +4196,9 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
 
 /* Only the embedded Canvas background becomes clear; native nodes keep their surfaces. */
 .jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-canvas-embed-body, .jam-deck-canvas-embed-host) { background: transparent; }
-.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) { background: transparent; }
+/* Native content keeps the foreground paired with its own theme surface.
+   Glass navigation below opts into wallpaper colors separately. */
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) { background: transparent; color: var(--text-normal); }
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) > .workspace-leaf-content,
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .view-content,
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-wrapper,
