@@ -1632,6 +1632,19 @@ function jamDeckAppearanceSettings(settings) {
   };
 }
 
+function jamDeckWallpaperLuminance(pixels, dim = 0) {
+  const shade = 1 - Math.max(0, Math.min(70, dim)) / 100;
+  const linear = value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  if (!pixels?.length) return linear(0.74 * shade);
+  let total = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const alpha = pixels[i + 3] / 255;
+    const channel = offset => linear((pixels[i + offset] / 255 * alpha + 0.74 * (1 - alpha)) * shade);
+    total += 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+  }
+  return total / (pixels.length / 4);
+}
+
 class JamDeckAppearance {
   constructor(view) {
     this.view = view;
@@ -1709,7 +1722,60 @@ class JamDeckAppearance {
       }
     }
     this.syncPlayback();
+    this.updateTone();
     this.scheduleGlass();
+  }
+
+  updateTone() {
+    if (this.disposed) return;
+    if (this.plugin.settings.skin !== "glass") { delete this.root.dataset.jamDeckGlassTone; return; }
+    if (this.source && !this.media?.hidden && !this.wallpaperPixels) { this.root.dataset.jamDeckGlassTone = "dark"; return; }
+    const luminance = jamDeckWallpaperLuminance(this.wallpaperPixels, this.plugin.settings.glassBackgroundDim);
+    // A dead band avoids flickering labels during slow fades and video noise.
+    const previous = this.root.dataset.jamDeckGlassTone || "dark";
+    this.root.dataset.jamDeckGlassTone = luminance < 0.24 ? "dark" : luminance > 0.32 ? "light" : previous;
+  }
+
+  sampleWallpaper(media) {
+    if (this.disposed || this.media !== media || this.toneReadFailed) return;
+    if (media.tagName === "VIDEO" ? media.readyState < 2 : !media.naturalWidth) return;
+    try {
+      if (!this.toneCanvas) {
+        this.toneCanvas = this.doc.createElement("canvas");
+        this.toneCanvas.width = 32; this.toneCanvas.height = 18;
+        // Read only once per second. Keep GPU downscaling before the tiny readback;
+        // a CPU-backed canvas would first transfer the full-resolution video frame.
+        this.toneContext = this.toneCanvas.getContext("2d", { willReadFrequently: false });
+      }
+      this.toneContext.clearRect(0, 0, 32, 18);
+      this.toneContext.drawImage(media, 0, 0, 32, 18);
+      this.wallpaperPixels = this.toneContext.getImageData(0, 0, 32, 18).data;
+      this.updateTone();
+    } catch (error) {
+      this.toneReadFailed = true;
+      this.stopToneSampling();
+      console.warn("Jam Deck: wallpaper brightness could not be read", error);
+    }
+  }
+
+  stopToneSampling() {
+    this.toneGeneration = (this.toneGeneration || 0) + 1;
+    this.win.clearTimeout(this.toneTimer); this.toneTimer = 0;
+  }
+
+  scheduleToneSampling() {
+    const video = this.media;
+    if (this.disposed || this.toneTimer || this.toneReadFailed || !video || video.tagName !== "VIDEO"
+      || video.paused || !this.visible || this.doc.hidden || this.plugin.islandMode?.active) return;
+    // Read the current decoded frame once per second, never on every video frame.
+    const generation = this.toneGeneration;
+    this.toneTimer = this.win.setTimeout(() => {
+      if (generation !== this.toneGeneration) return;
+      this.toneTimer = 0;
+      if (this.disposed || this.media !== video || video.paused || !this.visible || this.doc.hidden) return;
+      this.sampleWallpaper(video);
+      this.scheduleToneSampling();
+    }, 1000);
   }
 
   loadMedia(path) {
@@ -1721,11 +1787,20 @@ class JamDeckAppearance {
       media.muted = true; media.defaultMuted = true; media.loop = true;
       media.playsInline = true; media.preload = "metadata";
       media.disablePictureInPicture = true;
-      media.addEventListener("loadeddata", () => this.syncPlayback());
-    } else { media.alt = ""; media.decoding = "async"; }
+      media.addEventListener("loadeddata", () => {
+        if (this.disposed || this.media !== media) return;
+        this.sampleWallpaper(media); this.syncPlayback();
+      });
+      media.addEventListener("pause", () => { if (this.media === media) this.stopToneSampling(); });
+    } else {
+      media.alt = ""; media.decoding = "async";
+      media.addEventListener("load", () => this.sampleWallpaper(media), { once: true });
+    }
     media.addEventListener("error", () => {
       if (this.disposed || this.media !== media) return;
       media.hidden = true;
+      this.stopToneSampling(); this.toneReadFailed = true;
+      this.wallpaperPixels = null; this.updateTone();
       new Notice("Jam Deck：背景文件无法读取或格式不受支持，请在设置中重新选择");
     }, { once: true });
     media.src = this.plugin.app.vault.adapter.getResourcePath(path);
@@ -1739,13 +1814,18 @@ class JamDeckAppearance {
     const shouldPlay = !this.disposed && this.visible && !this.doc.hidden && this.root.isConnected
       && this.root.getClientRects().length > 0 && !this.plugin.islandMode?.active && settings.skin === "glass" && settings.glassVideoPlaying
       && settings.animationsEnabled !== false && !this.motion.matches;
-    if (!shouldPlay) { video.pause(); return; }
-    if (video.paused) void video.play().catch(() => {
-      if (this.media === video && !this.disposed) this.root.dataset.jamDeckVideoState = "paused";
+    if (!shouldPlay) { this.stopToneSampling(); video.pause(); return; }
+    if (video.paused) void video.play().then(() => {
+      if (this.media === video && !this.disposed) this.scheduleToneSampling();
+    }).catch(() => {
+      if (this.media === video && !this.disposed) { this.stopToneSampling(); this.root.dataset.jamDeckVideoState = "paused"; }
     });
+    else this.scheduleToneSampling();
   }
 
   releaseMedia() {
+    this.stopToneSampling();
+    this.wallpaperPixels = null; this.toneReadFailed = false;
     if (this.media) {
       if (this.media.tagName === "VIDEO") this.media.pause();
       this.media.removeAttribute("src");
@@ -1806,8 +1886,10 @@ class JamDeckAppearance {
     this.doc.removeEventListener("visibilitychange", this.onVisibility);
     this.motion.removeEventListener("change", this.onVisibility);
     this.releaseMedia(); this.clearGlass();
+    this.toneCanvas = null; this.toneContext = null;
     for (const material of this.root.querySelectorAll(".jam-deck-canvas-glass-material")) material.remove();
     delete this.root.dataset.jamDeckSkin; delete this.root.dataset.jamDeckGlassQuality;
+    delete this.root.dataset.jamDeckGlassTone;
     this.root.style.removeProperty("--jd-background-dim");
     this.root.style.removeProperty("--jd-glass-blur");
     this.root.style.removeProperty("--jd-glass-canvas-blur");
@@ -14542,11 +14624,13 @@ class JamDeckView extends ItemView {
       });
       const taskMain = row.createEl("button", {
         cls: "jam-deck-task-main",
-        attr: { type: "button",  "aria-label": `打开待办详情：${task.text}` },
+        attr: { type: "button", "aria-haspopup": "dialog" },
       });
       const category = this.plugin.resolveTaskCategory(task);
       taskMain.createSpan({ text: category === "work" ? "工作" : "生活", cls: `jam-deck-task-category is-${category}` });
-      taskMain.createSpan({ text: task.text, cls: "jam-deck-task-title" });
+      const taskTitle = taskMain.createSpan({ text: task.text, cls: "jam-deck-task-title", attr: { id: `jam-deck-task-${crypto.randomUUID()}` } });
+      // Name the action from visible text without Obsidian's automatic aria-label tooltip.
+      taskMain.setAttribute("aria-labelledby", taskTitle.id);
       if (task.dueDate) {
         const overdue = task.status === "active" && task.dueDate < this.plugin.formatLocalDate(new Date());
         taskMain.createSpan({ text: task.dueDate.slice(5), cls: `jam-deck-task-due${overdue ? " is-overdue" : ""}` });
@@ -20806,6 +20890,7 @@ class JamDeckSettingTab extends PluginSettingTab {
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
 JamDeckPlugin.Appearance = JamDeckAppearance;
 JamDeckPlugin.appearanceSettings = jamDeckAppearanceSettings;
+JamDeckPlugin.wallpaperLuminance = jamDeckWallpaperLuminance;
 JamDeckPlugin.backgroundKind = jamDeckBackgroundKind;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;

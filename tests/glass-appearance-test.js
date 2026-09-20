@@ -24,7 +24,7 @@ class Element extends Target {
     this.style = { setProperty: (k,v) => this.vars.set(k,v), removeProperty: k => this.vars.delete(k) };
     const classes = new Set(); this.classList = { add: n => classes.add(n), remove: (...ns) => ns.forEach(n=>classes.delete(n)),
       contains:n=>classes.has(n), toggle:(n,on)=>on?classes.add(n):classes.delete(n) };
-    this.isConnected = true; this.offsetWidth = 100; this.offsetHeight = 60; this.paused = true;
+    this.isConnected = true; this.offsetWidth = 100; this.offsetHeight = 60; this.paused = true; this.readyState = 0;
   }
   setAttribute() {}
   removeAttribute(name) { delete this[name]; }
@@ -41,16 +41,21 @@ class Element extends Target {
   }
 }
 function environment() {
-  const timers = new Map(), observers = []; let sequence = 0, engines = [];
+  const timers = new Map(), delays = new Map(), observers = []; let sequence = 0, engines = [];
   class Observer {
     constructor(fn) { this.fn = fn; this.targets = []; observers.push(this); }
     observe(el) { this.targets.push(el); }
     disconnect() { this.disconnected = true; }
   }
-  const doc = new Target(); doc.createElement = tag => new Element(tag); doc.hidden = false;
+  const doc = new Target(); doc.hidden = false; doc.pixels = new Uint8ClampedArray([0,0,0,255]); doc.samples = 0;
+  doc.createElement = tag => {
+    const el = new Element(tag);
+    if (tag === "canvas") el.getContext = () => ({ clearRect(){}, drawImage(){doc.samples++;}, getImageData:()=>({data:doc.pixels}) });
+    return el;
+  };
   const motion = new Target(); motion.matches = false;
   const win = { matchMedia: () => motion, IntersectionObserver: Observer, ResizeObserver: Observer, MutationObserver: Observer,
-    setTimeout: fn => { const id = ++sequence; timers.set(id,fn); return id; }, clearTimeout: id => timers.delete(id) };
+    setTimeout: (fn,delay) => { const id = ++sequence; timers.set(id,fn); delays.set(id,delay); return id; }, clearTimeout: id => timers.delete(id) };
   doc.defaultView = win;
   const root = new Element(); root.ownerDocument = doc;
   root.surfaces = Array.from({length: 8}, () => new Element());
@@ -58,7 +63,7 @@ function environment() {
   const source = fs.readFileSync(path.join(__dirname,"../main.js"),"utf8");
   const code = source.slice(source.indexOf("class JamDeckAppearance {"), source.indexOf("const DEFAULT_SETTINGS = {"));
   const Controller = vm.runInNewContext(`${code}\nJamDeckAppearance`, {
-    jamDeckBackgroundKind: Plugin.backgroundKind, Notice: class {},
+    jamDeckBackgroundKind: Plugin.backgroundKind, jamDeckWallpaperLuminance: Plugin.wallpaperLuminance, Notice: class {},
     jamDeckCreateGlassEngine: () => {
       const engine = { attached:new Set(), retunes:[], attach(el){this.attached.add(el);}, detach(el){this.attached.delete(el);},
         setOpts(opts){this.retunes.push(opts);return Promise.resolve();}, dispose(){this.disposed=true;this.attached.clear();} };
@@ -68,7 +73,7 @@ function environment() {
   const view = { contentEl: root, plugin, aiChat: root.surfaces[2] };
   const appearance = new Controller(view);
   const flush = () => { for (const [id,fn] of Array.from(timers)) { timers.delete(id); fn(); } };
-  return { appearance, root, plugin, doc, motion, timers, observers, engines, flush };
+  return { appearance, root, plugin, doc, motion, timers, delays, observers, engines, flush };
 }
 
 (async () => {
@@ -189,6 +194,42 @@ function environment() {
   assert.equal(budget.engines[0].attached.size,2,"pixel budget limits many large surfaces");
   budget.plugin.settings.glassQuality="light"; budget.appearance.update(); budget.flush();
   assert(budget.engines[0].disposed); budget.appearance.destroy();
+
+  assert.equal(Plugin.wallpaperLuminance([0,0,0,255]),0);
+  assert(Math.abs(Plugin.wallpaperLuminance([255,255,255,255])-1)<0.0001);
+  assert(Plugin.wallpaperLuminance([255,255,255,255],70)<0.1,"dimming applies before sRGB luminance conversion");
+  assert(Plugin.wallpaperLuminance([0,0,0,0])>0.32,"transparent image samples retain the gradient underneath");
+  const tone=environment(); tone.plugin.settings.skin="glass"; tone.plugin.settings.glassBackground="attachments/tone.png";
+  tone.appearance.update(); const toneImage=tone.appearance.media; toneImage.naturalWidth=100;
+  toneImage.events.get("load")(); assert.equal(tone.root.dataset.jamDeckGlassTone,"dark");
+  tone.plugin.settings.glassBackgroundDim=0; tone.doc.pixels=new Uint8ClampedArray([146,146,146,255]);
+  tone.appearance.sampleWallpaper(toneImage); assert.equal(tone.root.dataset.jamDeckGlassTone,"dark","dead band retains light text");
+  tone.doc.pixels=new Uint8ClampedArray([255,255,255,255]); tone.appearance.sampleWallpaper(toneImage);
+  assert.equal(tone.root.dataset.jamDeckGlassTone,"light");
+  tone.doc.pixels=new Uint8ClampedArray([146,146,146,255]); tone.appearance.sampleWallpaper(toneImage);
+  assert.equal(tone.root.dataset.jamDeckGlassTone,"light","dead band retains dark text");
+  const samplesBeforeDim=tone.doc.samples;
+  tone.plugin.settings.glassBackgroundDim=70; tone.appearance.update();
+  assert.equal(tone.root.dataset.jamDeckGlassTone,"dark"); assert.equal(tone.appearance.media,toneImage);
+  assert.equal(tone.doc.samples,samplesBeforeDim,"dimming reuses tiny cached pixels without a new GPU read");
+  tone.plugin.settings.glassBackground="attachments/tone.mp4"; tone.plugin.settings.glassVideoPlaying=false;
+  tone.appearance.update(); const toneVideo=tone.appearance.media; toneVideo.readyState=2;
+  toneVideo.events.get("loadeddata")(); assert(tone.doc.samples>samplesBeforeDim,"paused video's first frame is sampled");
+  const firstVideoSamples=tone.doc.samples;
+  toneImage.events.get("load")(); assert.equal(tone.doc.samples,firstVideoSamples,"late image load cannot recolor a replacement");
+  tone.appearance.visible=true; tone.plugin.settings.glassVideoPlaying=true; tone.appearance.syncPlayback(); await Promise.resolve();
+  const timerId=tone.appearance.toneTimer, staleSample=tone.timers.get(timerId);
+  assert.equal(tone.delays.get(timerId),1000,"video sampling is bounded to once per second");
+  tone.appearance.syncPlayback(); tone.appearance.update(); assert.equal(tone.appearance.toneTimer,timerId,"repeated updates share one sampling chain");
+  tone.doc.hidden=true; tone.appearance.syncPlayback(); assert(!tone.timers.has(timerId));
+  tone.doc.hidden=false; tone.appearance.syncPlayback(); await Promise.resolve();
+  const currentTimer=tone.appearance.toneTimer; staleSample();
+  assert.equal(tone.appearance.toneTimer,currentTimer,"cancelled callback cannot disturb a new chain");
+  tone.motion.matches=true; tone.appearance.syncPlayback(); assert.equal(tone.appearance.toneTimer,0);
+  tone.plugin.settings.glassBackgroundDim=0; toneVideo.events.get("error")();
+  assert(toneVideo.hidden); assert.equal(tone.appearance.wallpaperPixels,null);
+  assert.equal(tone.root.dataset.jamDeckGlassTone,"light","failed media uses the visible default gradient brightness");
+  tone.appearance.destroy(); assert.equal(tone.timers.size,0); assert.equal(tone.root.dataset.jamDeckGlassTone,undefined);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),"jamdeck-background-"));
   try {
