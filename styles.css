@@ -3959,3 +3959,158 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
 .jam-deck-settings .setting-item-heading .setting-item-name {
   color: #5c5c5c;
 }
+
+/* Liquid Glass: one wallpaper, bounded optical surfaces, no animation loop. */
+.jam-deck-root[data-jam-deck-skin="glass"] {
+  isolation: isolate;
+  background: #adbfc4;
+  --jd-ink: #202c35;
+  --jd-muted: #52616b;
+  --jd-faint: #6a7880;
+  --jd-line: rgb(255 255 255 / 0.38);
+  --jd-surface: rgb(245 250 253 / 0.35);
+  --jd-surface-raised: rgb(255 255 255 / 0.48);
+  --jd-paper: rgb(249 252 253 / 0.65);
+  --jd-hover: rgb(255 255 255 / 0.3);
+  --jd-glass-tint: rgb(246 251 255 / 0.32);
+  --jd-glass-control: rgb(255 255 255 / 0.3);
+  --jd-glass-highlight: rgb(255 255 255 / 0.64);
+  --jd-glass-heading: #46535d;
+  --jd-glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), inset 0 -1px 0 rgb(255 255 255 / 0.18), 0 8px 24px rgb(31 53 66 / 0.10), 0 1px 3px rgb(31 53 66 / 0.12);
+  color: var(--jd-ink);
+}
+.theme-dark .jam-deck-root[data-jam-deck-skin="glass"] {
+  --jd-ink: #f1f5f7;
+  --jd-muted: #c5d1d8;
+  --jd-faint: #aabcc6;
+  --jd-line: rgb(255 255 255 / 0.22);
+  --jd-surface: rgb(23 37 47 / 0.5);
+  --jd-surface-raised: rgb(36 52 65 / 0.64);
+  --jd-paper: rgb(26 41 52 / 0.82);
+  --jd-hover: rgb(255 255 255 / 0.12);
+  --jd-glass-tint: rgb(18 31 41 / 0.48);
+  --jd-glass-control: rgb(236 246 255 / 0.10);
+  --jd-glass-highlight: rgb(255 255 255 / 0.28);
+  --jd-glass-heading: #d7e1e7;
+  --jd-glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32), inset 0 -1px 0 rgb(255 255 255 / 0.07), 0 8px 26px rgb(4 15 25 / 0.22), 0 1px 3px rgb(4 15 25 / 0.20);
+}
+.jam-deck-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 12% 10%, #d6e9e5 0%, transparent 48%),
+    radial-gradient(ellipse at 84% 12%, #a8c0db 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 88%, #cebcb8 0%, transparent 52%),
+    linear-gradient(145deg, #b3c6cd, #7c9db3 50%, #d0cec4);
+}
+.jam-deck-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / var(--jd-background-dim, 0.12));
+}
+.jam-deck-background-media { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.jam-deck-background-media[hidden] { display: none; }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-widget, .jam-deck-toolbar, .jam-deck-ai-chat, .jam-deck-ai-fab) {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.13), transparent 38%, rgb(255 255 255 / 0.04)), var(--jd-glass-tint);
+  border: 1px solid var(--jd-line);
+  border-radius: 18px;
+  box-shadow: var(--jd-glass-shadow);
+  backdrop-filter: blur(8px) saturate(125%);
+  -webkit-backdrop-filter: blur(8px) saturate(125%);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-ai-fab { border-radius: 50%; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-glass-refract {
+  backdrop-filter: var(--hyalite, blur(8px));
+  -webkit-backdrop-filter: var(--hyalite, blur(8px));
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-canvas-embed {
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  background: var(--jd-glass-tint);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget-header { border-bottom-color: rgb(255 255 255 / 0.13); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-editing { border-style: dashed; border-color: var(--jd-accent); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-collision { border-color: var(--jd-danger); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-moving { box-shadow: var(--jd-shadow-lift); }
+
+/* Nested controls share their parent's sampled backdrop; no per-button SVG or blur. */
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
+  .jam-deck-task-composer button, .jam-deck-ai-provider-btn, .jam-deck-ai-quick-btn, .jam-deck-ai-send,
+  .jam-deck-ai-chat-close, .jam-deck-ai-archive, .jam-deck-ai-clear, .jam-deck-calendar-toolbar button,
+  .jam-deck-music-control, .jam-deck-music-source-button, .jam-deck-clip-btn,
+  .jam-deck-task-archive, .jam-deck-task-delete, .jam-deck-launcher-edit, .jam-deck-canvas-item,
+  .jam-deck-canvas-embed-state-actions button, .jam-deck-caption-action, .jam-deck-caption-icon-button) {
+  color: var(--jd-ink);
+  background: linear-gradient(155deg, rgb(255 255 255 / 0.12), transparent 65%), var(--jd-glass-control);
+  border: 1px solid var(--jd-line);
+  box-shadow: inset 0 1px 0 var(--jd-glass-highlight), 0 1px 3px rgb(20 35 50 / 0.06);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
+  .jam-deck-task-composer button, .jam-deck-ai-provider-btn, .jam-deck-ai-quick-btn, .jam-deck-ai-send):hover:not(:disabled) {
+  background: var(--jd-surface-raised);
+  border-color: var(--jd-glass-highlight);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action.is-active, .jam-deck-ai-tab.is-active) {
+  color: var(--jd-ink);
+  background: var(--jd-glass-control);
+  border-color: var(--jd-accent);
+  box-shadow: inset 0 -2px 0 var(--jd-accent), inset 0 1px 0 var(--jd-glass-highlight);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
+  .jam-deck-task-composer button, .jam-deck-ai-send):focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-composer input, .jam-deck-ai-row) {
+  background: var(--jd-glass-control);
+  border-color: var(--jd-line);
+  color: var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-title-main, .jam-deck-widget-title, .jam-deck-widget-icon,
+  .jam-deck-ai-chat-title, .jam-deck-ai-empty-title, .jam-deck-calendar-month, .jam-deck-music-title,
+  .jam-deck-task-title, .jam-deck-launcher-name, .jam-deck-canvas-embed-state-title) { color: var(--jd-glass-heading); }
+
+/* Only the embedded Canvas background becomes clear; native nodes keep their surfaces. */
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-canvas-embed-body, .jam-deck-canvas-embed-host) { background: transparent; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) { background: transparent; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) > .workspace-leaf-content,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .view-content,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-wrapper,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .view-header { background-color: transparent; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) :is(.canvas-card-menu.jam-deck-node-toolbar--spatial, .jam-deck-drawing-palette, .canvas-controls) {
+  background: var(--jd-glass-tint);
+  border-color: var(--jd-line);
+  box-shadow: var(--jd-glass-shadow);
+  backdrop-filter: blur(8px);
+}
+.jam-deck-root[data-jam-deck-skin="glass"][data-jam-deck-glass-quality="light"] :is(.jam-deck-widget, .jam-deck-toolbar, .jam-deck-ai-chat, .jam-deck-ai-fab) {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-group {
+  background: var(--jd-glass-tint);
+  border-color: var(--jd-line);
+  box-shadow: inset 0 1px 0 var(--jd-glass-highlight);
+}
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-item { background: transparent; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background { opacity: 0.28; }
+body[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
+  background: rgb(246 250 253 / 0.86);
+  border: 1px solid rgb(255 255 255 / 0.62);
+  border-radius: 22px;
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 20px 64px rgb(20 40 60 / 0.18);
+}
+body.theme-dark[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
+  background: rgb(28 40 51 / 0.90);
+  border-color: rgb(255 255 255 / 0.22);
+}
+body[data-jam-deck-skin="glass"] :is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal) button {
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.36);
+}

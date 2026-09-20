@@ -415,7 +415,9 @@ assert(styleSource.includes(".jam-deck-music-player:hover .jam-deck-music-contro
 assert(pluginSource.includes("jam-deck-music-transport-stage") && styleSource.includes(".jam-deck-music-transport-stage"), "transport controls and timeline must share one overlay stage");
 assert(styleSource.includes("color-mix(in srgb, var(--jd-surface) 94%, transparent)") && styleSource.includes("justify-self: start") && styleSource.includes("text-align: left"), "hover transport must veil the timeline and metadata must follow the screenshot's left-aligned beside-disc layout");
 assert(styleSource.includes("@container (max-width: 270px)"), "the music widget must adapt to narrow dashboard columns");
-assert(!pluginSource.includes("prefers-reduced-motion"), "JS must not consult the OS reduced-motion media query");
+const existingAnimationSource = pluginSource.slice(0, pluginSource.indexOf("function jamDeckCreateGlassEngine("))
+  + pluginSource.slice(pluginSource.indexOf("const DEFAULT_SETTINGS = {"));
+assert(!existingAnimationSource.includes("prefers-reduced-motion"), "existing animations keep the app preference; only the new wallpaper/optics module may consult reduced motion");
 assert(!pluginSource.includes("GameDeck") && !styleSource.includes(".game-deck-"), "Game Deck now ships as its own plugin; Jam Deck must stay 2D only");
 assert(pluginSource.includes("function jamDeckCollectFillSlots"), "dashboard insert must collect fillable gaps");
 assert(pluginSource.includes("function jamDeckPickFillSlot"), "dashboard insert must pick the hovered gap slot");
@@ -602,6 +604,8 @@ function makeIslandLifecycleHarness() {
     openDeck: async () => {},
     formatTime: () => "",
     imageMimeFromName: () => "image/png",
+    appearanceCalls: 0,
+    applyAppearance() { this.appearanceCalls += 1; },
   };
   const controller = new JamDeckPlugin.IslandModeController(plugin);
   const children = [];
@@ -641,6 +645,7 @@ async function testIslandLifecycle() {
     assert.strictEqual(harness.children.length, 1, "double-click must create only one island BrowserWindow");
     releaseLoad();
     assert.strictEqual(await first, true, "first island enter should complete after its child is ready");
+    assert.strictEqual(harness.plugin.appearanceCalls, 1, "entering island mode must explicitly suspend wallpaper even when Electron visibility stays visible");
     assert.strictEqual(harness.mainWindow.hideCalls, 1, "workbench must hide only after island load succeeds");
     assert.deepStrictEqual(harness.mainWindow.webContents.throttleCalls, [false], "hidden workbench renderer must disable throttling");
     harness.controller.exit();
