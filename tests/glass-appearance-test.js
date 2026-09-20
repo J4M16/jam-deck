@@ -22,7 +22,8 @@ class Element extends Target {
   constructor(tag = "div") {
     super(); this.tagName = tag.toUpperCase(); this.dataset = {}; this.vars = new Map(); this.children = [];
     this.style = { setProperty: (k,v) => this.vars.set(k,v), removeProperty: k => this.vars.delete(k) };
-    const classes = new Set(); this.classList = { add: n => classes.add(n), remove: n => classes.delete(n) };
+    const classes = new Set(); this.classList = { add: n => classes.add(n), remove: (...ns) => ns.forEach(n=>classes.delete(n)),
+      contains:n=>classes.has(n), toggle:(n,on)=>on?classes.add(n):classes.delete(n) };
     this.isConnected = true; this.offsetWidth = 100; this.offsetHeight = 60; this.paused = true;
   }
   setAttribute() {}
@@ -34,7 +35,10 @@ class Element extends Target {
   play() { this.paused = false; this.plays = (this.plays || 0) + 1; return Promise.resolve(); }
   pause() { this.paused = true; }
   getClientRects() { return this.offsetWidth ? [{}] : []; }
-  querySelectorAll() { return this.surfaces || []; }
+  querySelectorAll(selector) {
+    if (selector === ".jam-deck-widget.is-canvas-embed" || selector === ".jam-deck-canvas-glass-material") return [];
+    return selector.includes(".canvas-card-menu.") ? (this.surfaces || []).slice(0,2) : (this.surfaces || []).slice(2);
+  }
 }
 function environment() {
   const timers = new Map(), observers = []; let sequence = 0, engines = [];
@@ -56,7 +60,8 @@ function environment() {
   const Controller = vm.runInNewContext(`${code}\nJamDeckAppearance`, {
     jamDeckBackgroundKind: Plugin.backgroundKind, Notice: class {},
     jamDeckCreateGlassEngine: () => {
-      const engine = { attached:new Set(), attach(el){this.attached.add(el);}, detach(el){this.attached.delete(el);}, dispose(){this.disposed=true;this.attached.clear();} };
+      const engine = { attached:new Set(), retunes:[], attach(el){this.attached.add(el);}, detach(el){this.attached.delete(el);},
+        setOpts(opts){this.retunes.push(opts);return Promise.resolve();}, dispose(){this.disposed=true;this.attached.clear();} };
       engines.push(engine); return engine;
     }
   });
@@ -109,6 +114,34 @@ function environment() {
   }
   assert.equal(Plugin.appearanceSettings({glassBackground:"attachments\\背景.mp4"}).glassBackground,"attachments/背景.mp4");
   assert.equal(Plugin.appearanceSettings({glassBackgroundDim:90}).glassBackgroundDim,70);
+  assert.equal(Plugin.appearanceSettings({}).glassBlur,4);
+  assert.equal(Plugin.appearanceSettings({glassBlur:99}).glassBlur,16);
+  assert.equal(Plugin.appearanceSettings({glassBlur:-1}).glassBlur,0);
+  assert.equal(Plugin.appearanceSettings({glassBlur:"bad"}).glassBlur,4);
+
+  // Chrome toggles only affect the active deck document, including its embedded native Canvas.
+  const chrome = Object.create(Plugin.prototype);
+  const docA={body:new Element()}, docB={body:new Element()}, tabsA=new Element(), tabsB=new Element();
+  const embedded={containerEl:new Element()}, note={containerEl:new Element()};
+  const deckA={containerEl:{closest:()=>tabsA},view:{contentEl:{ownerDocument:docA,contains:el=>el===embedded.containerEl}}};
+  const deckB={containerEl:{closest:()=>tabsB},view:{contentEl:{ownerDocument:docB,contains:()=>false}}};
+  chrome.settings={...Plugin.appearanceSettings({}),hideObsidianSidebar:true,hideObsidianTopbar:true};
+  chrome.app={workspace:{activeLeaf:deckA,getLeavesOfType:()=>[deckA,deckB]}};
+  chrome.applyAppearance();
+  assert(docA.body.classList.contains("jam-deck-hide-sidebar") && tabsA.classList.contains("jam-deck-hide-tabbar"));
+  assert(!docB.body.classList.contains("jam-deck-hide-topbar"));
+  chrome.app.workspace.activeLeaf=embedded; chrome.applyAppearance();
+  assert(docA.body.classList.contains("jam-deck-hide-topbar"),"embedded Canvas retains chrome preference");
+  chrome.settings.hideObsidianSidebar=false; chrome.settings.skin="glass"; chrome.applyAppearance();
+  assert(!docA.body.classList.contains("jam-deck-hide-sidebar") && tabsA.classList.contains("jam-deck-hide-tabbar"),"independent toggles shared by both skins");
+  chrome.app.workspace.activeLeaf=note; chrome.applyAppearance();
+  assert(!docA.body.classList.contains("jam-deck-hide-topbar") && !tabsA.classList.contains("jam-deck-hide-tabbar"),"other notes restore native chrome");
+  chrome.app.workspace.activeLeaf=deckB; chrome.applyAppearance();
+  assert(docB.body.classList.contains("jam-deck-hide-topbar"));
+  chrome.islandMode={active:true}; chrome.applyAppearance();
+  assert(!tabsB.classList.contains("jam-deck-hide-tabbar"),"island owns its native window chrome");
+  chrome.islandMode.active=false; chrome.applyAppearance(); chrome.clearAppearance();
+  assert(!docB.body.classList.contains("jam-deck-hide-topbar") && !tabsB.classList.contains("jam-deck-hide-tabbar"),"unload restores every document and tab group");
 
   const e = environment(); e.appearance.update(); e.flush();
   assert.equal(e.root.children.length,0,"paper skin has no media layer or glass engine");
@@ -122,6 +155,15 @@ function environment() {
   e.plugin.settings.glassBackgroundDim=30; e.appearance.update(); e.flush();
   assert.equal(e.appearance.media,video,"dimming does not recreate the video");
   assert.equal(e.root.surfaces[0],contentIdentity);
+  const opticalEngine=e.engines[0];
+  for (const blur of [0,16,8]) e.appearance.setBlur(blur);
+  assert.equal(e.engines.length,1,"blur preview reuses the existing engine and optical surfaces");
+  assert.deepEqual(opticalEngine.retunes.map(o=>o.blur),[0,16,8]);
+  assert.equal(e.root.vars.get("--jd-glass-blur"),"8px");
+  assert.equal(e.root.vars.get("--jd-glass-canvas-blur"),"4px");
+  assert.equal(e.appearance.media,video,"blur preview does not recreate the background decoder");
+  e.plugin.settings.glassBlur=8; e.appearance.update(); e.flush();
+  assert.equal(opticalEngine.retunes.length,3,"persisting a preview must not duplicate the optical work");
   e.doc.hidden=true; e.doc.events.get("visibilitychange")(); e.flush(); assert(video.paused); assert(e.engines[0].disposed);
   e.doc.hidden=false; e.doc.events.get("visibilitychange")(); e.flush(); assert(!video.paused);
   e.motion.matches=true; e.motion.events.get("change")(); assert(video.paused);

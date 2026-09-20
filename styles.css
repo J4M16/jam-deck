@@ -3960,6 +3960,34 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
   color: #5c5c5c;
 }
 
+/* Optional workspace chrome, shared by both skins. Native split state stays intact. */
+.jam-deck-root .jam-deck-chrome-restore { display: none; }
+body.jam-deck-hide-sidebar { --ribbon-width: 0px; }
+body.jam-deck-hide-sidebar .workspace > .workspace-ribbon,
+body.jam-deck-hide-sidebar .workspace > .workspace-split:is(.mod-left-split, .mod-right-split),
+.workspace-tabs.jam-deck-hide-tabbar > .workspace-tab-header-container,
+.workspace-tabs.jam-deck-hide-tabbar [data-type="jam-deck-view"] > .view-header { display: none; }
+body.jam-deck-hide-topbar .titlebar { display: none; }
+body.jam-deck-hide-topbar .jam-deck-root > .jam-deck-toolbar {
+  -webkit-app-region: drag;
+}
+body.jam-deck-hide-topbar .jam-deck-root > .jam-deck-toolbar button { -webkit-app-region: no-drag; }
+body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-chrome-restore {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 0 8px;
+  padding: 3px 7px;
+  min-height: 24px;
+  color: var(--jd-muted);
+  font-size: var(--jd-font-caption, 11px);
+  background: var(--jd-hover);
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+.jam-deck-root .jam-deck-chrome-restore:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
+.jam-deck-settings .jam-deck-blur-value { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
 /* Liquid Glass: one wallpaper, bounded optical surfaces, no animation loop. */
 .jam-deck-root[data-jam-deck-skin="glass"] {
   isolation: isolate;
@@ -3967,32 +3995,32 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
   --jd-ink: #202c35;
   --jd-muted: #52616b;
   --jd-faint: #6a7880;
-  --jd-line: rgb(255 255 255 / 0.38);
+  --jd-line: rgb(255 255 255 / 0.12);
   --jd-surface: rgb(245 250 253 / 0.35);
   --jd-surface-raised: rgb(255 255 255 / 0.48);
   --jd-paper: rgb(249 252 253 / 0.65);
   --jd-hover: rgb(255 255 255 / 0.3);
   --jd-glass-tint: rgb(246 251 255 / 0.32);
   --jd-glass-control: rgb(255 255 255 / 0.3);
-  --jd-glass-highlight: rgb(255 255 255 / 0.64);
+  --jd-glass-highlight: rgb(255 255 255 / 0.18);
   --jd-glass-heading: #46535d;
-  --jd-glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), inset 0 -1px 0 rgb(255 255 255 / 0.18), 0 8px 24px rgb(31 53 66 / 0.10), 0 1px 3px rgb(31 53 66 / 0.12);
+  --jd-glass-shadow: inset 0 1px 1px rgb(255 255 255 / 0.16), 0 8px 24px rgb(31 53 66 / 0.10), 0 1px 3px rgb(31 53 66 / 0.12);
   color: var(--jd-ink);
 }
 .theme-dark .jam-deck-root[data-jam-deck-skin="glass"] {
   --jd-ink: #f1f5f7;
   --jd-muted: #c5d1d8;
   --jd-faint: #aabcc6;
-  --jd-line: rgb(255 255 255 / 0.22);
+  --jd-line: rgb(255 255 255 / 0.08);
   --jd-surface: rgb(23 37 47 / 0.5);
   --jd-surface-raised: rgb(36 52 65 / 0.64);
   --jd-paper: rgb(26 41 52 / 0.82);
   --jd-hover: rgb(255 255 255 / 0.12);
   --jd-glass-tint: rgb(18 31 41 / 0.48);
   --jd-glass-control: rgb(236 246 255 / 0.10);
-  --jd-glass-highlight: rgb(255 255 255 / 0.28);
+  --jd-glass-highlight: rgb(255 255 255 / 0.12);
   --jd-glass-heading: #d7e1e7;
-  --jd-glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32), inset 0 -1px 0 rgb(255 255 255 / 0.07), 0 8px 26px rgb(4 15 25 / 0.22), 0 1px 3px rgb(4 15 25 / 0.20);
+  --jd-glass-shadow: inset 0 1px 1px rgb(255 255 255 / 0.10), 0 8px 26px rgb(4 15 25 / 0.22), 0 1px 3px rgb(4 15 25 / 0.20);
 }
 .jam-deck-backdrop {
   position: absolute;
@@ -4019,17 +4047,30 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
   border: 1px solid var(--jd-line);
   border-radius: 18px;
   box-shadow: var(--jd-glass-shadow);
-  backdrop-filter: blur(8px) saturate(125%);
-  -webkit-backdrop-filter: blur(8px) saturate(125%);
+  backdrop-filter: blur(var(--jd-glass-blur, 4px)) saturate(125%);
+  -webkit-backdrop-filter: blur(var(--jd-glass-blur, 4px)) saturate(125%);
 }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-ai-fab { border-radius: 50%; }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-glass-refract {
-  backdrop-filter: var(--hyalite, blur(8px));
-  -webkit-backdrop-filter: var(--hyalite, blur(8px));
+  backdrop-filter: var(--hyalite, blur(var(--jd-glass-blur, 4px)));
+  -webkit-backdrop-filter: var(--hyalite, blur(var(--jd-glass-blur, 4px)));
 }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-canvas-embed {
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  isolation: isolate;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* A sibling material layer lets native toolbar glass sample the wallpaper instead
+   of hitting an ancestor backdrop root (which paints SVG refraction opaque). */
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-canvas-glass-material {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  backdrop-filter: blur(var(--jd-glass-canvas-blur, 2px));
+  -webkit-backdrop-filter: blur(var(--jd-glass-canvas-blur, 2px));
   background: var(--jd-glass-tint);
 }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget-header { border-bottom-color: rgb(255 255 255 / 0.13); }
@@ -4038,7 +4079,7 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-moving { box-shadow: var(--jd-shadow-lift); }
 
 /* Nested controls share their parent's sampled backdrop; no per-button SVG or blur. */
-.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-widget-action, .jam-deck-primary-button,
   .jam-deck-task-composer button, .jam-deck-ai-provider-btn, .jam-deck-ai-quick-btn, .jam-deck-ai-send,
   .jam-deck-ai-chat-close, .jam-deck-ai-archive, .jam-deck-ai-clear, .jam-deck-calendar-toolbar button,
   .jam-deck-music-control, .jam-deck-music-source-button, .jam-deck-clip-btn,
@@ -4062,6 +4103,15 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
 }
 .jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
   .jam-deck-task-composer button, .jam-deck-ai-send):focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action {
+  border-radius: 7px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action:hover { background: transparent; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action.is-active { background: transparent; color: var(--jd-ink); font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
 .jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-composer input, .jam-deck-ai-row) {
   background: var(--jd-glass-control);
   border-color: var(--jd-line);
@@ -4079,38 +4129,41 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-wrapper,
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background,
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .view-header { background-color: transparent; }
-.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) :is(.canvas-card-menu.jam-deck-node-toolbar--spatial, .jam-deck-drawing-palette, .canvas-controls) {
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) :is(.canvas-card-menu.jam-deck-node-toolbar--spatial, .jam-deck-drawing-palette) {
   background: var(--jd-glass-tint);
   border-color: var(--jd-line);
   box-shadow: var(--jd-glass-shadow);
-  backdrop-filter: blur(8px);
+  backdrop-filter: var(--hyalite, blur(var(--jd-glass-blur, 4px)));
 }
-.jam-deck-root[data-jam-deck-skin="glass"][data-jam-deck-glass-quality="light"] :is(.jam-deck-widget, .jam-deck-toolbar, .jam-deck-ai-chat, .jam-deck-ai-fab) {
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-controls {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-group {
   background: var(--jd-glass-tint);
   border-color: var(--jd-line);
   box-shadow: inset 0 1px 0 var(--jd-glass-highlight);
 }
-.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-item { background: transparent; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-item { background: transparent; border-color: var(--jd-line); }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-card-menu .canvas-card-menu-button svg { fill: none; }
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background { opacity: 0.28; }
 body[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
   .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
   background: rgb(246 250 253 / 0.86);
-  border: 1px solid rgb(255 255 255 / 0.62);
+  border: 1px solid rgb(255 255 255 / 0.14);
   border-radius: 22px;
   backdrop-filter: blur(12px);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 20px 64px rgb(20 40 60 / 0.18);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.16), 0 20px 64px rgb(20 40 60 / 0.18);
 }
 body.theme-dark[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
   .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
   background: rgb(28 40 51 / 0.90);
-  border-color: rgb(255 255 255 / 0.22);
+  border-color: rgb(255 255 255 / 0.08);
 }
 body[data-jam-deck-skin="glass"] :is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
   .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal) button {
   border-radius: 10px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.36);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.14);
 }

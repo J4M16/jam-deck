@@ -1623,6 +1623,9 @@ function jamDeckAppearanceSettings(settings) {
   return {
     skin: settings.skin === "glass" ? "glass" : "spatial",
     glassQuality: settings.glassQuality === "light" ? "light" : "balanced",
+    glassBlur: Number.isFinite(Number(settings.glassBlur)) ? Math.max(0, Math.min(16, Number(settings.glassBlur))) : 4,
+    hideObsidianSidebar: settings.hideObsidianSidebar === true,
+    hideObsidianTopbar: settings.hideObsidianTopbar === true,
     glassBackground: safePath ? path : "",
     glassBackgroundDim: Number.isFinite(Number(settings.glassBackgroundDim)) ? Math.max(0, Math.min(70, Number(settings.glassBackgroundDim))) : 12,
     glassVideoPlaying: settings.glassVideoPlaying !== false,
@@ -1657,7 +1660,22 @@ class JamDeckAppearance {
   }
 
   surfaces() {
-    return Array.from(this.root.querySelectorAll(":scope > .jam-deck-toolbar, :scope > .jam-deck-ai-fab, :scope > .jam-deck-ai-chat, :scope > .jam-deck-grid > .jam-deck-widget"));
+    // Small navigation surfaces take priority over large content panes.
+    return [
+      ...this.root.querySelectorAll(":scope > .jam-deck-toolbar, .canvas-card-menu.jam-deck-node-toolbar--spatial"),
+      ...this.root.querySelectorAll(":scope > .jam-deck-ai-fab, :scope > .jam-deck-ai-chat, :scope > .jam-deck-grid > .jam-deck-widget:not(.is-canvas-embed)"),
+    ];
+  }
+
+  setBlur(value) {
+    if (this.disposed) return;
+    const blur = Math.max(0, Math.min(16, Number(value)));
+    if (!Number.isFinite(blur) || this.blur === blur) return;
+    this.blur = blur;
+    this.root.style.setProperty("--jd-glass-blur", `${blur}px`);
+    this.root.style.setProperty("--jd-glass-canvas-blur", `${blur / 2}px`);
+    // The optical map does not depend on blur; retune in place without a new map or video.
+    if (this.engine) void this.engine.setOpts({ blur });
   }
 
   update() {
@@ -1665,6 +1683,17 @@ class JamDeckAppearance {
     const settings = this.plugin.settings;
     this.root.dataset.jamDeckSkin = settings.skin;
     this.root.dataset.jamDeckGlassQuality = settings.glassQuality;
+    this.setBlur(settings.glassBlur);
+    for (const widget of this.root.querySelectorAll(".jam-deck-widget.is-canvas-embed")) {
+      let material = widget.querySelector(":scope > .jam-deck-canvas-glass-material");
+      if (settings.skin !== "glass") { material?.remove(); continue; }
+      if (!material) {
+        material = this.doc.createElement("div");
+        material.className = "jam-deck-canvas-glass-material";
+        material.setAttribute("aria-hidden", "true"); material.inert = true;
+        widget.prepend(material);
+      }
+    }
     this.root.style.setProperty("--jd-background-dim", String(settings.glassBackgroundDim / 100));
     const signature = settings.skin === "glass" ? settings.glassBackground : null;
     if (signature !== this.source) {
@@ -1757,8 +1786,8 @@ class JamDeckAppearance {
     }
     for (const el of desired) {
       if (this.bound.has(el)) continue;
-      this.engine.attach(el, { bevel: 14, thickness: 26, slope: 1.5, blur: 4, dispersion: 0, sat: 1,
-        shade: 0.16, rim: 0.55, edge: 0.6, edgeW: 2, smooth: 0, materialize: 0, settle: 180, light: -35 });
+      this.engine.attach(el, { bevel: 18, thickness: 40, slope: 1.8, shape: "squircle", blur: this.blur, dispersion: 0, sat: 1,
+        shade: 0.14, rim: 0.22, edge: 0, edgeW: 4, smooth: 0, materialize: 0, settle: 180, light: -35 });
       el.classList.add("jam-deck-glass-refract"); this.bound.add(el);
     }
   }
@@ -1777,8 +1806,11 @@ class JamDeckAppearance {
     this.doc.removeEventListener("visibilitychange", this.onVisibility);
     this.motion.removeEventListener("change", this.onVisibility);
     this.releaseMedia(); this.clearGlass();
+    for (const material of this.root.querySelectorAll(".jam-deck-canvas-glass-material")) material.remove();
     delete this.root.dataset.jamDeckSkin; delete this.root.dataset.jamDeckGlassQuality;
     this.root.style.removeProperty("--jd-background-dim");
+    this.root.style.removeProperty("--jd-glass-blur");
+    this.root.style.removeProperty("--jd-glass-canvas-blur");
   }
 }
 
@@ -1786,6 +1818,9 @@ const DEFAULT_SETTINGS = {
   dataVersion: 4,
   skin: "spatial",
   glassQuality: "balanced",
+  glassBlur: 4,
+  hideObsidianSidebar: false,
+  hideObsidianTopbar: false,
   glassBackground: "",
   glassBackgroundDim: 12,
   glassVideoPlaying: true,
@@ -3062,6 +3097,7 @@ class CanvasInkOverlay {
     });
     menu.appendChild(button);
     this.toggleButton = button;
+    this.runtime.deckView?.appearance?.scheduleGlass();
   }
 
   makePaletteButton(parent, icon, label, handler, cls = "") {
@@ -12984,6 +13020,14 @@ class JamDeckView extends ItemView {
     const title = toolbar.createDiv({ cls: "jam-deck-title" });
     title.createSpan({ text: "Jam Deck", cls: "jam-deck-title-main" });
     title.createSpan({ text: "副屏工作台", cls: "jam-deck-title-sub" });
+    const restoreChrome = title.createEl("button", {
+      text: "恢复界面", cls: "jam-deck-chrome-restore",
+      attr: { "aria-label": "显示 Obsidian 侧栏与顶栏", title: "显示 Obsidian 侧栏与顶栏" },
+    });
+    restoreChrome.addEventListener("click", async () => {
+      await this.plugin.setAppearance("hideObsidianSidebar", false);
+      await this.plugin.setAppearance("hideObsidianTopbar", false);
+    });
 
     const actions = toolbar.createDiv({ cls: "jam-deck-actions" });
     this.makeToolbarButton(actions, "+ 添加", "添加组件", () => {
@@ -15847,9 +15891,20 @@ class JamDeckPlugin extends Plugin {
   }
 
   applyAppearance() {
+    if (this.appearanceDisposed) return;
     const documents = this.appearanceDocuments || (this.appearanceDocuments = new Set());
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    const active = this.app.workspace.activeLeaf;
+    const activeDeck = leaves.find(leaf => leaf === active || (active?.containerEl && leaf.view?.contentEl?.contains(active.containerEl)));
+    const activeDocument = !this.islandMode?.active && activeDeck?.view?.contentEl?.ownerDocument;
+    for (const tabs of this.appearanceTabs || []) tabs.classList.remove("jam-deck-hide-tabbar");
+    this.appearanceTabs = new Set();
+    if (activeDocument && this.settings.hideObsidianTopbar) {
+      const tabs = activeDeck.containerEl?.closest(".workspace-tabs");
+      if (tabs) { tabs.classList.add("jam-deck-hide-tabbar"); this.appearanceTabs.add(tabs); }
+    }
     if (typeof document !== "undefined") documents.add(document);
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+    for (const leaf of leaves) {
       const view = leaf.view;
       if (view?.contentEl?.ownerDocument) documents.add(view.contentEl.ownerDocument);
       if (view?.appearance && view.contentEl && view.contentEl.ownerDocument !== view.appearance.doc) {
@@ -15860,12 +15915,21 @@ class JamDeckPlugin extends Plugin {
     }
     for (const doc of documents) {
       if (doc.defaultView?.closed) { documents.delete(doc); continue; }
-      if (doc.body) doc.body.dataset.jamDeckSkin = this.settings.skin;
+      if (doc.body) {
+        doc.body.dataset.jamDeckSkin = this.settings.skin;
+        doc.body.classList.toggle("jam-deck-hide-sidebar", doc === activeDocument && this.settings.hideObsidianSidebar);
+        doc.body.classList.toggle("jam-deck-hide-topbar", doc === activeDocument && this.settings.hideObsidianTopbar);
+      }
     }
   }
 
   clearAppearance() {
-    for (const doc of this.appearanceDocuments || []) if (doc.body) delete doc.body.dataset.jamDeckSkin;
+    for (const doc of this.appearanceDocuments || []) if (doc.body) {
+      delete doc.body.dataset.jamDeckSkin;
+      doc.body.classList.remove("jam-deck-hide-sidebar", "jam-deck-hide-topbar");
+    }
+    for (const tabs of this.appearanceTabs || []) tabs.classList.remove("jam-deck-hide-tabbar");
+    this.appearanceTabs?.clear();
     this.appearanceDocuments?.clear();
   }
 
@@ -20481,12 +20545,35 @@ class JamDeckSettingTab extends PluginSettingTab {
         dropdown.addOptions({ spatial: "Spatial · 纸面", glass: "Liquid Glass · 玻璃" }).setValue(this.plugin.settings.skin);
         dropdown.onChange(async value => { await this.plugin.setAppearance("skin", value); this.display(); });
       });
+    new Setting(containerEl).setName("隐藏 Obsidian 侧栏").setDesc("纸面与玻璃通用，仅工作台活动时隐藏侧栏与左侧图标栏；不会改变原来的展开状态。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.hideObsidianSidebar);
+        toggle.onChange(async value => { await this.plugin.setAppearance("hideObsidianSidebar", value); toggle.setValue(this.plugin.settings.hideObsidianSidebar); });
+      });
+    new Setting(containerEl).setName("隐藏 Obsidian 顶栏").setDesc("同时隐藏标签栏与最小化、最大化、关闭按钮；先点工作台左上角「恢复界面」才重新显示。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.hideObsidianTopbar);
+        toggle.onChange(async value => { await this.plugin.setAppearance("hideObsidianTopbar", value); toggle.setValue(this.plugin.settings.hideObsidianTopbar); });
+      });
     if (this.plugin.settings.skin === "glass") {
       new Setting(containerEl).setName("玻璃效果").setDesc("均衡：主表面带真实边缘折射。轻盈：保留通透、高光与磨砂，减少图形负担。")
         .addDropdown(dropdown => {
           dropdown.addOptions({ balanced: "均衡 · 液态折射", light: "轻盈 · 省电" }).setValue(this.plugin.settings.glassQuality);
           dropdown.onChange(async value => { await this.plugin.setAppearance("glassQuality", value); dropdown.setValue(this.plugin.settings.glassQuality); });
         });
+      const blurSetting = new Setting(containerEl).setName("玻璃模糊").setDesc("0 最清透，16 最柔和。拖动实时预览；Canvas 大表面使用一半强度，保持轻快。");
+      const blurValue = blurSetting.controlEl.createEl("span", { text: `${this.plugin.settings.glassBlur}`, cls: "jam-deck-blur-value" });
+      const blurInput = blurSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "16", step: "1", "aria-label": "玻璃模糊" } });
+      blurInput.value = String(this.plugin.settings.glassBlur);
+      blurInput.addEventListener("input", () => {
+        blurValue.textContent = blurInput.value;
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.appearance?.setBlur(Number(blurInput.value));
+      });
+      blurInput.addEventListener("change", async () => {
+        await this.plugin.setAppearance("glassBlur", Number(blurInput.value));
+        this.plugin.applyAppearance();
+        blurInput.value = String(this.plugin.settings.glassBlur); blurValue.textContent = blurInput.value;
+      });
       const background = new Setting(containerEl).setName("背景图片或视频")
         .setDesc(this.plugin.settings.glassBackground ? `当前：${this.plugin.settings.glassBackground.split("/").pop()}` : "默认使用柔和的极光渐变。自选文件会导入库内，随库同步。");
       const input = background.controlEl.createEl("input", { type: "file", attr: { accept: ".jpg,.jpeg,.png,.webp,.avif,.mp4,.webm", "aria-label": "选择背景图片或视频" } });
