@@ -171,6 +171,16 @@ function environment() {
   assert.equal(e.appearance.media,video,"blur preview does not recreate the background decoder");
   e.plugin.settings.glassBlur=8; e.appearance.update(); e.flush();
   assert.equal(opticalEngine.retunes.length,3,"persisting a preview must not duplicate the optical work");
+  const backdropBeforeRender=e.appearance.backdrop, toneBeforeRender=e.root.dataset.jamDeckGlassTone;
+  video.currentTime=37;
+  e.appearance.prepareRender();
+  assert.equal(e.appearance.media,video); assert.equal(e.appearance.backdrop,backdropBeforeRender);
+  assert.equal(video.currentTime,37); assert(!video.removed && !video.paused,"control rebuild must not stop or detach wallpaper");
+  assert.equal(e.root.dataset.jamDeckGlassTone,toneBeforeRender,"rebuild retains wallpaper color choice");
+  e.root.surfaces=e.root.surfaces.map(()=>new Element());
+  e.appearance.observeSurfaces(); e.appearance.update(); e.flush();
+  assert.equal(e.appearance.media,video); assert.equal(e.root.children.length,1);
+  assert.equal(e.engines.at(-1).attached.size,4,"replacement controls regain optics without replacing media");
   e.doc.hidden=true; e.doc.events.get("visibilitychange")(); e.flush(); assert(video.paused); assert(e.engines[0].disposed);
   e.doc.hidden=false; e.doc.events.get("visibilitychange")(); e.flush(); assert(!video.paused);
   e.motion.matches=true; e.motion.events.get("change")(); assert(video.paused);

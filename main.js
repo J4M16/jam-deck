@@ -1666,10 +1666,21 @@ class JamDeckAppearance {
     });
     this.intersection.observe(this.root);
     this.resize = new this.win.ResizeObserver(() => this.scheduleGlass());
+    this.panelObserver = new this.win.MutationObserver(() => this.scheduleGlass());
+    this.observeSurfaces();
+  }
+
+  observeSurfaces() {
     this.resize.observe(this.root);
     for (const el of this.surfaces()) this.resize.observe(el);
-    this.panelObserver = new this.win.MutationObserver(() => this.scheduleGlass());
-    if (view.aiChat) this.panelObserver.observe(view.aiChat, { attributes: true, attributeFilter: ["hidden"] });
+    if (this.view.aiChat) this.panelObserver.observe(this.view.aiChat, { attributes: true, attributeFilter: ["hidden"] });
+  }
+
+  prepareRender() {
+    // Keep the connected wallpaper, decoder and tone while controls are rebuilt.
+    this.win.clearTimeout(this.glassTimer); this.glassTimer = 0;
+    this.clearGlass();
+    this.resize.disconnect(); this.panelObserver.disconnect();
   }
 
   surfaces() {
@@ -9603,6 +9614,10 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
   video.muted = true;
   video.playsInline = true;
   const engine = jamDeckCreateGlassEngine(win);
+  // Gate the entire filter output: an SVG filter can emit opaque pixels even
+  // while its source canvas is hidden and has never received a desktop frame.
+  const material = canvas.parentElement;
+  material.style.opacity = "0";
   let config = null, state = null, stream = null, starting = false, disposed = false;
   let generation = 0, callback = 0, attached = false, opticalKey = "", decoding = false;
   const stop = () => {
@@ -9613,6 +9628,7 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
     if (stream) stream.getTracks().forEach(track => track.stop());
     stream = null;
     video.pause(); video.srcObject = null;
+    material.style.opacity = "0";
     canvas.style.visibility = "hidden";
   };
   const paint = image => {
@@ -9624,6 +9640,7 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
         bounds.width * scaleX, bounds.height * scaleY, 0, 0, canvas.width, canvas.height);
     } else context.drawImage(image, 0, 0, canvas.width, canvas.height);
     canvas.style.visibility = "visible";
+    material.style.opacity = "1";
   };
   const startVideo = async () => {
     if (starting || stream || disposed || !state?.active || !config || config.platform !== "win32") return;
@@ -10082,7 +10099,7 @@ class IslandModeController {
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent !important; user-select: none; }
     button { font: inherit; }
     #app { position: relative; width: 100%; height: 100%; background: transparent; }
-    .island-material { position: absolute; inset: 0; height: ${ISLAND_CONTENT_HEIGHT}px; border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px; overflow: hidden; pointer-events: none; }
+    .island-material { position: absolute; inset: 0; height: ${ISLAND_CONTENT_HEIGHT}px; border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px; overflow: hidden; pointer-events: none; opacity: 0; }
     .island-material canvas { display: block; width: 100%; height: 100%; border-radius: inherit; visibility: hidden; }
     #app.is-collapsed .island-material, body:not(.is-glass) .island-material { display: none; }
     .surface {
@@ -10596,6 +10613,7 @@ class IslandModeController {
     island.on("closed", () => {
       captureSession.setPermissionRequestHandler(null);
       captureSession.setPermissionCheckHandler(null);
+      if (this.islandWindow !== island) return;
       const internal = this.closingIslandWindow;
       this.islandWindow = null;
       if (!internal && this.active) this.finishExit(true);
@@ -13421,8 +13439,7 @@ class JamDeckView extends ItemView {
       return;
     }
     const root = this.contentEl;
-    this.appearance?.destroy();
-    this.appearance = null;
+    this.appearance?.prepareRender();
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
     for (const dispose of this.launcherLayoutDisposers || []) dispose();
@@ -13431,7 +13448,9 @@ class JamDeckView extends ItemView {
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
     this.canvasRuntime.parkAll();
-    root.empty();
+    for (const child of Array.from(root.childNodes)) {
+      if (child !== this.appearance?.backdrop) child.remove();
+    }
     root.addClass("jam-deck-root");
     root.toggleClass("jam-deck-no-motion", !this.plugin.settings.animationsEnabled);
 
@@ -13551,7 +13570,8 @@ class JamDeckView extends ItemView {
     for (const id of Array.from(this.canvasRuntime.nativeConflictSuspendedIds || [])) {
       if (!liveCanvasIds.has(id)) this.canvasRuntime.nativeConflictSuspendedIds.delete(id);
     }
-    this.appearance = new JamDeckAppearance(this);
+    if (this.appearance) this.appearance.observeSurfaces();
+    else this.appearance = new JamDeckAppearance(this);
     this.appearance.update();
   }
 

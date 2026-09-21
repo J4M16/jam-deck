@@ -571,6 +571,26 @@ function makeIslandDragHarness() {
   assert.strictEqual(harness.sent.at(-1).type, "collapse");
 }
 
+{
+  const controller = new JamDeckPlugin.IslandModeController({ app: {}, settings: {} });
+  controller.computeIslandBounds = () => ({ x: 0, y: 0, width: 1600, height: 72 });
+  const handlers = new Map();
+  const remote = { BrowserWindow: class {
+    constructor() {
+      this.webContents = { id: 7, session: { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} }, on() {} };
+    }
+    on(name, fn) { handlers.set(name, fn); }
+    setContentProtection() {}
+  } };
+  const oldWindow = controller.createIslandWindow(remote);
+  const newWindow = {};
+  controller.islandWindow = newWindow; controller.active = true;
+  controller.finishExit = () => assert.fail("old close event must not exit the replacement island");
+  handlers.get("closed")();
+  assert.strictEqual(controller.islandWindow, newWindow, "late closure must preserve the replacement window");
+  assert.notStrictEqual(oldWindow, newWindow);
+}
+
 function makeIslandLifecycleHarness() {
   const body = { classList: { contains: () => false }, ownerDocument: { documentElement: { classList: { contains: () => false } } } };
   const view = {

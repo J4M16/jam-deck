@@ -16,7 +16,7 @@ function renderer() {
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
   const video = { videoWidth: 2560, videoHeight: 1440, pause() {}, play: async () => {},
     requestVideoFrameCallback(fn) { frames.set(1, fn); return 1; }, cancelVideoFrameCallback(id) { frames.delete(id); } };
-  const canvas = { width: 0, height: 0, style: {}, getContext: () => ({ drawImage() { calls.paints++; } }) };
+  const canvas = { width: 0, height: 0, style: {}, parentElement: { style: {} }, getContext: () => ({ drawImage() { calls.paints++; } }) };
   const win = { document: { createElement: () => video }, navigator: { mediaDevices: { getUserMedia(options) {
     calls.requests++; assert.equal(options.audio, false); assert.equal(options.video.mandatory.maxFrameRate, 30);
     return new Promise(resolve => { accept = resolve; });
@@ -26,7 +26,7 @@ function renderer() {
   vm.runInNewContext(renderSource + ";module.exports=jamDeckCreateIslandOptics;", { module, jamDeckCreateGlassEngine: () => engine });
   const instance = module.exports(win, canvas, error => calls.errors.push(error));
   instance.configure({ platform: "win32", sourceId: "screen:0:0", display: { x: -2560, y: 0, width: 2560, height: 1440 }, bounds: { x: -2080, y: 0, width: 1600, height: 72 } });
-  return { instance, calls, frames, resolve: () => accept(stream) };
+  return { instance, calls, frames, material: canvas.parentElement, resolve: () => accept(stream) };
 }
 const flush = () => new Promise(setImmediate);
 const moduleForController = { exports: {} };
@@ -47,10 +47,13 @@ const Controller = moduleForController.exports;
   {
     const h = renderer();
     h.instance.update({ active: true, blur: 0, quality: "balanced" }); h.resolve(); await flush();
+    assert.equal(h.material.style.opacity, "0", "filter output stays hidden until a desktop frame is painted");
     h.frames.get(1)(); assert.equal(h.calls.paints, 1);
+    assert.equal(h.material.style.opacity, "1");
     h.instance.update({ active: true, blur: 16, quality: "balanced" });
     assert.equal(h.calls.optics.at(-1).blur, 16); assert.equal(h.calls.requests, 1);
     h.instance.update({ active: false }); assert.equal(h.calls.stopped, 1); assert.equal(h.frames.size, 0);
+    assert.equal(h.material.style.opacity, "0", "collapse hides stale filter output before reopening");
     h.instance.dispose(); assert.equal(h.calls.stopped, 1);
   }
   {

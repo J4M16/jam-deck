@@ -4,6 +4,10 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
   video.muted = true;
   video.playsInline = true;
   const engine = jamDeckCreateGlassEngine(win);
+  // Gate the entire filter output: an SVG filter can emit opaque pixels even
+  // while its source canvas is hidden and has never received a desktop frame.
+  const material = canvas.parentElement;
+  material.style.opacity = "0";
   let config = null, state = null, stream = null, starting = false, disposed = false;
   let generation = 0, callback = 0, attached = false, opticalKey = "", decoding = false;
   const stop = () => {
@@ -14,6 +18,7 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
     if (stream) stream.getTracks().forEach(track => track.stop());
     stream = null;
     video.pause(); video.srcObject = null;
+    material.style.opacity = "0";
     canvas.style.visibility = "hidden";
   };
   const paint = image => {
@@ -25,6 +30,7 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
         bounds.width * scaleX, bounds.height * scaleY, 0, 0, canvas.width, canvas.height);
     } else context.drawImage(image, 0, 0, canvas.width, canvas.height);
     canvas.style.visibility = "visible";
+    material.style.opacity = "1";
   };
   const startVideo = async () => {
     if (starting || stream || disposed || !state?.active || !config || config.platform !== "win32") return;
