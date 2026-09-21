@@ -9697,8 +9697,9 @@ class IslandModeController {
       const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
       return { x, y, width, height };
     }
-    const width = contentWidth + ISLAND_SHADOW_PAD_X * 2;
-    const height = ISLAND_HEIGHT;
+    const glass = this.plugin.settings.skin === "glass";
+    const width = contentWidth + (glass ? 0 : ISLAND_SHADOW_PAD_X * 2);
+    const height = glass ? ISLAND_CONTENT_HEIGHT : ISLAND_HEIGHT;
     const x = Math.round(display.x + (display.width - width) / 2);
     const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
     return { x, y, width, height };
@@ -9742,9 +9743,10 @@ class IslandModeController {
     let point;
     try { point = screenApi.getCursorScreenPoint(); } catch (error) { return false; }
     // Only the visible capsule counts. Transparent shadow pads must not keep it expanded.
-    const left = bounds.x + ISLAND_SHADOW_PAD_X;
+    const pad = this.plugin.settings.skin === "glass" ? 0 : ISLAND_SHADOW_PAD_X;
+    const left = bounds.x + pad;
     const top = bounds.y + ISLAND_SHADOW_PAD_TOP;
-    const right = bounds.x + bounds.width - ISLAND_SHADOW_PAD_X;
+    const right = bounds.x + bounds.width - pad;
     const bottom = top + ISLAND_CONTENT_HEIGHT;
     return point.x >= left && point.x < right && point.y >= top && point.y < bottom;
   }
@@ -9823,7 +9825,8 @@ class IslandModeController {
     return {
       collapsed: this.collapsed,
       peekTight: !!(this.collapsed && this.peekTight),
-      dark,
+      glass: this.plugin.settings.skin === "glass",
+      dark: this.plugin.settings.skin === "glass" ? !!this.getElectronRemote().nativeTheme.shouldUseDarkColors : dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
       typography: jamDeckTypographyValues(this.plugin.settings),
       leaveMs: this.getLeaveMs(),
@@ -9964,6 +9967,25 @@ class IslandModeController {
     .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: var(--jd-font-meta, 10px); opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
     .toast.is-visible { opacity: 1; translate: -50% 0; }
     body.no-motion .toast { transition: none; }
+    /* Desktop pixels belong to the OS compositor, not this document's backdrop.
+       Acrylic / vibrancy supplies the blur; the surface supplies the glass finish. */
+    body.is-glass { --glass-ink: #202c35; --glass-muted: #52616b; --glass-line: rgba(255,255,255,.12); --glass-hover: rgba(255,255,255,.08); }
+    body.is-glass.is-dark { --glass-ink: #f1f5f7; --glass-muted: #c5d1d8; --glass-line: rgba(255,255,255,.08); --glass-hover: rgba(255,255,255,.06); }
+    body.is-glass .surface {
+      left: 0; width: 100%; color: var(--glass-ink);
+      background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04));
+      border-color: var(--glass-line);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.12);
+      transition: none; will-change: auto;
+    }
+    body.is-glass :is(.chip, .timer, .restore) { background: transparent; border-color: transparent; box-shadow: none; }
+    body.is-glass :is(.chip, .restore, .timer-toggle):hover { background: var(--glass-hover); border-color: transparent; }
+    body.is-glass :is(.brand-label, .clock) { color: var(--glass-ink); }
+    body.is-glass :is(.empty, .kind, .chip-time) { color: var(--glass-muted); }
+    body.is-glass :is(.kind, .timer-toggle) { background: var(--glass-hover); }
+    body.is-glass .timer.is-running .clock { text-decoration: underline; text-decoration-color: #b8ff3d; text-underline-offset: 5px; }
+    body.is-glass :is(.chip, .timer-toggle, .restore):focus-visible { outline: 2px solid #b8ff3d; outline-offset: -3px; box-shadow: none; }
+    body.is-glass #app.is-collapsed .surface { left: 0; width: 100%; background: rgba(255,255,255,.2); border-color: transparent; box-shadow: none; }
   </style>
 </head>
 <body>
@@ -10129,6 +10151,7 @@ class IslandModeController {
       state = next || state;
       for (const [name, value] of Object.entries(state.typography || {})) document.body.style.setProperty(name, value);
       document.body.classList.toggle("is-dark", !!state.dark);
+      document.body.classList.toggle("is-glass", !!state.glass);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
       app.classList.toggle("is-collapsed", !!state.collapsed);
       app.classList.toggle("is-peek-tight", !!state.peekTight);
@@ -10300,6 +10323,8 @@ class IslandModeController {
       fullscreenable: false,
       skipTaskbar: true,
       title: "Jam Deck 灵动岛",
+      roundedCorners: true,
+      visualEffectState: "active",
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
@@ -10339,15 +10364,57 @@ class IslandModeController {
     const html = this.buildWindowHtml();
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     await island.loadURL(url);
-    const initialState = JSON.stringify(this.buildSurfaceState());
+    const state = this.buildSurfaceState();
+    this.syncNativeGlass(state);
+    const initialState = JSON.stringify(state);
     await island.webContents.executeJavaScript(`window.jamDeckIslandSetState(${initialState}); new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
   }
 
   sendState() {
     const island = this.islandWindow;
     if (!this.active || !island || island.isDestroyed() || !this.actionChannel) return;
-    try { island.webContents.send(`${this.actionChannel}:state`, this.buildSurfaceState()); } catch (error) {
+    try {
+      const state = this.buildSurfaceState();
+      this.syncNativeGlass(state);
+      island.webContents.send(`${this.actionChannel}:state`, state);
+    } catch (error) {
       console.error("jam-deck island state sync failed", error);
+    }
+  }
+
+  syncNativeGlass(state, platform = process.platform) {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed()) return;
+    const enabled = !!state.glass && !state.collapsed;
+    const key = `${state.glass}:${state.collapsed}:${this.peekTight}`;
+    if (island.jamDeckMaterialKey === key) return;
+    island.jamDeckMaterialKey = key;
+    // No transparent shadow padding around an OS backdrop: the compositor would
+    // blur that padding too. A collapsed strip never keeps an OS backdrop alive.
+    const bounds = this.computeIslandBounds(state.collapsed && this.peekTight);
+    island.setBounds(bounds, false);
+    if (platform === "win32") {
+      island.setBackgroundMaterial(enabled ? "acrylic" : "none");
+      island.setBackgroundColor("#00000000");
+      const rects = [];
+      if (enabled) {
+        const radius = ISLAND_RADIUS;
+        rects.push({ x: 0, y: 0, width: bounds.width, height: bounds.height - radius });
+        for (let row = 0; row < radius; row++) {
+          const inset = Math.ceil(radius - Math.sqrt(radius * radius - (row + 0.5) ** 2));
+          rects.push({ x: inset, y: bounds.height - radius + row, width: bounds.width - inset * 2, height: 1 });
+        }
+      } else if (state.glass) {
+        const radius = bounds.height / 2;
+        for (let row = 0; row < bounds.height; row++) {
+          const distance = Math.abs(row + 0.5 - radius);
+          const inset = Math.ceil(radius - Math.sqrt(radius * radius - distance * distance));
+          rects.push({ x: inset, y: row, width: bounds.width - inset * 2, height: 1 });
+        }
+      }
+      island.setShape(rects);
+    } else if (platform === "darwin") {
+      island.setVibrancy(enabled ? "under-window" : null);
     }
   }
 
@@ -10408,6 +10475,12 @@ class IslandModeController {
     this.suppressExpandUntil = Date.now() + Math.max(450, ISLAND_MORPH_MS + 80);
     // Click-through immediately so the still-wide morphing frame cannot cover browser tabs.
     this.setMousePassthrough(true);
+    if (this.plugin.settings.skin === "glass") {
+      this.peekTight = true;
+      this.applyIslandBounds(true);
+      this.sendState();
+      return;
+    }
     // Morph in the full frame, then shrink the window to the visual 10px × 70% peek.
     this.sendState();
     this.schedulePeekBounds();
@@ -13135,6 +13208,8 @@ class JamDeckView extends ItemView {
         await this.plugin.autoArrange();
       });
     }
+    const wallpaperInput = this.plugin.createBackgroundPicker(actions, () => this.plugin.setAppearance("skin", "glass"));
+    this.makeToolbarButton(actions, "映画", "更换背景图片或视频", () => wallpaperInput.click());
     this.makeToolbarButton(actions, "灵动", "进入灵动岛悬浮条", () => {
       void this.plugin.enterIslandMode();
     }, false, "jam-deck-action jam-deck-island-entry");
@@ -16005,6 +16080,7 @@ class JamDeckPlugin extends Plugin {
         doc.body.classList.toggle("jam-deck-hide-topbar", doc === activeDocument && this.settings.hideObsidianTopbar);
       }
     }
+    if (this.islandMode?.active) this.islandMode.sendState();
   }
 
   clearAppearance() {
@@ -16041,6 +16117,20 @@ class JamDeckPlugin extends Plugin {
     });
     this.appearanceUpdateQueue = operation.catch(() => {});
     return operation;
+  }
+
+  createBackgroundPicker(container, onImported) {
+    const input = container.createEl("input", { type: "file", attr: { accept: ".jpg,.jpeg,.png,.webp,.avif,.mp4,.webm", "aria-label": "选择背景图片或视频" } });
+    input.hidden = true;
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file || input.disabled) return;
+      input.disabled = true;
+      try { if (await this.importGlassBackground(file)) await onImported(); }
+      catch (error) { new Notice(`Jam Deck：背景导入失败，${error.message}`); }
+      finally { input.disabled = false; input.value = ""; }
+    });
+    return input;
   }
 
   async importGlassBackground(file) {
@@ -20645,7 +20735,7 @@ class JamDeckSettingTab extends PluginSettingTab {
           dropdown.addOptions({ balanced: "均衡 · 液态折射", light: "轻盈 · 省电" }).setValue(this.plugin.settings.glassQuality);
           dropdown.onChange(async value => { await this.plugin.setAppearance("glassQuality", value); dropdown.setValue(this.plugin.settings.glassQuality); });
         });
-      const blurSetting = new Setting(containerEl).setName("玻璃模糊").setDesc("0 最清透，16 最柔和。拖动实时预览；Canvas 大表面使用一半强度，保持轻快。");
+      const blurSetting = new Setting(containerEl).setName("玻璃模糊").setDesc("工作台 0 最清透，16 最柔和，Canvas 使用一半强度。拖动实时预览；灵动岛模糊由系统控制。");
       const blurValue = blurSetting.controlEl.createEl("span", { text: `${this.plugin.settings.glassBlur}`, cls: "jam-deck-blur-value" });
       const blurInput = blurSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "16", step: "1", "aria-label": "玻璃模糊" } });
       blurInput.value = String(this.plugin.settings.glassBlur);
@@ -20660,18 +20750,9 @@ class JamDeckSettingTab extends PluginSettingTab {
       });
       const background = new Setting(containerEl).setName("背景图片或视频")
         .setDesc(this.plugin.settings.glassBackground ? `当前：${this.plugin.settings.glassBackground.split("/").pop()}` : "默认使用柔和的极光渐变。自选文件会导入库内，随库同步。");
-      const input = background.controlEl.createEl("input", { type: "file", attr: { accept: ".jpg,.jpeg,.png,.webp,.avif,.mp4,.webm", "aria-label": "选择背景图片或视频" } });
-      input.hidden = true;
+      const input = this.plugin.createBackgroundPicker(background.controlEl, () => this.display());
       background.addButton(button => button.setButtonText("选择文件…").onClick(() => input.click()));
       background.addButton(button => button.setButtonText("恢复默认").onClick(async () => { await this.plugin.setAppearance("glassBackground", ""); this.display(); }));
-      input.addEventListener("change", async () => {
-        const file = input.files?.[0];
-        if (!file) return;
-        input.disabled = true;
-        try { if (await this.plugin.importGlassBackground(file)) this.display(); }
-        catch (error) { new Notice(`Jam Deck：背景导入失败，${error.message}`); }
-        finally { input.disabled = false; input.value = ""; }
-      });
       containerEl.createEl("p", { cls: "jam-deck-setting-hint", text: "图片支持 JPG / PNG / WebP / AVIF；视频支持 MP4 / WebM，推荐 1080p、30 fps。恢复默认保留已导入的附件。" });
       new Setting(containerEl).setName("背景压暗").setDesc("背景太亮或太花时，降低亮度，让玻璃上的文字更清楚。")
         .addSlider(slider => {

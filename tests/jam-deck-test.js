@@ -635,6 +635,41 @@ function makeIslandLifecycleHarness() {
 }
 
 async function testIslandLifecycle() {
+  for (const platform of ["win32", "darwin"]) {
+    const {controller, plugin}=makeIslandLifecycleHarness();
+    plugin.settings.skin="glass";
+    controller.displayBounds={x:0,y:0,width:1920,height:1080};
+    controller.getElectronRemote=()=>({nativeTheme:{shouldUseDarkColors:true}});
+    const effects=[],shapes=[],bounds=[],passthrough=[];
+    controller.islandWindow={isDestroyed:()=>false,setBounds:b=>bounds.push(b),setBackgroundColor(){},
+      setBackgroundMaterial:m=>{assert.equal(platform,"win32");effects.push(m);},
+      setVibrancy:m=>{assert.equal(platform,"darwin");effects.push(m);},
+      setShape:r=>{assert.equal(platform,"win32");shapes.push(r);},
+      setIgnoreMouseEvents:v=>passthrough.push(v),focus(){}};
+    controller.active=true;
+    controller.startLeaveWatch=()=>{};
+    controller.sendState=()=>controller.syncNativeGlass(controller.buildSurfaceState(),platform);
+    const state=controller.buildSurfaceState();
+    assert(state.glass&&state.dark,"desktop material palette follows the native system theme");
+    controller.sendState();controller.sendState();
+    assert.equal(effects.length,1,"countdown updates must not rebuild OS glass");
+    assert.equal(effects[0],platform==="win32"?"acrylic":"under-window");
+    assert.equal(bounds[0].height,72,"OS material has no transparent shadow padding");
+    assert.equal(bounds[0].width,1600);
+    if(platform==="win32") assert(shapes[0].every(r=>r.x>=0&&r.y>=0&&r.x+r.width<=1600&&r.y+r.height<=72));
+    controller.collapse();
+    assert.equal(bounds.at(-1).height,10,"collapsed native window immediately releases the tall hit area");
+    assert.equal(bounds.at(-1).width,1120);
+    assert.equal(passthrough.at(-1),true);
+    assert.equal(effects.at(-1),platform==="win32"?"none":null,"collapsed strip releases the native backdrop");
+    assert.equal(controller.peekBoundsTimer,0,"glass does not leave a morph timer pending");
+    if(platform==="win32") assert(shapes.at(-1).every(r=>r.y+r.height<=10),"collapsed native region cannot leave a taller compositor backing");
+    controller.expand();
+    assert.equal(bounds.at(-1).height,72);assert.equal(passthrough.at(-1),false);
+    plugin.settings.skin="spatial";controller.sendState();
+    assert.equal(bounds.at(-1).height,112,"switching back restores the paper shadow geometry");
+    assert.equal(effects.at(-1),platform==="win32"?"none":null);
+  }
   {
     const harness = makeIslandLifecycleHarness();
     let releaseLoad;

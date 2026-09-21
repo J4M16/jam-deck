@@ -143,7 +143,9 @@ function environment() {
   assert(!docA.body.classList.contains("jam-deck-hide-topbar") && !tabsA.classList.contains("jam-deck-hide-tabbar"),"other notes restore native chrome");
   chrome.app.workspace.activeLeaf=deckB; chrome.applyAppearance();
   assert(docB.body.classList.contains("jam-deck-hide-topbar"));
-  chrome.islandMode={active:true}; chrome.applyAppearance();
+  let islandAppearanceUpdates=0;
+  chrome.islandMode={active:true,sendState(){islandAppearanceUpdates++;}}; chrome.applyAppearance();
+  assert.equal(islandAppearanceUpdates,1,"appearance changes sync the independent island window");
   assert(!tabsB.classList.contains("jam-deck-hide-tabbar"),"island owns its native window chrome");
   chrome.islandMode.active=false; chrome.applyAppearance(); chrome.clearAppearance();
   assert(!docB.body.classList.contains("jam-deck-hide-topbar") && !tabsB.classList.contains("jam-deck-hide-tabbar"),"unload restores every document and tab group");
