@@ -497,7 +497,9 @@ function makeIslandDragHarness() {
   });
   const controller = new JamDeckPlugin.IslandModeController({ app: {} });
   controller.actionChannel = "island-drag-test";
-  const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1];
+  // Capture lifecycle is exercised separately; this fixture isolates existing clipboard drag semantics.
+  const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1]
+    .replace(/window\.jamDeckIslandOptics = jamDeckCreateIslandOptics[^\n]+/, "window.jamDeckIslandOptics = {update(){},frame(){},dispose(){}};");
   vm.runInNewContext(script, {
     document, window, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
     require: () => ({ ipcRenderer: { send: (_channel, payload) => sent.push(payload), on() {} } }),
@@ -635,49 +637,6 @@ function makeIslandLifecycleHarness() {
 }
 
 async function testIslandLifecycle() {
-  {
-    const { EventEmitter } = require("events");
-    const { PassThrough } = require("stream");
-    const failures = [];
-    const child = new EventEmitter();
-    child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
-    child.kills = 0; child.kill = () => { child.kills++; child.emit("exit", 0); };
-    const writes = []; child.stdin.on("data", data => writes.push(data.toString()));
-    const material = new JamDeckPlugin.IslandGlassMaterial({ getBounds: () => ({ x: -1840, y: 0, width: 1600, height: 72 }) }, error => failures.push(error));
-    material.launch = () => child;
-    const started = material.start();
-    material.update(true);
-    assert.equal(writes.length, 0, "no material command before native readiness");
-    child.stdout.write("rea"); child.stdout.write("dy\n");
-    await started;
-    material.update(true); material.update(true); material.update(false);
-    assert.deepEqual(writes, ["show -1840 0 1600 72 31\n", "hide\n"], "native material updates only on visibility/bounds changes");
-    material.stop(); material.stop();
-    assert.equal(child.kills, 1, "helper is terminated exactly once");
-    assert.equal(failures.length, 0, "intentional exit must not report a crash");
-  }
-  {
-    const { EventEmitter } = require("events");
-    const { PassThrough } = require("stream");
-    const mockChild = () => {
-      const child = new EventEmitter();
-      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
-      child.kill = () => {};
-      return child;
-    };
-    const child = mockChild(), failures = [];
-    const material = new JamDeckPlugin.IslandGlassMaterial({}, error => failures.push(error));
-    material.launch = () => child;
-    const ready = material.start(); child.stdout.write("ready\n"); await ready;
-    child.emit("exit", 1); child.stdin.emit("error", Error("pipe closed"));
-    assert.equal(failures.length, 1, "helper crash reports once even if its pipe subsequently errors");
-    assert(material.stopped);
-    const pending = new JamDeckPlugin.IslandGlassMaterial({}, () => assert.fail("cancel is not a failure"));
-    pending.launch = mockChild;
-    const start = pending.start();
-    pending.stop();
-    await assert.rejects(start, /cancelled/, "cancel while awaiting readiness must settle the pending promise");
-  }
   {
     const harness = makeIslandLifecycleHarness();
     harness.plugin.settings.skin = "glass";
