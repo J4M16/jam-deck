@@ -9973,7 +9973,7 @@ class IslandModeController {
     body.is-glass.is-dark { --glass-ink: #f1f5f7; --glass-muted: #c5d1d8; --glass-line: rgba(255,255,255,.08); --glass-hover: rgba(255,255,255,.06); }
     body.is-glass .surface {
       left: 0; width: 100%; color: var(--glass-ink);
-      background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04)), rgba(255,255,255,.08);
+      background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04)), rgba(255,255,255,.4);
       border-color: var(--glass-line);
       box-shadow: inset 0 1px 1px rgba(255,255,255,.12);
       transition: none; will-change: auto;
