@@ -636,6 +636,91 @@ function makeIslandLifecycleHarness() {
 
 async function testIslandLifecycle() {
   {
+    const { EventEmitter } = require("events");
+    const { PassThrough } = require("stream");
+    const failures = [];
+    const child = new EventEmitter();
+    child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
+    child.kills = 0; child.kill = () => { child.kills++; child.emit("exit", 0); };
+    const writes = []; child.stdin.on("data", data => writes.push(data.toString()));
+    const material = new JamDeckPlugin.IslandGlassMaterial({ getBounds: () => ({ x: -1840, y: 0, width: 1600, height: 72 }) }, error => failures.push(error));
+    material.launch = () => child;
+    const started = material.start();
+    material.update(true);
+    assert.equal(writes.length, 0, "no material command before native readiness");
+    child.stdout.write("rea"); child.stdout.write("dy\n");
+    await started;
+    material.update(true); material.update(true); material.update(false);
+    assert.deepEqual(writes, ["show -1840 0 1600 72 31\n", "hide\n"], "native material updates only on visibility/bounds changes");
+    material.stop(); material.stop();
+    assert.equal(child.kills, 1, "helper is terminated exactly once");
+    assert.equal(failures.length, 0, "intentional exit must not report a crash");
+  }
+  {
+    const { EventEmitter } = require("events");
+    const { PassThrough } = require("stream");
+    const mockChild = () => {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
+      child.kill = () => {};
+      return child;
+    };
+    const child = mockChild(), failures = [];
+    const material = new JamDeckPlugin.IslandGlassMaterial({}, error => failures.push(error));
+    material.launch = () => child;
+    const ready = material.start(); child.stdout.write("ready\n"); await ready;
+    child.emit("exit", 1); child.stdin.emit("error", Error("pipe closed"));
+    assert.equal(failures.length, 1, "helper crash reports once even if its pipe subsequently errors");
+    assert(material.stopped);
+    const pending = new JamDeckPlugin.IslandGlassMaterial({}, () => assert.fail("cancel is not a failure"));
+    pending.launch = mockChild;
+    const start = pending.start();
+    pending.stop();
+    await assert.rejects(start, /cancelled/, "cancel while awaiting readiness must settle the pending promise");
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    harness.plugin.settings.skin = "glass";
+    harness.controller.loadIslandWindow = async () => {};
+    let ready, stopped = 0;
+    harness.controller.createGlassMaterial = () => ({ start: () => new Promise(resolve => { ready = resolve; }), update() {}, stop() { stopped++; } });
+    const entering = harness.controller.enter();
+    await Promise.resolve();
+    assert.equal(harness.mainWindow.hideCalls, 0, "workbench stays visible while native material starts");
+    harness.controller.destroy();
+    ready();
+    assert.equal(await entering, false, "native readiness after unload cannot resurrect the island");
+    assert.equal(stopped, 1, "unload stops a starting native helper");
+    assert.equal(harness.mainWindow.hideCalls, 0);
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    harness.plugin.settings.skin = "glass";
+    harness.controller.loadIslandWindow = async () => {};
+    let stopped = 0;
+    harness.controller.createGlassMaterial = () => ({ start: async () => { throw Error("native launch failed"); }, update() {}, stop() { stopped++; } });
+    const original = console.error; console.error = () => {};
+    try { assert.equal(await harness.controller.enter(), false); } finally { console.error = original; }
+    assert.equal(stopped, 1);
+    assert.equal(harness.mainWindow.hideCalls, 0, "native failure leaves workbench accessible");
+    assert(harness.children[0].destroyed);
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    harness.plugin.settings.skin = "glass";
+    harness.controller.loadIslandWindow = async () => {};
+    let stopped = 0;
+    const updates = [];
+    harness.controller.createGlassMaterial = () => ({ start: async () => {}, update: visible => updates.push(visible), stop() { stopped++; } });
+    assert(await harness.controller.enter());
+    assert.equal(updates.at(-1), true);
+    harness.controller.syncGlassMaterial({ glass: true, collapsed: true });
+    assert.equal(updates.at(-1), false, "collapse removes the full native blur surface");
+    harness.controller.finishExit(true);
+    assert.equal(stopped, 1, "external island window close also releases native material");
+    assert.equal(harness.mainWindow.showCalls, 1);
+  }
+  {
     const {controller, plugin}=makeIslandLifecycleHarness();
     plugin.settings.skin="glass";
     controller.displayBounds={x:0,y:0,width:1920,height:1080};
