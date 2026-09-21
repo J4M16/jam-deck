@@ -9967,13 +9967,13 @@ class IslandModeController {
     .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: var(--jd-font-meta, 10px); opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
     .toast.is-visible { opacity: 1; translate: -50% 0; }
     body.no-motion .toast { transition: none; }
-    /* Desktop pixels belong to the OS compositor, not this document's backdrop.
-       Acrylic / vibrancy supplies the blur; the surface supplies the glass finish. */
+    /* Clear glass keeps the original rounded silhouette. OS backdrops paint
+       beyond the CSS corners, so this transparent window uses no native blur. */
     body.is-glass { --glass-ink: #202c35; --glass-muted: #52616b; --glass-line: rgba(255,255,255,.12); --glass-hover: rgba(255,255,255,.08); }
     body.is-glass.is-dark { --glass-ink: #f1f5f7; --glass-muted: #c5d1d8; --glass-line: rgba(255,255,255,.08); --glass-hover: rgba(255,255,255,.06); }
     body.is-glass .surface {
       left: 0; width: 100%; color: var(--glass-ink);
-      background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04));
+      background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04)), rgba(255,255,255,.08);
       border-color: var(--glass-line);
       box-shadow: inset 0 1px 1px rgba(255,255,255,.12);
       transition: none; will-change: auto;
@@ -10323,8 +10323,6 @@ class IslandModeController {
       fullscreenable: false,
       skipTaskbar: true,
       title: "Jam Deck 灵动岛",
-      roundedCorners: true,
-      visualEffectState: "active",
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
@@ -10365,7 +10363,7 @@ class IslandModeController {
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     await island.loadURL(url);
     const state = this.buildSurfaceState();
-    this.syncNativeGlass(state);
+    this.syncWindowBounds(state);
     const initialState = JSON.stringify(state);
     await island.webContents.executeJavaScript(`window.jamDeckIslandSetState(${initialState}); new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
   }
@@ -10375,47 +10373,22 @@ class IslandModeController {
     if (!this.active || !island || island.isDestroyed() || !this.actionChannel) return;
     try {
       const state = this.buildSurfaceState();
-      this.syncNativeGlass(state);
+      this.syncWindowBounds(state);
       island.webContents.send(`${this.actionChannel}:state`, state);
     } catch (error) {
       console.error("jam-deck island state sync failed", error);
     }
   }
 
-  syncNativeGlass(state, platform = process.platform) {
+  syncWindowBounds(state) {
     const island = this.islandWindow;
     if (!island || island.isDestroyed()) return;
-    const enabled = !!state.glass && !state.collapsed;
     const key = `${state.glass}:${state.collapsed}:${this.peekTight}`;
-    if (island.jamDeckMaterialKey === key) return;
-    island.jamDeckMaterialKey = key;
-    // No transparent shadow padding around an OS backdrop: the compositor would
-    // blur that padding too. A collapsed strip never keeps an OS backdrop alive.
+    if (island.jamDeckBoundsKey === key) return;
+    // Countdown updates do not resize the native window.
     const bounds = this.computeIslandBounds(state.collapsed && this.peekTight);
     island.setBounds(bounds, false);
-    if (platform === "win32") {
-      island.setBackgroundMaterial(enabled ? "acrylic" : "none");
-      island.setBackgroundColor("#00000000");
-      const rects = [];
-      if (enabled) {
-        const radius = ISLAND_RADIUS;
-        rects.push({ x: 0, y: 0, width: bounds.width, height: bounds.height - radius });
-        for (let row = 0; row < radius; row++) {
-          const inset = Math.ceil(radius - Math.sqrt(radius * radius - (row + 0.5) ** 2));
-          rects.push({ x: inset, y: bounds.height - radius + row, width: bounds.width - inset * 2, height: 1 });
-        }
-      } else if (state.glass) {
-        const radius = bounds.height / 2;
-        for (let row = 0; row < bounds.height; row++) {
-          const distance = Math.abs(row + 0.5 - radius);
-          const inset = Math.ceil(radius - Math.sqrt(radius * radius - distance * distance));
-          rects.push({ x: inset, y: row, width: bounds.width - inset * 2, height: 1 });
-        }
-      }
-      island.setShape(rects);
-    } else if (platform === "darwin") {
-      island.setVibrancy(enabled ? "under-window" : null);
-    }
+    island.jamDeckBoundsKey = key;
   }
 
   applyIslandBounds(collapsed) {
@@ -20735,7 +20708,7 @@ class JamDeckSettingTab extends PluginSettingTab {
           dropdown.addOptions({ balanced: "均衡 · 液态折射", light: "轻盈 · 省电" }).setValue(this.plugin.settings.glassQuality);
           dropdown.onChange(async value => { await this.plugin.setAppearance("glassQuality", value); dropdown.setValue(this.plugin.settings.glassQuality); });
         });
-      const blurSetting = new Setting(containerEl).setName("玻璃模糊").setDesc("工作台 0 最清透，16 最柔和，Canvas 使用一半强度。拖动实时预览；灵动岛模糊由系统控制。");
+      const blurSetting = new Setting(containerEl).setName("玻璃模糊").setDesc("工作台 0 最清透，16 最柔和，Canvas 使用一半强度。拖动实时预览；灵动岛使用无磨砂的清透玻璃。");
       const blurValue = blurSetting.controlEl.createEl("span", { text: `${this.plugin.settings.glassBlur}`, cls: "jam-deck-blur-value" });
       const blurInput = blurSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "16", step: "1", "aria-label": "玻璃模糊" } });
       blurInput.value = String(this.plugin.settings.glassBlur);
