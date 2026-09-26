@@ -4,10 +4,14 @@
 
 - 起因：代码与视觉规范交叉审查发现 token 化程度两极——字号硬编码 0 处、`var(--jd-font-*)` 130 处，而色值仍有孤立裸值，间距与圆角几乎无 token。本批先收口色值。
 - 新增 `--jd-heading`（`#5c5c5c`）。关键约束：自有弹窗由 Obsidian Modal 挂载到 `document.body`，不在 `.jam-deck-root` 内，若把该变量定义在根上，弹窗侧会解析失败并丢失标题色；因此定义在 `body` 级，并注释说明只有跨明暗主题不变的值才允许进该块。原先的长 `:is()` 白名单选择器保留，但色值来源收敛为单一 token。
-- 新增 `--jd-accent-deep`，替换 `.jam-deck-clip-text` 与 `.jam-deck-clip-text-time` 上的 `#3B6D11`。该值此前是全项目唯一的大写 hex、且不属于 `--jd-accent` / `--jd-accent-ink` 任一档；更重要的是它在 `.theme-dark` 下没有任何覆盖，深绿文字直接压在深色底上，对比度不合格。暗色档改为 `color-mix(var(--jd-accent) 68%, var(--jd-surface-raised))`。
+- 新增角色令牌 `--jd-radius-control`（7px），同样放在 `body` 块。收口对象是文本输入控件：`.jam-deck-task-composer input`、`.jam-deck-browser-modal input`、`.jam-deck-task-form textarea` 此前为 6px，`.jam-deck-shortcut-form input` 为 9px，玻璃皮肤弹窗规则为 7px——同一语义元素在不同弹窗里形状不同。`.jam-deck-task-field` 是包住 label+input 的 grid 容器而非输入框本身，未纳入。
+- 纠错记录（值得后来者注意）：本批最初把 `.jam-deck-clip-text` / `.jam-deck-clip-text-time` 上孤立的 `#3B6D11` 换成了新令牌 `--jd-accent-deep`，并以为顺带修了暗色对比度。复核发现这两条规则早已是僵尸——Spatial 重写产物 `.jam-deck-root .jam-deck-clip-text`（styles.css:2699，`border: 0`、`background: transparent`、`border-radius: var(--jd-radius-md)`）与 `.jam-deck-root .jam-deck-clip-text-time`（`color: var(--jd-muted)`）特异性更高，逐属性完全覆盖，绿色边框与绿色时间戳根本不参与渲染。另确认灵动岛剪贴板走的是独立类名（`chip` / `chip-text` / `chip-time`），不复用 `.jam-deck-clip-*`，因此不存在第二个消费者。正确动作是删僵尸而非给僵尸上色：已移除这两条规则，并撤掉失去使用者的 `--jd-accent-deep`。
+- 教训：改动 `.jam-deck-*` 基础规则前，必须先查是否存在 `.jam-deck-root .jam-deck-*` 的 Spatial 重写版本。扁平期的旧规则在 CSS 里仍有残留，特异性上一律输给 root 版本。本次仅清理了已确证的两条，其余疑似僵尸规则建议用浏览器 coverage 实测后再批量处理，不凭静态阅读删除。
+- 顺带修复倒计时输入格圆角 bug（由实机取计算样式发现，静态阅读看不出来）。`.jam-deck-countdown-duration` 是单类选择器，特异性 (0,1,0)，低于 Obsidian 自带的 `input[type="text"]` (0,1,1)，常态圆角实际取的是主题 `--input-radius`（本机 5px），而 `.jam-deck-countdown-duration:focus`、`:disabled` 因伪类补足特异性为 (0,2,0)、以及运行态 `.jam-deck-countdown-flip-digit`（div，不受 input 规则影响）都是 7px。结果是聚焦输入格、以及启停切换到翻牌时圆角可见跳变，规范要求的「独立底板」在常态从未生效。选择器改为类型限定的 `input.jam-deck-countdown-duration`，并把输入格与翻牌一并接入 `--jd-radius-control`，使两者共享单一来源。玻璃皮肤下的同名规则特异性本就足够，一并换成令牌。
+- 推论：凡是用单类选择器给原生表单元素（input / textarea / select / button）设样式的规则，都可能被 Obsidian 主题的属性选择器压过。项目里给 input 设圆角的其余规则均为 `.祖先类 元素` 形式 (0,1,1)，与原生平手且插件样式表后加载，因此生效；只有倒计时这一处是裸单类。后续新增此类样式时应显式带上元素类型。
 - 玻璃皮肤标题走 `--jd-glass-heading` 的独立规则（styles.css:4200），优先级高于基础规则，本次改动不影响其行为。
 - 仓库卫生：删除长期游离的未跟踪文件 `main.js.bak`（734 KB，8 月 6 日快照）、`pw-probe.txt`、`cleanup-check.txt`；改用 git tag `baseline/pre-token-refactor` 作为重构前回滚点。`.gitignore` 增补 `*.bak`、`tmp-*.txt`。
-- 验证：npm run verify 全绿（check + 12 项测试 + 灵动岛两项）。纯样式改动，未触及逻辑、生命周期与持久化，个人 data.json 未读写。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
+- 验证：npm run verify 全绿（check + 12 项测试 + 灵动岛两项），并部署到 Obsidian 后用 CLI 读取计算样式，实机核对标题色与输入框圆角。纯样式改动，未触及逻辑、生命周期与持久化，个人 data.json 未读写。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
 
 ## 2026-09-21 — 1.1.9 玻璃首帧与勾选闪烁
 

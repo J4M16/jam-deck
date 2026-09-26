@@ -2,7 +2,7 @@
 
 ## 1.2.0 — 2026-09-26（开发版）
 
-- 设计令牌统一（第 1 批：色值）。新增跨作用域 `--jd-heading`，定义在 `body` 而非 `.jam-deck-root`，因为自有弹窗挂载在工作台根节点之外；工作台与弹窗标题不再依赖枚举白名单里的裸色值 `#5c5c5c`。新增 `--jd-accent-deep`，取代剪贴板文本卡上孤立的 `#3B6D11`，并顺带修复该色在暗色主题下完全没有覆盖、深绿文字压深底对比度不足的问题，暗色档改为由品牌绿与升起表面混合。玻璃皮肤的 `--jd-glass-heading` 覆盖优先级更高，行为不变。仓库卫生：删除游离的 `main.js.bak`、`pw-probe.txt`、`cleanup-check.txt`，`.gitignore` 补 `*.bak` 与 `tmp-*.txt` 防复发。npm run verify 全绿，纯样式改动不涉及逻辑与持久化。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
+- 设计令牌统一（第 1 批：色值与输入控件圆角）。新增跨作用域 `--jd-heading`，定义在 `body` 而非 `.jam-deck-root`——自有弹窗由 Obsidian Modal 挂载到工作台根节点之外，定义在根上会让弹窗侧解析失败；标题色不再是枚举白名单里的裸值 `#5c5c5c`。新增角色令牌 `--jd-radius-control` 收口文本输入控件圆角：此前 task-composer、browser-modal、task-form 用 6px，shortcut-form 用 9px，玻璃弹窗规则用 7px，同一种输入框在不同弹窗里形状不同，现统一为 7px。清理剪贴板僵尸样式：`.jam-deck-clip-text` 与 `.jam-deck-clip-text-time` 的扁平期规则（绿色左边框、绿色时间戳、4px 圆角）被 Spatial 重写的 `.jam-deck-root` 版本逐属性完全覆盖，长期不参与渲染，本次删除；灵动岛剪贴板使用独立类名，不受影响。修复倒计时输入格圆角长期被 Obsidian 主题覆盖的问题：`.jam-deck-countdown-duration` 是单类选择器（0,1,0），输给原生 `input[type="text"]`（0,1,1），常态实际取到主题的 `--input-radius`（本机 5px），而 `:focus`、`:disabled` 与运行态翻牌都是 7px，导致聚焦和启停时圆角跳变；选择器改为类型限定的 `input.jam-deck-countdown-duration`，输入格与翻牌一并接入 `--jd-radius-control`。玻璃皮肤的 `--jd-glass-heading` 覆盖优先级更高，行为不变。仓库卫生：删除游离的 `main.js.bak`、`pw-probe.txt`、`cleanup-check.txt`，`.gitignore` 补 `*.bak` 与 `tmp-*.txt` 防复发。npm run verify 全绿，并在 Obsidian 实机核对标题色与输入框圆角的计算值。纯样式改动，不涉及逻辑与持久化。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
 
 ## 1.1.9 — 2026-09-21（开发版）
 

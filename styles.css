@@ -3,6 +3,10 @@
    Only theme-invariant values belong in this block. */
 body {
   --jd-heading: #5c5c5c;
+  /* Role token, not a size step: every text entry control (input, textarea,
+     select, composed field) uses one corner so the same element never changes
+     shape between the workbench and a modal. */
+  --jd-radius-control: 7px;
 }
 
 .workspace-leaf-content[data-type="jam-deck-view"] .view-content {
@@ -382,7 +386,11 @@ body {
   min-width: 0;
   margin-left: auto;
 }
-.jam-deck-countdown-duration {
+/* Type-qualified on purpose: Obsidian's own input[type="text"] rule is (0,1,1)
+   and would otherwise win over a bare class, dropping the field back to the
+   theme's --input-radius while :focus/:disabled and the running flip digits
+   stayed at the intended corner. */
+input.jam-deck-countdown-duration {
   width: 34px;
   min-width: 0;
   height: 28px;
@@ -390,7 +398,7 @@ body {
   margin: 0;
   padding: 0 3px;
   border: 1px solid var(--jd-countdown-card-border, var(--background-modifier-border));
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: var(--jd-countdown-input-bg, var(--background-primary));
   box-shadow: var(--jd-countdown-input-shadow, none);
   color: var(--jd-countdown-card-ink, var(--text-normal));
@@ -437,7 +445,7 @@ body {
   height: clamp(26px, 2.4vw, 30px);
   overflow: hidden;
   border: 1px solid var(--jd-countdown-card-border, var(--background-modifier-border));
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: linear-gradient(
     to bottom,
     var(--jd-countdown-card-top, var(--background-primary-alt)) 0 49%,
@@ -504,10 +512,8 @@ body {
 .jam-deck-clip-image { position: relative; overflow: hidden; border-radius: 7px; background: var(--background-primary); line-height: 0; cursor: grab; }
 .jam-deck-clip-image img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
 .jam-deck-clip-overlay { position: absolute; top: 7px; left: 7px; padding: 2px 7px; color: #fff; background: rgba(0,0,0,0.46); border-radius: 4px; font-size: var(--jd-font-meta, 10px); line-height: 1.4; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
-.jam-deck-clip-text { position: relative; border-left: 2px solid var(--jd-accent-deep); padding: 5px 7px; background: var(--background-primary); border-radius: 4px; cursor: grab; }
 .jam-deck-clip-image.is-dragging,
 .jam-deck-clip-text.is-dragging { opacity: 0.48; cursor: grabbing; }
-.jam-deck-clip-text-time { display: block; margin-bottom: 3px; color: var(--jd-accent-deep); font-size: var(--jd-font-meta, 10px); font-weight: 600; }
 .jam-deck-clip-text-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--jd-font-body-compact, 11px); line-height: 1.45; max-height: 112px; overflow: auto; }
 .jam-deck-clip-toolbar { position: absolute; top: 5px; right: 5px; display: none; gap: 4px; z-index: 2; }
 .jam-deck-clip-image:hover .jam-deck-clip-toolbar,
@@ -521,7 +527,7 @@ body {
 .jam-deck-clipboard-drag-hint { margin-top: 8px; color: var(--text-faint); font-size: var(--jd-font-caption, 9px); line-height: 1.45; text-align: center; }
 
 .jam-deck-task-composer { display: flex; align-items: stretch; gap: 6px; margin-bottom: 8px; }
-.jam-deck-task-composer input { min-width: 0; min-height: 32px; flex: 1; margin: 0; padding: 6px 9px; box-sizing: border-box; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-label, 11px); }
+.jam-deck-task-composer input { min-width: 0; min-height: 32px; flex: 1; margin: 0; padding: 6px 9px; box-sizing: border-box; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-composer button { width: 32px; min-width: 32px; min-height: 32px; margin: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--interactive-accent); border-radius: 6px; background: var(--interactive-accent); color: var(--text-on-accent); box-shadow: none; font-size: 16px; line-height: 1; cursor: pointer; }
 .jam-deck-task-list { display: grid; gap: 5px; }
 .jam-deck-task { min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 8px; box-sizing: border-box; border: 1px solid transparent; border-radius: 7px; background: var(--background-primary); transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
@@ -1834,7 +1840,7 @@ body {
 .jam-deck-shortcut-preview .jam-deck-launcher-icon .jam-deck-launcher-fallback svg { width: 30px; height: 30px; }
 .jam-deck-shortcut-fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 18px; min-width: 0; }
 .jam-deck-shortcut-field { display: grid; min-width: 0; gap: 10px; font-size: var(--jd-font-body, 12px); color: var(--jd-muted); }
-.jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: 9px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-input, 13px); }
+.jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-control); background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-input, 13px); }
 .jam-deck-shortcut-modal .jam-deck-shortcut-form input:focus { border-color: var(--jd-line); box-shadow: none; }
 .jam-deck-shortcut-form input:focus-visible, .jam-deck-shortcut-form button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: -1px; }
 .jam-deck-shortcut-appearance { min-width: 0; display: grid; gap: 20px; }
@@ -1930,7 +1936,7 @@ body {
 .jam-deck-browser-modal { padding: 18px; }
 .jam-deck-browser-modal h2 { margin: 0 0 6px; }
 .jam-deck-browser-modal p { margin: 0 0 12px; color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
-.jam-deck-browser-modal input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); }
+.jam-deck-browser-modal input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); }
 .jam-deck-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .jam-deck-modal-actions button { padding: 5px 10px; border-radius: 5px; cursor: pointer; }
 
@@ -1974,7 +1980,7 @@ body {
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   background: var(--background-primary);
   color: var(--text-normal);
   font: inherit;
@@ -2089,7 +2095,6 @@ body {
   --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent);
   --jd-accent: #b8ff3d;
   --jd-accent-ink: #183000;
-  --jd-accent-deep: #3b6d11;
   --jd-cyan: #c9f4ee;
   --jd-danger: color-mix(in srgb, var(--text-error) 78%, #ff6b6b);
   --jd-radius-sm: 10px;
@@ -2125,7 +2130,6 @@ body {
   --jd-hover: color-mix(in srgb, var(--text-normal) 7%, transparent);
   --jd-accent: #c7ff55;
   --jd-accent-ink: #132000;
-  --jd-accent-deep: color-mix(in srgb, var(--jd-accent) 68%, var(--jd-surface-raised));
   --jd-cyan: #1e4e49;
   --jd-shadow-card: 0 1px 1px rgb(0 0 0 / 0.24), 0 9px 22px rgb(0 0 0 / 0.25);
   --jd-shadow-lift: 0 2px 4px rgb(0 0 0 / 0.28), 0 16px 34px rgb(0 0 0 / 0.32);
@@ -4149,7 +4153,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-countdown-duration {
   background: var(--jd-countdown-input-bg);
   border: 1px solid var(--jd-line);
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   color: var(--jd-ink);
   box-shadow: none;
 }
@@ -4271,7 +4275,7 @@ body[data-jam-deck-skin="glass"] :is(.jam-deck-task-modal, .jam-deck-shortcut-mo
   :is(input[type="text"], input[type="url"], input[type="date"], textarea, select) {
   background: var(--jd-dialog-field);
   border: 1px solid var(--jd-dialog-line);
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   color: var(--text-normal);
   box-shadow: none;
 }
