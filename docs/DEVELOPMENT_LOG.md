@@ -1,5 +1,16 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-26 — 1.2.0 滚动条改为悬停才出现
+
+- Jam 反馈「滚动条好像又全部出来了」。先查证是否为本轮回归：`git diff baseline/pre-token-refactor..HEAD -- styles.css` 过滤 scrollbar 无任何命中，四个 commit 都没碰这组规则。实际是**既有设计**——滑块基态就是 `--text-muted` 20% 常驻，`docs/VISUAL_DESIGN.md` 原文也写着「默认可见滑块 2px、20% 强度」。所以这是需求变更，不是修 bug。
+- 改法：滑块基态改为完全透明，新增一段「所属面板悬停或聚焦才显示 20%」。**关键约束是 6px 占位宽度必须与显隐解耦**——`::-webkit-scrollbar` 的 `width` 保持不动，只切 `::-webkit-scrollbar-thumb` 的 `background`，否则显隐会让内容宽度来回跳 6px。显隐条件带上 `:focus-within` 保留键盘路径；不给粗指针环境开常驻，与插件里其他悬停态控件的既定态度一致。
+- 特异性排布：面板显隐规则 `:is(hosts):is(:hover, :focus-within) *::-webkit-scrollbar-thumb` 与滑块自身悬停规则 `:is(hosts) *::-webkit-scrollbar-thumb:hover` 都是 (0,2,0)，靠**书写顺序**决定胜负，因此滑块悬停段必须排在面板显隐段之后。第一版把 AI 面板写成 `.jam-deck-root .jam-deck-ai-chat:hover`，(0,3,0) 压过了滑块悬停的 (0,2,0)，会导致指针压在 AI 面板滚动条上时卡在 20% 不变粗；去掉 `.jam-deck-root` 前缀降回 (0,2,0) 后修正。
+- 顺带补齐既有缺口：这六段规则此前只列了 `.jam-deck-root`、`.jam-deck-canvas-picker-modal`、`.jam-deck-shortcut-editor-modal` 三个宿主，而 `.jam-deck-picker`、`.jam-deck-task-modal`、`.jam-deck-archive-modal`、`.jam-deck-browser-modal`、`.jam-deck-shortcut-modal`、`.jam-deck-folder-rename-modal`、`.jam-deck-settings` 一直在用 Obsidian 原生滚动条——规范明写「弹窗挂载在工作台根节点外，必须显式接入同一组规则」，属长期未落地。改用 `:is()` 收拢宿主清单并补到 11 个，同时把 `::-webkit-scrollbar-button` 段里冗余的 `:single-button` 变体去掉（通用按钮伪元素已覆盖）。
+- **写错过一次**：想用 `:is(hosts) :is(::-webkit-scrollbar-track, ::-webkit-scrollbar-corner)` 合并两个伪元素。`:is()` 内不允许伪元素，而顶层逗号选择器列表**不是** forgiving 的，一个无效选择器会让整条规则被静默丢弃——轨道与角落会直接退回原生外观。已拆回四个独立选择器。
+- **验证手段踩坑记录（重要）**：`getComputedStyle(el, "::-webkit-scrollbar-thumb")` 的返回值**不反映真实渲染**。先用它读到基态 `rgba(0,0,0,0)`，看着对；但插入一条 `background: rgb(1,2,3) !important` 的哨兵规则后读数毫无变化，说明读数不可信。`dev:screenshot` 在连续调用时也会返回内容完全相同的缓存图。最终找到可靠办法：**临时把槽位宽度从 6px 改成 16px，测滚动容器 `clientWidth` 的差值**——实测 266 → 256，delta 恰好 10px，证明「祖先状态 + 后代 + 滚动条伪元素」这套选择器完全生效。再用 `:is(.jam-deck-widget):is(.is-probe)` 同形状探针复测，delta 同样为 10，确认 `:is(A):is(B)` 嵌套形式可用。
+- 验收：六段规则全部存在于运行时 CSSOM（宿主引用数 22/44/22/22/24/22，与预期一致），说明没有被无效选择器拖累而丢弃；滚动条实际占位 `offsetWidth - clientWidth - 边框` = 6px；归档弹窗自身滚动条已由原生宽度变为 6px，确认弹窗接入生效。真实鼠标悬停的观感留给 Jam 肉眼确认——`:hover` 无法程序化触发。
+- `npm run verify` 全绿（exit 0，不经管道），已部署热重载。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
+
 ## 2026-09-26 — 1.2.0 圆角归双数与僵尸普查扩展
 
 - 按 Jam 要求把散落的六个按钮圆角值向双数归拢。执行顺序上先做普查再动圆角——`.jam-deck-clip-image` 的 7px 已确证是僵尸，给死代码改值是白费力气。
