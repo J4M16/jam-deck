@@ -58,7 +58,9 @@
 - 占位宽度与显隐无关，恒为 6px：显隐只切换滑块颜色，不得改动槽位尺寸，否则内容宽度会随悬停跳动。
 - 显隐条件同时包含 `:hover` 与 `:focus-within`，保证键盘路径可见。不为粗指针环境常驻显示，与插件其他悬停态控件的处理保持一致。
 - 使用既有 WebKit 样式保证精确像素，不添加会覆盖它的 `scrollbar-width: thin` 或 `scrollbar-color`。弹窗挂载在工作台根节点外，必须把弹窗类显式加进全部宿主清单——槽位、轨道/角、按钮、滑块基态、面板显隐、滑块悬停共六段规则各一份，漏一段就会退回 Obsidian 原生滚动条。
-- `:is()` 内不得出现伪元素，一个无效选择器会让整条规则被静默丢弃。另注意 `getComputedStyle(el, "::-webkit-scrollbar-thumb")` 的返回值不反映真实渲染，不能用它验收；可靠办法是临时把槽位宽度改成别的值，观察滚动容器 `clientWidth` 的差值。
+- **状态相关的滚动条选择器一律逐个展开，不得用 `:is()` 收拢宿主。** Chromium 匹配 `::-webkit-scrollbar-*` 走独立路径，一旦伪类落在 `:is()` 内（如 `:is(.a, .b):is(:hover) *::-webkit-scrollbar-thumb`）就永不匹配，且不报错——表现正是「滑块藏起来再也不出现」。无状态的段（槽位、轨道、按钮、滑块基态）可以用 `:is()`。
+- `:is()` 内也不得出现伪元素：顶层逗号选择器列表不是 forgiving 的，一个无效选择器会让整条规则被静默丢弃。
+- 验收手段：`getComputedStyle(el, "::-webkit-scrollbar-thumb")` 的返回值**不反映真实渲染**，`dev:screenshot` 可能返回缓存帧，两者都不能用来验收。可靠办法有两种——量尺寸时临时改槽位宽度、观察滚动容器 `clientWidth` 的差值；验状态时用 `require("electron").remote` 取 webContents，`sendInputEvent` 派发真实 `mouseMove`，再用 `capturePage` 裁剪滚动条那一小条区域截图对比离开／悬停面板／压在滑块上三个状态。
 
 ## Canvas 选择弹窗
 

@@ -3263,27 +3263,91 @@ input.jam-deck-countdown-duration {
    owning panel is hovered or holds focus. The 6px gutter declared above never
    changes, so revealing a thumb cannot reflow content. focus-within keeps the
    keyboard path visible; no coarse-pointer fallback, matching how the rest of
-   the plugin treats hover-only affordances. */
-:is(.jam-deck-widget, .jam-deck-ai-chat, .jam-deck-picker, .jam-deck-canvas-picker,
-  .jam-deck-canvas-picker-modal, .jam-deck-browser-modal, .jam-deck-task-modal,
-  .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
-  .jam-deck-folder-rename-modal, .jam-deck-settings):is(:hover, :focus-within)::-webkit-scrollbar-thumb,
-:is(.jam-deck-widget, .jam-deck-ai-chat, .jam-deck-picker, .jam-deck-canvas-picker,
-  .jam-deck-canvas-picker-modal, .jam-deck-browser-modal, .jam-deck-task-modal,
-  .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
-  .jam-deck-folder-rename-modal, .jam-deck-settings):is(:hover, :focus-within) *::-webkit-scrollbar-thumb {
+   the plugin treats hover-only affordances.
+
+   Hosts are spelled out instead of collected with :is() on purpose. Chromium
+   matches ::-webkit-scrollbar-* through a separate path that silently fails
+   once a pseudo-class lives inside :is() -- ":is(a, b):is(:hover) *::-webkit-
+   scrollbar-thumb" never matches, so the thumb would hide and never come back.
+   Verified with a real mouseMove via sendInputEvent plus capturePage. Keep the
+   state-dependent selectors expanded; the stateless blocks above may use :is(). */
+.jam-deck-widget:hover::-webkit-scrollbar-thumb,
+.jam-deck-widget:hover *::-webkit-scrollbar-thumb,
+.jam-deck-widget:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-widget:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:hover::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:hover *::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-picker:hover::-webkit-scrollbar-thumb,
+.jam-deck-picker:hover *::-webkit-scrollbar-thumb,
+.jam-deck-picker:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-picker:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:hover::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:hover *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-settings:hover::-webkit-scrollbar-thumb,
+.jam-deck-settings:hover *::-webkit-scrollbar-thumb,
+.jam-deck-settings:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-settings:focus-within *::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-muted) 20%, transparent) !important;
   background-clip: content-box !important;
 }
 
 /* Pointer resting on the thumb itself: full 6px at 40%. Listed after the
-   panel-hover rule so it wins the equal-specificity tie. */
-:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
-  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal,
-  .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-thumb:hover,
-:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
-  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal,
-  .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-thumb:hover {
+   panel-reveal rule so it wins the equal-specificity tie, and expanded for the
+   same Chromium limitation described above. */
+.jam-deck-root::-webkit-scrollbar-thumb:hover,
+.jam-deck-root *::-webkit-scrollbar-thumb:hover,
+.jam-deck-picker::-webkit-scrollbar-thumb:hover,
+.jam-deck-picker *::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker *::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-browser-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-browser-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-task-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-task-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-archive-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-archive-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-editor-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-folder-rename-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-folder-rename-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-settings::-webkit-scrollbar-thumb:hover,
+.jam-deck-settings *::-webkit-scrollbar-thumb:hover {
   border-width: 0 !important;
   background: color-mix(in srgb, var(--text-muted) 40%, transparent) !important;
   background-clip: border-box !important;

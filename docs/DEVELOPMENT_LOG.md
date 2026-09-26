@@ -1,5 +1,16 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-26 — 1.2.0 修复滚动条藏起来不再出现（:is() + 滚动条伪元素的陷阱）
+
+- Jam 反馈「hover 没有变粗，刚中间有一次我看到实现了，现在没有了」。这条反馈信息量极大：说明第一版（逐个展开宿主）是对的，而随后为补全弹窗宿主所做的 `:is()` 重构把它弄坏了。
+- **根因**：Chromium 匹配 `::-webkit-scrollbar-*` 系列伪元素走的是独立于常规选择器的代码路径，**一旦伪类落在 `:is()` 内部就永不匹配**，而且不报错、不降级。于是出现了最迷惑的组合表现——滑块基态那段没有伪类、`:is()` 正常生效，把滑块成功隐藏；面板显隐段 `:is(hosts):is(:hover, :focus-within) *::-webkit-scrollbar-thumb` 与滑块悬停段 `:is(hosts) *::-webkit-scrollbar-thumb:hover` 都带伪类，双双失效。净效果就是「藏起来了，再也不出来」。
+- **诊断过程（这次终于找到可靠工具）**：前一轮已确认 `getComputedStyle(el, "::-webkit-scrollbar-thumb")` 不反映真实渲染、`dev:screenshot` 会返回缓存帧，两者都不能用。这次发现 Obsidian 渲染进程里 `require("electron").remote` **可用**，于是：① `remote.getCurrentWebContents().sendInputEvent({type:"mouseMove", x, y})` 派发真实鼠标；② 先自检 `document.querySelectorAll(":hover")`，确认链条里确实出现了 `jam-deck-widget is-clock` 与 `jam-deck-widget-body`，证明事件生效、`.jam-deck-widget:hover` 确实匹配；③ 用 `capturePage({x, y, width: 40, height: 120})` 只截滚动条那一小条、`toPNG()` 落盘，绕开 `dev:screenshot` 的缓存。
+- **决定性实验**：在此基础上插入一条**不带 `:is()`** 的 `.jam-deck-widget:hover *::-webkit-scrollbar-thumb { background: red }`，真实鼠标悬停后截图——红色滑块清晰出现。同一位置、同一状态下带 `:is()` 的规则毫无反应。病因锁定。
+- 修复：面板显隐与滑块悬停两段逐个展开，分别得到 48 条和 22 条选择器（12 个面板 × hover/focus-within × 自身/后代；11 个宿主 × 自身/后代），生成用一次性脚本完成以免手写出错。无状态的四段（槽位、轨道/角、按钮、滑块基态）继续用 `:is()`——它们已被 `clientWidth` 差值实测验证生效。代码里就地写了注释说明这条分界线。
+- 三态验收（真实鼠标 + 裁剪截图）：鼠标离开组件时只剩组件边界线、无滑块；移入组件内出现细浅灰滑块；压到滑块本身变成明显更粗更深的 6px。
+- 教训沉淀：凡涉及 `::-webkit-scrollbar-*` 的状态样式，选择器必须朴素——宿主类 + 伪类直接相连 + 后代 + 伪元素，不要套现代选择器函数。已写入 `docs/VISUAL_DESIGN.md` 滚动条一节，连同「用 sendInputEvent + capturePage 验收」的方法。
+- `npm run verify` 全绿（exit 0，不经管道），已部署热重载。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
+
 ## 2026-09-26 — 1.2.0 滚动条改为悬停才出现
 
 - Jam 反馈「滚动条好像又全部出来了」。先查证是否为本轮回归：`git diff baseline/pre-token-refactor..HEAD -- styles.css` 过滤 scrollbar 无任何命中，四个 commit 都没碰这组规则。实际是**既有设计**——滑块基态就是 `--text-muted` 20% 常驻，`docs/VISUAL_DESIGN.md` 原文也写着「默认可见滑块 2px、20% 强度」。所以这是需求变更，不是修 bug。
