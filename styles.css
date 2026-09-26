@@ -3,10 +3,21 @@
    Only theme-invariant values belong in this block. */
 body {
   --jd-heading: #5c5c5c;
-  /* Role token, not a size step: every text entry control (input, textarea,
-     select, composed field) uses one corner so the same element never changes
-     shape between the workbench and a modal. */
-  --jd-radius-control: 7px;
+
+  /* Corner scale. Every step is an even number: odd values were folded into
+     the nearest even neighbour (5 -> 4, 7 -> 6, 9 -> 8; 3 moves up to 4
+     because 2px is reserved for the folder and turntable geometry, which is
+     not part of this scale).
+     The first three are role tokens rather than size steps, so the same kind
+     of element keeps one corner wherever it appears. Icon corners stay
+     proportional to their box and deliberately sit outside this scale. */
+  --jd-radius-chip: 4px;      /* badges, micro controls, progress tracks */
+  --jd-radius-control: 6px;   /* text inputs and buttons */
+  --jd-radius-surface: 8px;   /* small surfaces inside a widget: cards, rows */
+  --jd-radius-sm: 10px;       /* icon-sized boxes */
+  --jd-radius-md: 14px;       /* groupings */
+  --jd-radius-lg: 18px;       /* primary surfaces and dialogs */
+  --jd-radius-pill: 999px;
 }
 
 .workspace-leaf-content[data-type="jam-deck-view"] .view-content {
@@ -86,7 +97,7 @@ body {
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
   color: var(--text-normal);
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   cursor: pointer;
 }
 
@@ -118,7 +129,7 @@ body {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--background-secondary);
   container-type: inline-size;
 }
@@ -195,7 +206,7 @@ body {
   visibility: hidden;
   pointer-events: none;
   z-index: 6;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   border: 2px solid transparent;
   background:
     linear-gradient(
@@ -272,7 +283,7 @@ body {
   position: absolute;
   z-index: 6;
   pointer-events: none;
-  border-radius: 3px;
+  border-radius: var(--jd-radius-chip);
 }
 .jam-deck-widget.is-layout-seam-top::before {
   left: 0;
@@ -508,40 +519,35 @@ input.jam-deck-countdown-duration {
   line-height: 1.6;
 }
 
-.jam-deck-clipboard-gallery { display: grid; gap: 8px; }
-.jam-deck-clip-image { position: relative; overflow: hidden; border-radius: 7px; background: var(--background-primary); line-height: 0; cursor: grab; }
-.jam-deck-clip-image img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
-.jam-deck-clip-overlay { position: absolute; top: 7px; left: 7px; padding: 2px 7px; color: #fff; background: rgba(0,0,0,0.46); border-radius: 4px; font-size: var(--jd-font-meta, 10px); line-height: 1.4; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
+.jam-deck-clip-overlay { position: absolute; top: 7px; left: 7px; padding: 2px 7px; color: #fff; background: rgba(0,0,0,0.46); border-radius: var(--jd-radius-chip); font-size: var(--jd-font-meta, 10px); line-height: 1.4; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
 .jam-deck-clip-image.is-dragging,
 .jam-deck-clip-text.is-dragging { opacity: 0.48; cursor: grabbing; }
 .jam-deck-clip-text-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--jd-font-body-compact, 11px); line-height: 1.45; max-height: 112px; overflow: auto; }
-.jam-deck-clip-toolbar { position: absolute; top: 5px; right: 5px; display: none; gap: 4px; z-index: 2; }
 .jam-deck-clip-image:hover .jam-deck-clip-toolbar,
 .jam-deck-clip-text:hover .jam-deck-clip-toolbar { display: flex; }
-.jam-deck-clip-btn { padding: 2px 6px; border: 0; border-radius: 4px; background: rgba(0,0,0,0.55); color: #fff; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-clip-btn { padding: 2px 6px; border: 0; border-radius: var(--jd-radius-chip); background: rgba(0,0,0,0.55); color: #fff; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
 .jam-deck-clip-btn:hover { background: rgba(0,0,0,0.75); }
 .jam-deck-clip-btn.is-danger:hover { background: rgba(180,30,30,0.85); }
-.jam-deck-clip-text .jam-deck-clip-btn { background: var(--background-modifier-border); color: var(--text-normal); }
 .jam-deck-clip-text .jam-deck-clip-btn:hover { background: var(--background-modifier-hover); }
 .jam-deck-clip-text .jam-deck-clip-btn.is-danger:hover { background: var(--text-error); color: #fff; }
 .jam-deck-clipboard-drag-hint { margin-top: 8px; color: var(--text-faint); font-size: var(--jd-font-caption, 9px); line-height: 1.45; text-align: center; }
 
 .jam-deck-task-composer { display: flex; align-items: stretch; gap: 6px; margin-bottom: 8px; }
 .jam-deck-task-composer input { min-width: 0; min-height: 32px; flex: 1; margin: 0; padding: 6px 9px; box-sizing: border-box; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-label, 11px); }
-.jam-deck-task-composer button { width: 32px; min-width: 32px; min-height: 32px; margin: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--interactive-accent); border-radius: 6px; background: var(--interactive-accent); color: var(--text-on-accent); box-shadow: none; font-size: 16px; line-height: 1; cursor: pointer; }
+.jam-deck-task-composer button { width: 32px; min-width: 32px; min-height: 32px; margin: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--interactive-accent); border-radius: var(--jd-radius-control); background: var(--interactive-accent); color: var(--text-on-accent); box-shadow: none; font-size: 16px; line-height: 1; cursor: pointer; }
 .jam-deck-task-list { display: grid; gap: 5px; }
-.jam-deck-task { min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 8px; box-sizing: border-box; border: 1px solid transparent; border-radius: 7px; background: var(--background-primary); transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.jam-deck-task { min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 8px; box-sizing: border-box; border: 1px solid transparent; border-radius: var(--jd-radius-control); background: var(--background-primary); transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
 .jam-deck-task:hover { background: var(--background-modifier-hover); }
 .jam-deck-task.is-completed { opacity: 0.68; }
 .jam-deck-task.is-archiving { opacity: 0.5; }
 .jam-deck-task-check { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; accent-color: var(--interactive-accent); cursor: pointer; }
 
 .jam-deck-task-main:hover { color: var(--text-accent); }
-.jam-deck-task-main:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: 3px; }
+.jam-deck-task-main:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: var(--jd-radius-chip); }
 .jam-deck-task.is-completed .jam-deck-task-main { text-decoration: line-through; }
 .jam-deck-task-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .jam-deck-task-archive,
-.jam-deck-task-delete { height: 26px; min-height: 26px; margin: 0; padding: 0; display: grid; place-items: center; flex: 0 0 auto; white-space: nowrap; border: 1px solid var(--background-modifier-border); border-radius: 5px; background: transparent; color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-meta, 10px); line-height: 1; cursor: pointer; }
+.jam-deck-task-delete { height: 26px; min-height: 26px; margin: 0; padding: 0; display: grid; place-items: center; flex: 0 0 auto; white-space: nowrap; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: transparent; color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-meta, 10px); line-height: 1; cursor: pointer; }
 .jam-deck-task-archive { width: 40px; }
 .jam-deck-task-delete { width: 26px; font-size: 13px; opacity: 0; transition: opacity 0.15s, border-color 0.15s, background 0.15s, color 0.15s; }
 .jam-deck-task:hover .jam-deck-task-delete,
@@ -557,8 +563,8 @@ input.jam-deck-countdown-duration {
 .jam-deck-task-foot { margin-top: 8px; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); text-align: center; }
 .jam-deck-task-dropzone,
 .jam-deck-launcher-dropzone { position: relative; }
-.jam-deck-launcher-dropzone.is-drop-target::after { content: "释放以添加"; position: absolute; inset: 5px; z-index: 12; display: grid; place-items: center; border: 1px dashed var(--interactive-accent); border-radius: 7px; background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 650; pointer-events: none; backdrop-filter: blur(4px); }
-.jam-deck-task-create-drop { max-height: 0; min-height: 0; margin: 0; padding: 0 10px; overflow: hidden; box-sizing: border-box; display: grid; place-items: center; border: 1px dashed transparent; border-radius: 7px; opacity: 0; color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 600; line-height: 1.3; pointer-events: none; transform: translateY(-4px); transition: max-height 0.18s ease, min-height 0.18s ease, margin 0.18s ease, padding 0.18s ease, opacity 0.15s ease, transform 0.18s ease, background 0.15s ease; }
+.jam-deck-launcher-dropzone.is-drop-target::after { content: "释放以添加"; position: absolute; inset: 5px; z-index: 12; display: grid; place-items: center; border: 1px dashed var(--interactive-accent); border-radius: var(--jd-radius-control); background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 650; pointer-events: none; backdrop-filter: blur(4px); }
+.jam-deck-task-create-drop { max-height: 0; min-height: 0; margin: 0; padding: 0 10px; overflow: hidden; box-sizing: border-box; display: grid; place-items: center; border: 1px dashed transparent; border-radius: var(--jd-radius-control); opacity: 0; color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 600; line-height: 1.3; pointer-events: none; transform: translateY(-4px); transition: max-height 0.18s ease, min-height 0.18s ease, margin 0.18s ease, padding 0.18s ease, opacity 0.15s ease, transform 0.18s ease, background 0.15s ease; }
 .jam-deck-task-dropzone.is-drag-active .jam-deck-task-create-drop { max-height: 38px; min-height: 34px; margin: 0 0 8px; padding: 7px 10px; border-color: var(--interactive-accent); opacity: 1; pointer-events: auto; transform: translateY(0); }
 .jam-deck-task-create-drop.is-drop-target { background: color-mix(in srgb, var(--background-primary) 82%, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, transparent 68%, var(--interactive-accent)); }
 .jam-deck-task.is-drop-target { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, transparent 72%, var(--interactive-accent)); }
@@ -567,7 +573,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-calendar-weekdays,
 .jam-deck-calendar-days { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; gap: 2px; }
 .jam-deck-calendar-weekdays { color: var(--text-muted); font-size: var(--jd-font-caption, 9px); margin-bottom: 3px; }
-.jam-deck-calendar-days span { display: grid; place-items: center; height: 22px; border-radius: 4px; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-calendar-days span { display: grid; place-items: center; height: 22px; border-radius: var(--jd-radius-chip); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
 .jam-deck-calendar-days span:not(.is-blank):hover { background: var(--background-modifier-hover); }
 .jam-deck-calendar-days .is-today { background: var(--interactive-accent); color: var(--text-on-accent); font-weight: 600; }
 .jam-deck-calendar-foot { margin-top: 8px; text-align: center; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); }
@@ -580,7 +586,7 @@ input.jam-deck-countdown-duration {
 
 .jam-deck-canvas-leaf > .workspace-leaf-content { display: flex; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .jam-deck-canvas-leaf .view-content { flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0; overflow: hidden; }
-.jam-deck-canvas-beta { flex: 0 0 auto; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--text-accent) 35%, transparent); border-radius: 999px; color: var(--text-accent); font-size: var(--jd-font-badge, 8px); font-weight: 700; line-height: 1.4; letter-spacing: .02em; }
+.jam-deck-canvas-beta { flex: 0 0 auto; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--text-accent) 35%, transparent); border-radius: var(--jd-radius-pill); color: var(--text-accent); font-size: var(--jd-font-badge, 8px); font-weight: 700; line-height: 1.4; letter-spacing: .02em; }
 .jam-deck-canvas-embed-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-muted); font-size: var(--jd-font-label, 11px); pointer-events: none; }
 .jam-deck-canvas-embed-host.is-ready .jam-deck-canvas-embed-loading { display: none; }
 .jam-deck-canvas-embed-host.is-fallback { display: grid; place-items: center; padding: 18px; box-sizing: border-box; }
@@ -589,7 +595,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-canvas-embed-state-title { font-size: var(--jd-font-body, 12px); font-weight: 650; }
 .jam-deck-canvas-embed-state-path { max-width: 100%; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); overflow-wrap: anywhere; }
 .jam-deck-canvas-embed-state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 3px; }
-.jam-deck-canvas-embed-state-actions button { min-height: 28px; margin: 0; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: 5px; background: var(--background-secondary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-canvas-embed-state-actions button { min-height: 28px; margin: 0; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: var(--background-secondary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
 .jam-deck-canvas-embed-state-actions button:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
 .jam-deck-canvas-embed-host.is-compact .jam-deck-canvas-embed-state { gap: 4px; }
 .jam-deck-canvas-embed-host.is-compact .jam-deck-canvas-embed-state-icon { font-size: 22px; }
@@ -602,7 +608,7 @@ input.jam-deck-countdown-duration {
   align-items: center;
   overflow: visible;
   border: 1px solid color-mix(in srgb, var(--jd-line) 70%, transparent);
-  border-radius: 18px;
+  border-radius: var(--jd-radius-lg);
   background: color-mix(in srgb, var(--jd-board) 82%, var(--jd-surface-raised));
   box-shadow: 0 10px 26px rgb(0 0 0 / 0.18), 0 2px 5px rgb(0 0 0 / 0.12);
   backdrop-filter: blur(12px);
@@ -618,7 +624,7 @@ input.jam-deck-countdown-duration {
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--jd-radius-md);
   background: transparent;
   color: var(--jd-muted);
   box-shadow: none;
@@ -705,12 +711,12 @@ input.jam-deck-countdown-duration {
   content: "";
   width: 22px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jam-deck-ink-color);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.24);
 }
 .jam-deck-canvas-leaf .jam-deck-ink-color[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--jd-surface-raised), 0 0 0 4px var(--jam-deck-ink-color); }
-.jam-deck-canvas-leaf .jam-deck-ink-width span { display: block; width: 24px; height: var(--jam-deck-ink-width); max-height: 9px; border-radius: 999px; background: currentColor; }
+.jam-deck-canvas-leaf .jam-deck-ink-width span { display: block; width: 24px; height: var(--jam-deck-ink-width); max-height: 9px; border-radius: var(--jd-radius-pill); background: currentColor; }
 .jam-deck-canvas-leaf .jam-deck-drawing-palette .jam-deck-ink-done { width: auto; min-width: 56px; padding: 0 10px; color: var(--jd-ink); background: var(--jd-hover); font-size: 12px; font-weight: 650; }
 .jam-deck-canvas-leaf .jam-deck-drawing-palette.is-eraser [data-group="color"] { opacity: 0.36; pointer-events: none; }
 
@@ -851,7 +857,7 @@ input.jam-deck-countdown-duration {
   overflow: hidden;
   box-sizing: border-box;
   border: 2px solid rgb(255 255 255 / 0.92);
-  border-radius: var(--jd-canvas-image-radius, 10px);
+  border-radius: var(--jd-canvas-image-radius);
   background: color-mix(in srgb, var(--background-primary) 88%, var(--jd-folder-color) 12%);
   box-shadow: 0 3px 10px rgb(0 0 0 / 0.12);
   pointer-events: none;
@@ -1068,7 +1074,7 @@ input.jam-deck-countdown-duration {
     var(--jd-paper, var(--background-primary));
   color: var(--jd-ink, var(--text-normal));
   border: 1px solid var(--jd-paper-edge, transparent);
-  border-radius: var(--jd-radius-md, 14px);
+  border-radius: var(--jd-radius-md);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.42),
     var(--jd-shadow-lift, 0 28px 80px -24px rgb(0 0 0 / 0.68));
@@ -1126,7 +1132,7 @@ input.jam-deck-countdown-duration {
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   color: #fff !important;
   background: rgb(255 255 255 / 0.15) !important;
   background-image: none !important;
@@ -1368,8 +1374,8 @@ input.jam-deck-countdown-duration {
   min-width: 0;
   min-height: 0;
   background: var(--background-primary);
-  --jd-canvas-image-radius: var(--jd-radius-sm, 10px);
-  --jd-canvas-group-radius: var(--jd-radius-md, 14px);
+  --jd-canvas-image-radius: var(--jd-radius-sm);
+  --jd-canvas-group-radius: var(--jd-radius-md);
 }
 
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-layer {
@@ -1395,7 +1401,7 @@ input.jam-deck-countdown-duration {
   z-index: 1;
   inset: 0;
   overflow: visible;
-  border-radius: var(--jd-radius-md, 14px);
+  border-radius: var(--jd-radius-md);
   pointer-events: none;
   cursor: default;
 }
@@ -1432,7 +1438,7 @@ input.jam-deck-countdown-duration {
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--jd-folder-panel-edge);
-  border-radius: var(--jd-radius-md, 14px);
+  border-radius: var(--jd-radius-md);
   background: var(--jd-folder-panel);
   box-shadow: var(--jd-folder-shadow);
   pointer-events: none;
@@ -1570,7 +1576,7 @@ input.jam-deck-countdown-duration {
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-folder-control-ink);
   box-shadow: none;
@@ -1622,7 +1628,7 @@ input.jam-deck-countdown-duration {
   min-height: 28px;
   padding: 5px 7px;
   border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: rgb(30 33 37 / 0.96);
   box-shadow: 0 4px 10px rgb(0 0 0 / 0.24), 0 12px 24px rgb(0 0 0 / 0.24);
   white-space: nowrap;
@@ -1793,19 +1799,19 @@ input.jam-deck-countdown-duration {
 
 .jam-deck-browser-empty { height: 100%; display: grid; place-items: center; gap: 8px; color: var(--text-muted); font-size: var(--jd-font-label, 11px); text-align: center; }
 .jam-deck-primary-button { padding: 5px 9px; font-size: var(--jd-font-label, 11px); }
-.jam-deck-browser-frame { width: 100%; height: calc(100% - 22px); border: 0; border-radius: 5px; background: #fff; }
+.jam-deck-browser-frame { width: 100%; height: calc(100% - 22px); border: 0; border-radius: var(--jd-radius-chip); background: #fff; }
 .jam-deck-browser-fallback { display: block; margin-top: 4px; color: var(--text-accent); font-size: var(--jd-font-meta, 10px); text-align: center; }
 
 .jam-deck-launcher-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
-.jam-deck-launcher-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; cursor: grab; position: relative; transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease; }
+.jam-deck-launcher-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: var(--jd-radius-surface); cursor: grab; position: relative; transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease; }
 .jam-deck-launcher-item:active { cursor: grabbing; }
 .jam-deck-launcher-item:hover { background: var(--background-modifier-hover); transform: scale(1.08); }
 .jam-deck-launcher-item.is-reordering { opacity: 0.52; }
 .jam-deck-launcher-item.is-insert-before::before,
-.jam-deck-launcher-item.is-insert-after::after { content: ""; position: absolute; z-index: 3; top: 11%; bottom: 11%; width: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 64%, transparent); pointer-events: none; }
+.jam-deck-launcher-item.is-insert-after::after { content: ""; position: absolute; z-index: 3; top: 11%; bottom: 11%; width: 2px; border-radius: var(--jd-radius-pill); background: color-mix(in srgb, var(--text-muted) 64%, transparent); pointer-events: none; }
 .jam-deck-launcher-item.is-insert-before::before { left: -5px; }
 .jam-deck-launcher-item.is-insert-after::after { right: -5px; }
-.jam-deck-launcher-grid.is-insert-at-end::after { content: ""; width: 2px; min-height: 44px; align-self: center; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 54%, transparent); }
+.jam-deck-launcher-grid.is-insert-at-end::after { content: ""; width: 2px; min-height: 44px; align-self: center; border-radius: var(--jd-radius-pill); background: color-mix(in srgb, var(--text-muted) 54%, transparent); }
 .jam-deck-launcher-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; overflow: hidden; }
 .jam-deck-launcher-icon img { width: 100%; height: 100%; object-fit: contain; }
 .jam-deck-launcher-icon span { font-size: 24px; }
@@ -1822,7 +1828,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-launcher-icon .jam-deck-launcher-fallback svg { width: 20px; height: 20px; }
 .jam-deck-launcher-name { font-size: var(--jd-font-meta, 10px); text-align: center; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-normal); }
 .jam-deck-launcher-live { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
-.jam-deck-launcher-edit { position: absolute; top: 2px; right: 2px; min-width: 19px; height: 19px; margin: 0; padding: 0 4px; display: grid; place-items: center; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-caption, 9px); line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.jam-deck-launcher-edit { position: absolute; top: 2px; right: 2px; min-width: 19px; height: 19px; margin: 0; padding: 0 4px; display: grid; place-items: center; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: var(--background-primary); color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-caption, 9px); line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
 .jam-deck-launcher-edit.is-edit { right: 24px; }
 .jam-deck-launcher-item:hover .jam-deck-launcher-edit,
 .jam-deck-launcher-item:focus-within .jam-deck-launcher-edit { opacity: 1; }
@@ -1846,13 +1852,13 @@ input.jam-deck-countdown-duration {
 .jam-deck-shortcut-appearance { min-width: 0; display: grid; gap: 20px; }
 .jam-deck-shortcut-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--jd-font-body, 12px); font-weight: 600; }
 .jam-deck-shortcut-modes { display: flex; gap: 4px; }
-.jam-deck-shortcut-modes button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 999px; box-shadow: none; background: transparent; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
+.jam-deck-shortcut-modes button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--jd-radius-pill); box-shadow: none; background: transparent; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
 .jam-deck-shortcut-modes button[aria-pressed="true"] { color: var(--jd-ink); background: var(--jd-hover); border-color: var(--jd-line); }
 .jam-deck-shortcut-character-controls { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .jam-deck-shortcut-character-controls input[type="text"] { text-align: center; }
 .jam-deck-shortcut-form input[type="color"] { cursor: pointer; padding: 5px; }
 .jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-.jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch { border: 0; border-radius: var(--jd-radius-chip); }
 .jam-deck-shortcut-folder-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--jd-font-body, 12px); color: var(--jd-muted); }
 .jam-deck-shortcut-palette { display: flex; gap: 4px; }
 .jam-deck-shortcut-palette button { width: 30px; height: 30px; padding: 5px; border: 1px solid transparent; border-radius: 50%; background: var(--jd-swatch); background-clip: content-box; box-shadow: none; }
@@ -1863,7 +1869,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-shortcut-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 20px; border-top: 1px solid var(--jd-line); }
 .jam-deck-shortcut-footer > .jam-deck-shortcut-hint { flex: 1; min-width: 140px; }
 .jam-deck-shortcut-modal .jam-deck-modal-actions { flex-shrink: 0; margin: 0 0 0 auto; gap: 10px; }
-.jam-deck-shortcut-modal .jam-deck-modal-actions button { height: 38px; min-width: 76px; border: 1px solid var(--jd-line); border-radius: 999px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-body, 12px); }
+.jam-deck-shortcut-modal .jam-deck-modal-actions button { height: 38px; min-width: 76px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-pill); background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-body, 12px); }
 .jam-deck-shortcut-modal .jam-deck-modal-actions .jam-deck-shortcut-save { background: var(--jd-ink); color: var(--background-primary); border-color: transparent; font-weight: 650; }
 .jam-deck-shortcut-modal button { cursor: pointer; }
 .jam-deck-shortcut-modal button:hover { filter: brightness(.96); }
@@ -1891,7 +1897,7 @@ input.jam-deck-countdown-duration {
   --jd-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent); --jd-accent: #b8ff3d;
   width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
-  padding: 32px 24px 18px; border: 1px solid var(--jd-line); border-radius: 18px;
+  padding: 32px 24px 18px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-lg);
   background: var(--jd-paper); color: var(--jd-ink); box-shadow: 0 14px 48px rgb(15 20 18 / .16);
 }
 .theme-dark .modal.jam-deck-canvas-picker-modal,
@@ -1902,11 +1908,11 @@ input.jam-deck-countdown-duration {
 .jam-deck-canvas-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
 .jam-deck-canvas-picker h2 { margin: 0 0 6px; font-size: var(--jd-font-dialog-title, 21px); line-height: 1.3; font-weight: 650; letter-spacing: -.4px; }
 .jam-deck-canvas-picker-heading p { margin: 0; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); line-height: 1.5; }
-.jam-deck-canvas-picker button.jam-deck-canvas-picker-create { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; height: 38px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-create { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; height: 38px; padding: 0 14px; border: 0; border-radius: var(--jd-radius-pill); background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer; }
 .jam-deck-canvas-picker button.jam-deck-canvas-picker-create:hover { opacity: .86; }
 .jam-deck-canvas-picker-create span { display: inline-flex; }
 .jam-deck-canvas-picker-create svg, .jam-deck-canvas-picker-search svg { width: 16px; height: 16px; }
-.jam-deck-canvas-picker-search { display: flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--jd-line); border-radius: 10px; padding: 0 12px; color: var(--jd-muted); }
+.jam-deck-canvas-picker-search { display: flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-sm); padding: 0 12px; color: var(--jd-muted); }
 .jam-deck-canvas-picker-search > span { display: flex; }
 .jam-deck-canvas-picker input[type="search"] { min-width: 0; width: 100%; height: 40px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: var(--jd-font-input, 13px); }
 .jam-deck-canvas-picker-search:focus-within { border-color: var(--jd-muted); box-shadow: 0 0 0 2px color-mix(in srgb, var(--jd-accent) 28%, transparent); }
@@ -1938,7 +1944,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-browser-modal p { margin: 0 0 12px; color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
 .jam-deck-browser-modal input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); }
 .jam-deck-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-.jam-deck-modal-actions button { padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+.jam-deck-modal-actions button { padding: 5px 10px; border-radius: var(--jd-radius-chip); cursor: pointer; }
 
 .modal.jam-deck-task-modal-shell {
   width: min(620px, calc(100vw - 32px));
@@ -1970,7 +1976,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-task-modal h2 { margin: 0 32px 4px 0; font-size: var(--jd-font-title, 20px); line-height: 1.3; }
 .jam-deck-task-modal-subtitle { margin: 0 32px 18px 0; color: var(--text-muted); font-size: var(--jd-font-label, 11px); line-height: 1.55; }
 .jam-deck-task-form { min-width: 0; display: grid; gap: 12px; }
-.jam-deck-task-field { min-width: 0; display: grid; gap: 6px; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 9px; background: var(--background-secondary); }
+.jam-deck-task-field { min-width: 0; display: grid; gap: 6px; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-surface); background: var(--background-secondary); }
 .jam-deck-task-form label { color: var(--text-normal); font-size: var(--jd-font-label, 11px); font-weight: 650; }
 .jam-deck-task-form input[type="text"],
 .jam-deck-task-form textarea {
@@ -2009,15 +2015,15 @@ input.jam-deck-countdown-duration {
 .jam-deck-task-form textarea:focus { border-color: var(--interactive-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent); }
 .jam-deck-task-hint { min-width: 0; color: var(--text-faint); font-size: var(--jd-font-meta, 10px); line-height: 1.45; overflow-wrap: anywhere; }
 .jam-deck-task-images { min-width: 0; display: grid; gap: 6px; max-height: 190px; overflow-x: hidden; overflow-y: auto; }
-.jam-deck-task-image-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; border-radius: 6px; background: var(--background-secondary); }
+.jam-deck-task-image-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; border-radius: var(--jd-radius-control); background: var(--background-secondary); }
 
-.jam-deck-task-image-row img { width: 42px; height: 42px; border-radius: 4px; object-fit: cover; }
+.jam-deck-task-image-row img { width: 42px; height: 42px; border-radius: var(--jd-radius-chip); object-fit: cover; }
 .jam-deck-task-image-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-image-row button { padding: 3px 7px; font-size: var(--jd-font-meta, 10px); }
-.jam-deck-task-image-empty { padding: 16px 10px; border: 1px dashed var(--background-modifier-border); border-radius: 6px; color: var(--text-muted); text-align: center; font-size: var(--jd-font-label, 11px); }
+.jam-deck-task-image-empty { padding: 16px 10px; border: 1px dashed var(--background-modifier-border); border-radius: var(--jd-radius-control); color: var(--text-muted); text-align: center; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-file-picker { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .jam-deck-task-file-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.jam-deck-task-file-button { flex: 0 0 auto; min-height: 30px; padding: 5px 10px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); font-size: var(--jd-font-label, 11px); cursor: pointer; }
+.jam-deck-task-file-button { flex: 0 0 auto; min-height: 30px; padding: 5px 10px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); font-size: var(--jd-font-label, 11px); cursor: pointer; }
 .jam-deck-task-file-button:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
 .jam-deck-task-file-hint { min-width: 0; color: var(--text-faint); font-size: var(--jd-font-meta, 10px); overflow-wrap: anywhere; }
 .jam-deck-task-modal .jam-deck-modal-actions { position: sticky; bottom: -24px; z-index: 2; margin: 4px -24px -24px; padding: 14px 24px; border-top: 1px solid var(--background-modifier-border); background: color-mix(in srgb, var(--background-primary) 92%, transparent); backdrop-filter: blur(10px); }
@@ -2027,12 +2033,12 @@ input.jam-deck-countdown-duration {
 .jam-deck-archive-modal h2 { margin: 0 0 12px; }
 .jam-deck-archive-empty { color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
 .jam-deck-archive-list { display: grid; gap: 6px; }
-.jam-deck-archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--background-secondary); }
+.jam-deck-archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--jd-radius-control); background: var(--background-secondary); }
 .jam-deck-archive-text { min-width: 0; padding: 2px 0; border: 0; background: transparent; font: inherit; font-size: var(--jd-font-body, 12px); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: line-through; color: var(--text-muted); cursor: pointer; }
 .jam-deck-archive-text:hover { color: var(--text-accent); }
-.jam-deck-archive-text:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: 3px; }
+.jam-deck-archive-text:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: var(--jd-radius-chip); }
 .jam-deck-archive-meta { font-size: var(--jd-font-meta, 10px); color: var(--text-faint); white-space: nowrap; }
-.jam-deck-archive-action { padding: 3px 7px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: transparent; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-archive-action { padding: 3px 7px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: transparent; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
 .jam-deck-archive-action:hover { color: var(--text-normal); border-color: var(--text-muted); }
 .jam-deck-archive-action.is-danger:hover { color: #fff; background: var(--text-error); border-color: var(--text-error); }
 .jam-deck-archive-footer { margin-top: 14px; text-align: right; }
@@ -2097,9 +2103,6 @@ input.jam-deck-countdown-duration {
   --jd-accent-ink: #183000;
   --jd-cyan: #c9f4ee;
   --jd-danger: color-mix(in srgb, var(--text-error) 78%, #ff6b6b);
-  --jd-radius-sm: 10px;
-  --jd-radius-md: 14px;
-  --jd-radius-lg: 18px;
   --jd-shadow-card: 0 1px 1px rgb(15 20 18 / 0.05), 0 7px 20px rgb(15 20 18 / 0.08);
   --jd-shadow-lift: 0 2px 3px rgb(15 20 18 / 0.07), 0 14px 30px rgb(15 20 18 / 0.13);
   --jd-shadow-toolbar: 0 1px 2px rgb(15 20 18 / 0.09), 0 8px 18px rgb(15 20 18 / 0.11);
@@ -2162,7 +2165,7 @@ input.jam-deck-countdown-duration {
   margin: 0;
   padding: 5px 10px;
   border-color: transparent;
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: transparent;
   box-shadow: none;
   transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
@@ -2183,7 +2186,7 @@ input.jam-deck-countdown-duration {
   height: 52px;
   padding: 0 18px;
   border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-surface-raised);
   color: var(--jd-ink);
   font-size: var(--jd-font-lead, 14px);
@@ -2212,7 +2215,7 @@ input.jam-deck-countdown-duration {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--jd-line);
-  border-radius: 14px;
+  border-radius: var(--jd-radius-md);
   background: var(--jd-surface-raised);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
   overflow: hidden;
@@ -2251,7 +2254,7 @@ input.jam-deck-countdown-duration {
   min-height: 28px;
   padding: 2px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: var(--jd-font-label, 11px);
@@ -2265,7 +2268,7 @@ input.jam-deck-countdown-duration {
   min-height: 32px;
   padding: 2px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--jd-radius-surface);
   background: transparent;
   color: var(--jd-ink);
   font-size: var(--jd-font-label, 11px);
@@ -2290,7 +2293,7 @@ input.jam-deck-countdown-duration {
   width: 36px;
   height: 36px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: 15px;
@@ -2308,7 +2311,7 @@ input.jam-deck-countdown-duration {
   height: 32px;
   padding: 2px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: color-mix(in srgb, var(--jd-ink) 6%, transparent);
 }
 .jam-deck-root .jam-deck-ai-tab {
@@ -2316,7 +2319,7 @@ input.jam-deck-countdown-duration {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: var(--jd-font-body, 12px);
@@ -2373,7 +2376,7 @@ input.jam-deck-countdown-duration {
   min-height: 28px;
   padding: 2px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-ink);
   font-size: var(--jd-font-label, 11px);
@@ -2420,7 +2423,7 @@ input.jam-deck-countdown-duration {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   cursor: pointer;
@@ -2468,7 +2471,7 @@ input.jam-deck-countdown-duration {
   min-height: 26px;
   padding: 3px 12px;
   border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-surface);
   color: var(--jd-ink);
   font-size: var(--jd-font-body, 12px);
@@ -2485,7 +2488,7 @@ input.jam-deck-countdown-duration {
   margin: 0 20px 20px;
   padding: 6px 6px 6px 14px;
   border: 1px solid var(--jd-line);
-  border-radius: 11px;
+  border-radius: var(--jd-radius-sm);
   background: color-mix(in srgb, var(--jd-ink) 3%, var(--jd-surface));
   transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
 }
@@ -2497,7 +2500,7 @@ input.jam-deck-countdown-duration {
   margin: 8px 12px 0;
   padding: 6px 10px;
   border: 1px dashed color-mix(in srgb, var(--jd-accent) 45%, var(--jd-line));
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: color-mix(in srgb, var(--jd-accent) 8%, transparent);
 }
 /* display:flex 会覆盖 HTML [hidden]，未载入图片时显式隐藏预览条 */
@@ -2507,7 +2510,7 @@ input.jam-deck-countdown-duration {
   width: 44px;
   height: 44px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   border: 1px solid var(--jd-line);
   background: var(--jd-surface);
 }
@@ -2525,7 +2528,7 @@ input.jam-deck-countdown-duration {
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: 14px;
@@ -2566,7 +2569,7 @@ input.jam-deck-countdown-duration {
   min-height: 40px;
   padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: transparent;
   color: var(--jd-ink);
   font-size: var(--jd-font-body, 12px);
@@ -2595,7 +2598,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-root .jam-deck-grid { gap: var(--deck-gap); padding: 14px; }
 .jam-deck-root .jam-deck-widget {
   border-color: var(--jd-line);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-surface);
   box-shadow: var(--jd-shadow-card);
 }
@@ -2614,7 +2617,7 @@ input.jam-deck-countdown-duration {
   min-height: 16px;
   padding: 1px 5px;
   border-color: color-mix(in srgb, var(--jd-muted) 35%, transparent);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: transparent;
   color: var(--jd-muted);
   box-shadow: none;
@@ -2634,7 +2637,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-root .jam-deck-clock-time { margin-top: 2px; color: var(--jd-ink); font-size: clamp(30px, 4vw, 58px); font-weight: 650; letter-spacing: -0.055em; }
 .jam-deck-root .jam-deck-clock-date { margin-top: 7px; color: var(--jd-muted); font-size: var(--jd-font-meta, 10px); }
 
-.jam-deck-root .jam-deck-calendar-days span { border-radius: 999px; }
+.jam-deck-root .jam-deck-calendar-days span { border-radius: var(--jd-radius-pill); }
 .jam-deck-root .jam-deck-calendar-days span:not(.is-blank):hover { background: var(--jd-cyan); color: var(--jd-accent-ink); }
 .jam-deck-root .jam-deck-calendar-days .is-today { background: var(--jd-accent); color: var(--jd-accent-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jd-accent-ink) 12%, transparent); }
 
@@ -2744,7 +2747,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-root .jam-deck-clip-media {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--jd-paper-edge) 62%, transparent);
-  border-radius: 8px;
+  border-radius: var(--jd-radius-surface);
   background: color-mix(in srgb, var(--jd-board) 82%, var(--jd-paper));
   line-height: 0;
 }
@@ -2765,7 +2768,7 @@ input.jam-deck-countdown-duration {
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-surface-raised);
   box-shadow: var(--jd-shadow-toolbar);
   opacity: 0;
@@ -2788,7 +2791,7 @@ input.jam-deck-countdown-duration {
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: transparent;
   color: var(--jd-ink);
   box-shadow: none;
@@ -2879,20 +2882,20 @@ input.jam-deck-countdown-duration {
 .jam-deck-task-due.is-overdue { color: var(--jd-danger, var(--text-error)); }
 
 .jam-deck-calendar-toolbar { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px 28px; align-items: center; gap: 3px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid color-mix(in srgb, var(--jd-line) 56%, transparent); }
-.jam-deck-calendar-toolbar button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--jd-muted, var(--text-muted)); box-shadow: none; }
+.jam-deck-calendar-toolbar button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--jd-radius-pill); background: transparent; color: var(--jd-muted, var(--text-muted)); box-shadow: none; }
 .jam-deck-calendar-toolbar button:hover { background: var(--jd-hover); color: var(--jd-ink); }
 .jam-deck-calendar-toolbar button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 1px; }
 .jam-deck-calendar-toolbar .jam-deck-calendar-month { margin: 0; }
 .jam-deck-calendar-days { grid-auto-rows: minmax(34px, 1fr); gap: 2px 4px; }
 .jam-deck-root .jam-deck-calendar-day { position: relative; min-width: 0; min-height: 34px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .jam-deck-root .jam-deck-calendar-day:hover { border: 0; background: transparent; }
-.jam-deck-root .jam-deck-calendar-date { width: 29px; min-width: 29px; height: 29px; min-height: 29px; margin: 0; padding: 0 0 4px; border: 0 !important; border-radius: 999px; background: transparent !important; box-shadow: none !important; color: var(--jd-ink, var(--text-normal)); font-size: var(--jd-font-label, 11px); font-weight: 450; }
+.jam-deck-root .jam-deck-calendar-date { width: 29px; min-width: 29px; height: 29px; min-height: 29px; margin: 0; padding: 0 0 4px; border: 0 !important; border-radius: var(--jd-radius-pill); background: transparent !important; box-shadow: none !important; color: var(--jd-ink, var(--text-normal)); font-size: var(--jd-font-label, 11px); font-weight: 450; }
 .jam-deck-root .jam-deck-calendar-date:hover { background: var(--jd-hover) !important; }
 .jam-deck-root .jam-deck-calendar-date:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 1px; background: color-mix(in srgb, var(--jd-accent) 12%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-day.is-outside { opacity: .38; }
-.jam-deck-root .jam-deck-calendar-day.is-today .jam-deck-calendar-date { width: 32px; border-radius: 7px; background: color-mix(in srgb, var(--jd-accent) 12%, transparent) !important; color: var(--jd-ink); font-weight: 700; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jd-accent) 78%, transparent) !important; }
+.jam-deck-root .jam-deck-calendar-day.is-today .jam-deck-calendar-date { width: 32px; border-radius: var(--jd-radius-control); background: color-mix(in srgb, var(--jd-accent) 12%, transparent) !important; color: var(--jd-ink); font-weight: 700; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jd-accent) 78%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-days .jam-deck-calendar-day.is-today { background: transparent; color: inherit; box-shadow: none; }
-.jam-deck-root .jam-deck-calendar-date.has-completed { width: 32px; padding-bottom: 0; border-radius: 7px; }
+.jam-deck-root .jam-deck-calendar-date.has-completed { width: 32px; padding-bottom: 0; border-radius: var(--jd-radius-control); }
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-1 { background: color-mix(in srgb, var(--jd-accent) 20%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-2 { background: color-mix(in srgb, var(--jd-accent) 40%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-3 { background: color-mix(in srgb, var(--jd-accent) 60%, transparent) !important; color: var(--jd-accent-ink); }
@@ -2900,7 +2903,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-5 { background: var(--jd-accent) !important; color: var(--jd-accent-ink); font-weight: 700; }
 .jam-deck-root .jam-deck-calendar-date.has-completed:hover { filter: brightness(1.06); }
 .jam-deck-calendar-markers { position: absolute; left: 3px; right: 3px; bottom: 1px; display: flex; justify-content: center; gap: 3px; pointer-events: none; }
-.jam-deck-root .jam-deck-calendar-task-marker { width: 4px; min-width: 4px; height: 4px; min-height: 4px; margin: 0; padding: 0; border: 0 !important; border-radius: 999px; background: var(--jd-accent); box-shadow: none !important; pointer-events: auto; }
+.jam-deck-root .jam-deck-calendar-task-marker { width: 4px; min-width: 4px; height: 4px; min-height: 4px; margin: 0; padding: 0; border: 0 !important; border-radius: var(--jd-radius-pill); background: var(--jd-accent); box-shadow: none !important; pointer-events: auto; }
 
 .jam-deck-calendar-task-marker.is-overdue { background: var(--text-error); }
 .jam-deck-calendar-more { position: absolute; right: 2px; bottom: 1px; color: var(--text-muted); font-size: var(--jd-font-micro, 7px); }
@@ -2948,7 +2951,7 @@ input.jam-deck-countdown-duration {
   flex-direction: column;
   justify-content: center;
   gap: 12px;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   color: var(--jd-ink, var(--text-normal));
   outline: none;
 }
@@ -3045,7 +3048,7 @@ input.jam-deck-countdown-duration {
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--jd-line) 82%, transparent);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-music-control);
   color: var(--jd-muted);
   box-shadow: none;
@@ -3061,7 +3064,7 @@ input.jam-deck-countdown-duration {
   min-width: 112px;
   padding: 4px;
   border: 1px solid var(--jd-line);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-surface-raised);
   box-shadow: 0 10px 24px rgb(20 27 23 / .16);
 }
@@ -3074,7 +3077,7 @@ input.jam-deck-countdown-duration {
   padding: 0 7px;
   justify-content: flex-start;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: transparent;
   color: var(--jd-muted);
   box-shadow: none;
@@ -3111,7 +3114,7 @@ input.jam-deck-countdown-duration {
 }
 .jam-deck-root input.jam-deck-music-progress::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: linear-gradient(90deg, color-mix(in srgb, var(--jd-accent) 84%, var(--jd-ink)) 0 var(--jd-music-progress), var(--jd-music-track) var(--jd-music-progress) 100%);
 }
 .jam-deck-root input.jam-deck-music-progress::-webkit-slider-thumb {
@@ -3170,7 +3173,7 @@ input.jam-deck-countdown-duration {
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--jd-line) 82%, transparent);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-music-control);
   color: var(--jd-muted);
   box-shadow: none;
@@ -3255,7 +3258,7 @@ input.jam-deck-countdown-duration {
   min-width: 6px !important;
   min-height: 18px !important;
   border: 2px solid transparent !important;
-  border-radius: 999px !important;
+  border-radius: var(--jd-radius-pill) !important;
   background: color-mix(in srgb, var(--text-muted) 20%, transparent) !important;
   background-clip: content-box !important;
 }
@@ -3493,7 +3496,7 @@ input.jam-deck-countdown-duration {
   margin: 0;
   padding: 0;
   border: 1px solid color-mix(in srgb, #000 14%, transparent);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: color-mix(in srgb, #fff 78%, var(--jd-folder-color, var(--jd-folder-neutral)) 22%);
   color: color-mix(in srgb, #000 42%, var(--jd-folder-color, var(--jd-folder-neutral)) 58%);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.38), 0 1px 2px rgb(0 0 0 / 0.08);
@@ -3697,7 +3700,7 @@ input.jam-deck-countdown-duration {
   gap: 3px;
   padding: 2px;
   border: 1px solid rgb(0 0 0 / 0.09);
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: rgb(255 255 255 / 0.72);
   box-shadow: 0 3px 10px rgb(0 0 0 / 0.10);
   -webkit-backdrop-filter: blur(10px);
@@ -3724,7 +3727,7 @@ input.jam-deck-countdown-duration {
   height: 20px;
   min-height: 20px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   pointer-events: auto !important;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder:is(:hover, :focus-within) .jam-deck-canvas-folder-controls {
@@ -3904,7 +3907,7 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 .jam-deck-caption-utilities { margin-left: auto; padding-left: 8px; border-left: 1px solid var(--jd-line); }
 .jam-deck-root .jam-deck-caption-action {
   min-height: 32px; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
-  border: 1px solid color-mix(in srgb, var(--jd-muted) 35%, transparent); border-radius: 999px; box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--jd-muted) 35%, transparent); border-radius: var(--jd-radius-pill); box-shadow: none;
   background: transparent; color: var(--jd-muted); font: inherit; font-size: var(--jd-font-label, 11px); line-height: 1; padding: 4px 10px;
 }
 .jam-deck-root .jam-deck-caption-action:hover { border-color: color-mix(in srgb, var(--jd-muted) 58%, transparent); background: var(--jd-hover); color: var(--jd-ink); }
@@ -3995,7 +3998,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   font-size: var(--jd-font-caption, 11px);
   background: var(--jd-hover);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   box-shadow: none;
 }
 .jam-deck-root .jam-deck-chrome-restore:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
@@ -4066,7 +4069,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
 .jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-widget, .jam-deck-toolbar, .jam-deck-ai-chat, .jam-deck-ai-fab) {
   background: linear-gradient(145deg, rgb(255 255 255 / 0.13), transparent 38%, rgb(255 255 255 / 0.04)), var(--jd-glass-tint);
   border: 1px solid var(--jd-line);
-  border-radius: 18px;
+  border-radius: var(--jd-radius-lg);
   box-shadow: var(--jd-glass-shadow);
   backdrop-filter: blur(var(--jd-glass-blur, 4px)) saturate(125%);
   -webkit-backdrop-filter: blur(var(--jd-glass-blur, 4px)) saturate(125%);
@@ -4134,7 +4137,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   .jam-deck-caption-action, .jam-deck-caption-icon-button):focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-ai-tabs { background: transparent; }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action {
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -4248,6 +4251,8 @@ body[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canv
   .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
   background: rgb(246 250 253 / 0.86);
   border: 1px solid rgb(255 255 255 / 0.14);
+  /* Deliberately outside the corner scale: this shell wraps an 18px content
+     surface, and the extra 4px keeps the inner and outer corners concentric. */
   border-radius: 22px;
   backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.16), 0 20px 64px rgb(20 40 60 / 0.18);
@@ -4259,7 +4264,7 @@ body.theme-dark[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .ja
 }
 body[data-jam-deck-skin="glass"] :is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
   .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal) button {
-  border-radius: 10px;
+  border-radius: var(--jd-radius-sm);
   box-shadow: none;
 }
 /* Self-owned dialogs share a material; their fields do not become nested paper cards. */

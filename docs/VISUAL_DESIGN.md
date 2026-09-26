@@ -36,7 +36,8 @@
 
 - 令牌的像素值与色值只有一个来源：`styles.css`。本文件与其他文档只引用令牌名，不重复写数值，避免两处各自漂移。
 - 作用域：自有弹窗由 Obsidian Modal 挂载到 `document.body`，不在 `.jam-deck-root` 内。工作台与弹窗共用的令牌必须定义在 `styles.css` 顶部的 `body` 块，且该块只放跨明暗主题不变的值；随主题变化的令牌仍定义在 `.jam-deck-root` 与 `.theme-dark .jam-deck-root`。
-- 角色优先于尺寸：同一语义的元素共用一个角色令牌（所有文本输入控件用 `--jd-radius-control`），不按各自尺寸另取近似值。尺寸阶梯 `--jd-radius-sm/md/lg` 只描述表面层级。
+- 圆角阶梯全部取双数：`--jd-radius-chip`（徽标、微控件、进度条）、`--jd-radius-control`（文本输入与按钮）、`--jd-radius-surface`（组件内小表面：卡片、行）、`--jd-radius-sm`（图标尺寸的方块）、`--jd-radius-md`（分组）、`--jd-radius-lg`（主表面与弹窗）、`--jd-radius-pill`。前三档是角色令牌而非尺寸档，同类元素无论出现在哪里都保持同一个圆角。新增圆角一律复用这七个令牌，不写字面像素值。
+- 允许留在阶梯之外的只有三类，且必须在代码里注释说明：拟物与 Figma 几何（文件夹壳体前片与叠纸、唱机唱臂）、按盒子比例缩放的图标圆角、以及包裹某一档内容表面的外壳（玻璃弹窗外框比 18px 内容层大 4px，保证内外圆角同心）。
 - 图标圆角是等比关系而非阶梯：快捷方式图标在不同尺寸下保持大致相同的圆角比例，使弹窗预览与工作台实物形状一致；这类比例值不纳入阶梯令牌，也不与之归并。
 - 给原生表单元素（`input` / `textarea` / `select` / `button`）写样式必须带上元素类型，例如 `input.jam-deck-countdown-duration`。Obsidian 主题自带的 `input[type="text"]` 特异性为 (0,1,1)，裸单类 (0,1,0) 会被它压过，结果是常态取主题的 `--input-radius`、而 `:focus` 等伪类态取自己的值，产生肉眼可见的跳变。
 - 修改任何 `.jam-deck-*` 基础规则前，先确认是否存在 `.jam-deck-root .jam-deck-*` 的 Spatial 重写版本。扁平期遗留规则仍留在文件里，但特异性一律输给 root 版本；静态阅读会把僵尸规则误判为生效，结论以运行中 Obsidian 的计算样式为准。

@@ -211,8 +211,8 @@ assert(pluginSource.includes("typeof this.canvas.requestPushHistory.run"), "auto
 assert(pluginSource.includes("stableFrames >= 3"), "auto-snap must wait for three stable world-rect samples");
 assert(pluginSource.includes("Date.now() - drag.releaseTime >= 210"), "auto-snap must stay inside the native Canvas history coalescing window");
 assert(pluginSource.includes("jamDeckCanvasStackOverlapRatio"), "Canvas stacks must use world-geometry overlap");
-assert(styleSource.includes("--jd-canvas-image-radius: var(--jd-radius-sm, 10px)"), "Canvas image radius must reuse the launcher icon radius token");
-assert(styleSource.includes("--jd-canvas-group-radius: var(--jd-radius-md, 14px)"), "Canvas group radius must use the next Spatial radius tier");
+assert(styleSource.includes("--jd-canvas-image-radius: var(--jd-radius-sm)"), "Canvas image radius must reuse the launcher icon radius token");
+assert(styleSource.includes("--jd-canvas-group-radius: var(--jd-radius-md)"), "Canvas group radius must use the next Spatial radius tier");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-node:has(> .canvas-group-label)"), "Canvas group styling must stay inside the embedded leaf");
 assert(styleSource.includes(".jam-deck-canvas-stack-overlay"), "Canvas stacks must render hover previews in a dedicated overlay");
 assert(styleSource.includes(".jam-deck-canvas-stack-preview {") && styleSource.includes("pointer-events: auto;"), "an open stack preview must isolate the Canvas below it");

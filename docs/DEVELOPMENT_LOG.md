@@ -1,5 +1,18 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-26 — 1.2.0 圆角归双数与僵尸普查扩展
+
+- 按 Jam 要求把散落的六个按钮圆角值向双数归拢。执行顺序上先做普查再动圆角——`.jam-deck-clip-image` 的 7px 已确证是僵尸，给死代码改值是白费力气。
+- 建立七档令牌，全部双数：`chip` 4px / `control` 6px / `surface` 8px / `sm` 10px / `md` 14px / `lg` 18px / `pill`。前三档按角色而非尺寸命名，兑现上一批写进规范的「角色优先于尺寸」。折向规则：5→4、7→6、9→8、11→10 取向下的偶数；3→4 例外向上，因为 2px 留给拟物几何。全部 radius 令牌一并从 `.jam-deck-root` 移到 `body` 块，否则弹窗侧解析不到。
+- 复核时发现三个先前统计漏掉的值：`.jam-deck-ai-row` 11px（单数，归 10px）、画笔面板按钮 12px、玻璃弹窗外框 22px。漏的原因是早期统计用 `cut` 取值，只覆盖单行紧凑规则，多行属性块里的声明没进样本。22px 判定为正确的嵌套圆角（外壳比 18px 内容层大 4px 保证同心），就地注释保留；12px 那条恰好在 overridden 名单里，暂不动。
+- 迁移用一次性脚本完成，带选择器回溯（多行块里 `border-radius` 的上方若干行才是选择器）与排除名单，先 dry-run 逐条过目再落盘。第一版排除条件写成 `canvas-folder` 宽匹配，误把悬停操作条和颜色弹层也挡了——它们是普通 UI 控件、规范未规定圆角，收紧为只排除 `canvas-folder-slot` 与 `canvas-folder-front`（几何本体，且规范明定前片 10px）。最终替换 83 处、有意保留 5 处。
+- **踩到一个流程陷阱**：`npm run verify 2>&1 | tail -4 && npm run deploy` 里，`&&` 判断的是管道最后一个命令 `tail` 的退出码，永远为 0，于是测试失败时仍然把坏版本部署了出去。改为 `cmd > log 2>&1; echo exit=$?` 再读日志。后续任何「验证通过才部署」的链式命令都不能把 verify 放在管道里。
+- verify 失败的根因是 `tests/jam-deck-test.js:214` 把 fallback 写法也钉进了断言：`--jd-canvas-image-radius: var(--jd-radius-sm, 10px)`。断言意图（Canvas 图片圆角必须复用快捷方式图标令牌）在去掉 fallback 后依然满足，属断言写得过死，已同步为不带 fallback 的形式。另注意到 `tests/jam-deck-test.js:2398` 仍断言存在字面 `border-radius: 10px`，当前靠被排除的 Figma 文件夹前片侥幸通过，属脆弱断言，后续清理该行时需一并修。
+- 普查侧：探测器改累积模式，多次扫描间保留判定。逐界面推进后覆盖率 26% → 42%（1022 条中判定 428 条）：工作台、五个自有弹窗、画笔面板，以及玻璃皮肤。玻璃那遍**没有切设置**——切皮肤会触发 saveSettings 写 `data.json`，改为临时改 root 与 body 的 `data-jam-deck-skin` 属性、扫完在 `finally` 里还原，标签记为 `glass-dom-only` 以示该批不含 JS 注入的玻璃变量、可信度略低。
+- 结果：确证 48 条被覆盖、17 条冗余。本次只删 5 条语义最明确的扁平期剪贴板规则；同段的 `.jam-deck-clip-overlay` 与 `.jam-deck-clip-btn` 未被判定，不靠静态推断删。剩余 594 条未判定的大头是交互瞬时态（`is-layout-dragging` / `is-moving` / `is-collision` / `is-compact`）与 Canvas 深层交互（237 条，需真实堆叠展开、放映、拖拽），程序化模拟成本过高，42% 基本是自动探测天花板，再往上要靠日常使用时顺手跑一遍。
+- 另记两处「规范与实现不符」的疑点，本次未动：`.jam-deck-shortcut-folder-front` 圆角 3px，而规范写「前片四角统一 10px」；`.jam-deck-task` 的 `border-radius` 声明被 `.jam-deck-root .jam-deck-task` 的 `border-radius: 0` 覆盖（Spatial 要求列表行不做卡片），属属性级僵尸——规则整体仍有效，所以规则级探测判它 alive 是对的，要发现这类需要属性级探测。
+- 验证：`npm run verify` 全绿（exit 0 确认，不经管道），部署热重载后实机读计算样式核对七档令牌与六个代表元素。`data.json` 未被本次改动写入。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
+
 ## 2026-09-26 — 1.2.0 新增僵尸 CSS 运行时探测器
 
 - 背景：本日早些时候在剪贴板上踩到僵尸规则（扁平期旧规则被 Spatial 重写版本按特异性完全压过，静态读源码看不出来）。为避免后续每次都靠肉眼推断，把判定方法固化为 `scripts/audit-dead-css.js`。
