@@ -1,3 +1,10 @@
+/* Cross-scope Jam Deck tokens.  Own modals mount on document.body, outside
+   .jam-deck-root, so values shared by workbench and modals must live here.
+   Only theme-invariant values belong in this block. */
+body {
+  --jd-heading: #5c5c5c;
+}
+
 .workspace-leaf-content[data-type="jam-deck-view"] .view-content {
   padding: 0;
 }
@@ -497,10 +504,10 @@
 .jam-deck-clip-image { position: relative; overflow: hidden; border-radius: 7px; background: var(--background-primary); line-height: 0; cursor: grab; }
 .jam-deck-clip-image img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
 .jam-deck-clip-overlay { position: absolute; top: 7px; left: 7px; padding: 2px 7px; color: #fff; background: rgba(0,0,0,0.46); border-radius: 4px; font-size: var(--jd-font-meta, 10px); line-height: 1.4; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
-.jam-deck-clip-text { position: relative; border-left: 2px solid #3B6D11; padding: 5px 7px; background: var(--background-primary); border-radius: 4px; cursor: grab; }
+.jam-deck-clip-text { position: relative; border-left: 2px solid var(--jd-accent-deep); padding: 5px 7px; background: var(--background-primary); border-radius: 4px; cursor: grab; }
 .jam-deck-clip-image.is-dragging,
 .jam-deck-clip-text.is-dragging { opacity: 0.48; cursor: grabbing; }
-.jam-deck-clip-text-time { display: block; margin-bottom: 3px; color: #3B6D11; font-size: var(--jd-font-meta, 10px); font-weight: 600; }
+.jam-deck-clip-text-time { display: block; margin-bottom: 3px; color: var(--jd-accent-deep); font-size: var(--jd-font-meta, 10px); font-weight: 600; }
 .jam-deck-clip-text-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--jd-font-body-compact, 11px); line-height: 1.45; max-height: 112px; overflow: auto; }
 .jam-deck-clip-toolbar { position: absolute; top: 5px; right: 5px; display: none; gap: 4px; z-index: 2; }
 .jam-deck-clip-image:hover .jam-deck-clip-toolbar,
@@ -2082,6 +2089,7 @@
   --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent);
   --jd-accent: #b8ff3d;
   --jd-accent-ink: #183000;
+  --jd-accent-deep: #3b6d11;
   --jd-cyan: #c9f4ee;
   --jd-danger: color-mix(in srgb, var(--text-error) 78%, #ff6b6b);
   --jd-radius-sm: 10px;
@@ -2117,6 +2125,7 @@
   --jd-hover: color-mix(in srgb, var(--text-normal) 7%, transparent);
   --jd-accent: #c7ff55;
   --jd-accent-ink: #132000;
+  --jd-accent-deep: color-mix(in srgb, var(--jd-accent) 68%, var(--jd-surface-raised));
   --jd-cyan: #1e4e49;
   --jd-shadow-card: 0 1px 1px rgb(0 0 0 / 0.24), 0 9px 22px rgb(0 0 0 / 0.25);
   --jd-shadow-lift: 0 2px 4px rgb(0 0 0 / 0.28), 0 16px 34px rgb(0 0 0 / 0.32);
@@ -3957,7 +3966,7 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
   .jam-deck-folder-rename-modal, .jam-deck-settings) :is(h1, h2, h3, h4, h5, h6),
 .jam-deck-shortcut-section-heading > span,
 .jam-deck-settings .setting-item-heading .setting-item-name {
-  color: #5c5c5c;
+  color: var(--jd-heading);
 }
 
 /* Optional workspace chrome, shared by both skins. Native split state stays intact. */
