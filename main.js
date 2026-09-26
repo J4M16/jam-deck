@@ -2515,6 +2515,7 @@ class ArchiveViewerModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.modalEl.addClass("jam-deck-archive-modal-shell");
     contentEl.addClass("jam-deck-archive-modal");
     contentEl.createEl("h2", { text: "归档待办" });
 

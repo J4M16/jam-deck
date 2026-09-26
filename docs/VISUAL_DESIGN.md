@@ -62,6 +62,15 @@
 - `:is()` 内也不得出现伪元素：顶层逗号选择器列表不是 forgiving 的，一个无效选择器会让整条规则被静默丢弃。
 - 验收手段：`getComputedStyle(el, "::-webkit-scrollbar-thumb")` 的返回值**不反映真实渲染**，`dev:screenshot` 可能返回缓存帧，两者都不能用来验收。可靠办法有两种——量尺寸时临时改槽位宽度、观察滚动容器 `clientWidth` 的差值；验状态时用 `require("electron").remote` 取 webContents，`sendInputEvent` 派发真实 `mouseMove`，再用 `capturePage` 裁剪滚动条那一小条区域截图对比离开／悬停面板／压在滑块上三个状态。
 
+## 自有弹窗通用
+
+- 所有自有弹窗共用一份底材：调色板（`--jd-paper` / `--jd-ink` / `--jd-muted` / `--jd-faint` / `--jd-line` / `--jd-hover` / `--jd-accent`）、`--jd-radius-lg` 圆角、细边与柔和阴影统一定义在 modalEl 上，尺寸与内边距由各弹窗自己声明；内容布局归 contentEl。新增弹窗把 shell 类加进这份共用清单即可，不要另起一套配色。
+- 一个弹窗只有一个主表面。表单字段靠留白与低对比标签分区，**不得给每个字段套底色卡片**；列表同理，行默认透明、只用发丝分隔线，悬停做低对比底色变化。
+- 每个弹窗只有一个高对比黑白主按钮（`--jd-ink` 底、纸色字），其余一律细描边；次级操作（如「完成并归档」）不得做成第二个实心按钮与主按钮竞争。禁止直接沿用 Obsidian 的 `mod-cta` 强调色。
+- 行内操作按钮默认隐藏，仅在所在行 `:hover` 或 `:focus-within` 时出现；不属于任何行的底部操作（如「清空全部归档」）保持常驻并使用描边。
+- 覆盖 Obsidian 原生 `button` 时有两个必踩的坑：主题用 **inset `box-shadow`** 画按钮外框，只改 `background` 与 `border` 去不掉，必须显式写 `box-shadow: none`；原生按钮是 **flex 容器**，`text-align: left` 不起作用，需要改 `display: block` 才能左对齐并配合 `text-overflow: ellipsis`。
+- 标签色要比标题再弱一档。部分主题把 `--text-muted` 解析成与标题相同的 `#5c5c5c`，直接使用会让层级塌陷，应再降一档透明度。
+
 ## Canvas 选择弹窗
 
 - 更换/插入 Canvas 使用单纸面、18px 外圆角、轻搜索框和文件列表；文件名与路径左对齐分两行，使用细分隔，不制作逐行卡片墙，不继承原生按钮固定高度。

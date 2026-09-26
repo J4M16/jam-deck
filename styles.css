@@ -1890,19 +1890,33 @@ input.jam-deck-countdown-duration {
 .jam-deck-picker-icon { font-size: 18px; color: var(--text-accent); }
 .jam-deck-picker-label { font-size: var(--jd-font-body, 12px); }
 
+/* Shared dialog material. Own modals mount outside .jam-deck-root, so the
+   palette has to be re-declared on each shell. Palette and surface live here;
+   size and padding stay with each dialog below. */
 .modal.jam-deck-canvas-picker-modal,
-.modal.jam-deck-shortcut-editor-modal {
+.modal.jam-deck-shortcut-editor-modal,
+.modal.jam-deck-task-modal-shell,
+.modal.jam-deck-archive-modal-shell {
   --jd-paper: color-mix(in srgb, var(--background-primary) 96%, #f7f6f1);
   --jd-ink: var(--text-normal); --jd-muted: var(--text-muted);
+  --jd-faint: color-mix(in srgb, var(--text-muted) 58%, transparent);
   --jd-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent); --jd-accent: #b8ff3d;
-  width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
-  padding: 32px 24px 18px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-lg);
+  border: 1px solid var(--jd-line); border-radius: var(--jd-radius-lg);
   background: var(--jd-paper); color: var(--jd-ink); box-shadow: 0 14px 48px rgb(15 20 18 / .16);
 }
 .theme-dark .modal.jam-deck-canvas-picker-modal,
-.theme-dark .modal.jam-deck-shortcut-editor-modal { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
-.modal.jam-deck-shortcut-editor-modal { width: min(500px, calc(100vw - 32px)); padding: 24px; }
+.theme-dark .modal.jam-deck-shortcut-editor-modal,
+.theme-dark .modal.jam-deck-task-modal-shell,
+.theme-dark .modal.jam-deck-archive-modal-shell { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
+.modal.jam-deck-canvas-picker-modal {
+  width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
+  padding: 32px 24px 18px;
+}
+.modal.jam-deck-shortcut-editor-modal {
+  width: min(500px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
+  padding: 24px;
+}
 .jam-deck-shortcut-editor-modal > .modal-header { display: none; }
 .jam-deck-canvas-picker-modal .jam-deck-canvas-picker { padding: 0; margin: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; gap: 16px; }
 .jam-deck-canvas-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
@@ -1946,12 +1960,24 @@ input.jam-deck-countdown-duration {
 .jam-deck-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .jam-deck-modal-actions button { padding: 5px 10px; border-radius: var(--jd-radius-chip); cursor: pointer; }
 
+/* Both task dialogs let the content element own the padding, because their
+   sticky footers rely on negative margins measured against it. */
 .modal.jam-deck-task-modal-shell {
   width: min(620px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
-  overflow: visible;
+  padding: 0;
+  overflow: hidden;
 }
+.modal.jam-deck-archive-modal-shell {
+  width: min(560px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(720px, calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+.jam-deck-task-modal-shell > .modal-header,
+.jam-deck-archive-modal-shell > .modal-header { display: none; }
 
 .jam-deck-folder-rename-input {
   width: 100%;
@@ -1973,11 +1999,15 @@ input.jam-deck-countdown-duration {
   overflow-x: hidden;
   overflow-y: auto;
 }
-.jam-deck-task-modal h2 { margin: 0 32px 4px 0; font-size: var(--jd-font-title, 20px); line-height: 1.3; }
-.jam-deck-task-modal-subtitle { margin: 0 32px 18px 0; color: var(--text-muted); font-size: var(--jd-font-label, 11px); line-height: 1.55; }
-.jam-deck-task-form { min-width: 0; display: grid; gap: 12px; }
-.jam-deck-task-field { min-width: 0; display: grid; gap: 6px; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-surface); background: var(--background-secondary); }
-.jam-deck-task-form label { color: var(--text-normal); font-size: var(--jd-font-label, 11px); font-weight: 650; }
+.jam-deck-task-modal h2 { margin: 0 32px 6px 0; font-size: var(--jd-font-dialog-title, 21px); font-weight: 650; letter-spacing: -.4px; line-height: 1.3; }
+.jam-deck-task-modal-subtitle { margin: 0 32px 24px 0; color: var(--jd-muted); font-size: var(--jd-font-label, 11px); line-height: 1.55; }
+/* One paper surface: fields are separated by whitespace and a quiet label,
+   never by their own card. The glass skin already worked this way. */
+.jam-deck-task-form { min-width: 0; display: grid; gap: 20px; }
+.jam-deck-task-field { min-width: 0; display: grid; gap: 6px; }
+/* One step weaker than the heading. Some themes resolve --text-muted to the
+   same #5c5c5c the headings are pinned to, which would flatten the hierarchy. */
+.jam-deck-task-form label { color: color-mix(in srgb, var(--jd-muted) 72%, transparent); font-size: var(--jd-font-label, 11px); font-weight: 600; letter-spacing: .02em; }
 .jam-deck-task-form input[type="text"],
 .jam-deck-task-form textarea {
   display: block;
@@ -1985,10 +2015,10 @@ input.jam-deck-countdown-duration {
   max-width: 100%;
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid var(--jd-line);
   border-radius: var(--jd-radius-control);
   background: var(--background-primary);
-  color: var(--text-normal);
+  color: var(--jd-ink);
   font: inherit;
   font-size: var(--jd-font-body, 12px);
   line-height: 1.5;
@@ -2012,36 +2042,82 @@ input.jam-deck-countdown-duration {
   user-select: text;
 }
 .jam-deck-task-form input[type="text"]:focus,
-.jam-deck-task-form textarea:focus { border-color: var(--interactive-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent); }
+.jam-deck-task-form textarea:focus { border-color: var(--jd-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--jd-accent) 38%, transparent); }
 .jam-deck-task-hint { min-width: 0; color: var(--text-faint); font-size: var(--jd-font-meta, 10px); line-height: 1.45; overflow-wrap: anywhere; }
 .jam-deck-task-images { min-width: 0; display: grid; gap: 6px; max-height: 190px; overflow-x: hidden; overflow-y: auto; }
-.jam-deck-task-image-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; border-radius: var(--jd-radius-control); background: var(--background-secondary); }
+.jam-deck-task-image-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; border-radius: var(--jd-radius-control); background: transparent; transition: background-color 120ms ease-out; }
+.jam-deck-task-image-row:hover { background: var(--jd-hover); }
 
 .jam-deck-task-image-row img { width: 42px; height: 42px; border-radius: var(--jd-radius-chip); object-fit: cover; }
 .jam-deck-task-image-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-image-row button { padding: 3px 7px; font-size: var(--jd-font-meta, 10px); }
-.jam-deck-task-image-empty { padding: 16px 10px; border: 1px dashed var(--background-modifier-border); border-radius: var(--jd-radius-control); color: var(--text-muted); text-align: center; font-size: var(--jd-font-label, 11px); }
+.jam-deck-task-image-empty { padding: 16px 10px; border: 1px dashed var(--jd-line); border-radius: var(--jd-radius-control); color: var(--jd-muted); text-align: center; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-file-picker { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .jam-deck-task-file-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .jam-deck-task-file-button { flex: 0 0 auto; min-height: 30px; padding: 5px 10px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); font-size: var(--jd-font-label, 11px); cursor: pointer; }
-.jam-deck-task-file-button:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
+.jam-deck-task-file-button:hover { border-color: color-mix(in srgb, var(--jd-ink) 32%, var(--jd-line)); background: var(--jd-hover); }
+.jam-deck-task-file-button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
 .jam-deck-task-file-hint { min-width: 0; color: var(--text-faint); font-size: var(--jd-font-meta, 10px); overflow-wrap: anywhere; }
-.jam-deck-task-modal .jam-deck-modal-actions { position: sticky; bottom: -24px; z-index: 2; margin: 4px -24px -24px; padding: 14px 24px; border-top: 1px solid var(--background-modifier-border); background: color-mix(in srgb, var(--background-primary) 92%, transparent); backdrop-filter: blur(10px); }
-.jam-deck-task-modal .jam-deck-modal-actions button { min-width: 72px; min-height: 34px; }
+.jam-deck-task-modal .jam-deck-modal-actions { position: sticky; bottom: -24px; z-index: 2; margin: 8px -24px -24px; padding: 16px 24px; border-top: 1px solid var(--jd-line); background: var(--jd-paper); }
+/* Outlined buttons on the paper, one high-contrast black-and-white primary.
+   Obsidian's mod-cta accent is overridden on purpose: the spec calls for a
+   black-and-white primary, not the theme accent. */
+.jam-deck-task-modal .jam-deck-modal-actions button {
+  min-width: 72px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-control);
+  background: transparent;
+  color: var(--jd-ink);
+  box-shadow: none;
+  font-size: var(--jd-font-button, 12px);
+  cursor: pointer;
+}
+.jam-deck-task-modal .jam-deck-modal-actions button:hover { background: var(--jd-hover); }
+.jam-deck-task-modal .jam-deck-modal-actions button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--jd-accent);
+}
+.jam-deck-task-modal .jam-deck-modal-actions button.mod-cta {
+  background: var(--jd-ink);
+  border-color: var(--jd-ink);
+  color: var(--jd-paper);
+}
+.jam-deck-task-modal .jam-deck-modal-actions button.mod-cta:hover { filter: brightness(1.15); background: var(--jd-ink); }
+.jam-deck-task-modal .jam-deck-modal-actions button.is-danger { color: var(--text-error); }
+.jam-deck-task-modal .jam-deck-modal-actions button.is-danger:hover {
+  border-color: color-mix(in srgb, var(--text-error) 52%, var(--jd-line));
+  background: color-mix(in srgb, var(--text-error) 10%, transparent);
+}
 
-.jam-deck-archive-modal { padding: 18px; max-height: 70vh; overflow-y: auto; }
-.jam-deck-archive-modal h2 { margin: 0 0 12px; }
-.jam-deck-archive-empty { color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
-.jam-deck-archive-list { display: grid; gap: 6px; }
-.jam-deck-archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--jd-radius-control); background: var(--background-secondary); }
-.jam-deck-archive-text { min-width: 0; padding: 2px 0; border: 0; background: transparent; font: inherit; font-size: var(--jd-font-body, 12px); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: line-through; color: var(--text-muted); cursor: pointer; }
-.jam-deck-archive-text:hover { color: var(--text-accent); }
-.jam-deck-archive-text:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: var(--jd-radius-chip); }
-.jam-deck-archive-meta { font-size: var(--jd-font-meta, 10px); color: var(--text-faint); white-space: nowrap; }
-.jam-deck-archive-action { padding: 3px 7px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: transparent; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
-.jam-deck-archive-action:hover { color: var(--text-normal); border-color: var(--text-muted); }
-.jam-deck-archive-action.is-danger:hover { color: #fff; background: var(--text-error); border-color: var(--text-error); }
-.jam-deck-archive-footer { margin-top: 14px; text-align: right; }
+.jam-deck-archive-modal { padding: 24px; max-height: min(720px, calc(100vh - 48px)); overflow-y: auto; }
+.jam-deck-archive-modal h2 { margin: 0 0 20px; font-size: var(--jd-font-dialog-title, 21px); font-weight: 650; letter-spacing: -.4px; }
+.jam-deck-archive-empty { color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
+.jam-deck-archive-list { display: grid; }
+/* Quiet rows: one hairline separator instead of a card per row, hover only a
+   low-contrast wash. Row actions stay hidden until hover or focus. */
+.jam-deck-archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 9px 8px; border-radius: var(--jd-radius-control); border-bottom: 1px solid color-mix(in srgb, var(--jd-line) 60%, transparent); background: transparent; transition: background-color 120ms ease-out; }
+.jam-deck-archive-row:last-child { border-bottom: 0; }
+.jam-deck-archive-row:hover { background: var(--jd-hover); }
+/* Type-qualified: a bare class loses to the theme's own button rule, which
+   centres the label. */
+/* display:block and box-shadow:none are both required: the theme paints its
+   button outline with an inset shadow, and its flex layout would centre the
+   label no matter what text-align says. */
+button.jam-deck-archive-text { display: block; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font: inherit; font-size: var(--jd-font-body, 12px); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--jd-muted) 55%, transparent); color: var(--jd-muted); cursor: pointer; }
+button.jam-deck-archive-text:hover { color: var(--jd-ink); }
+button.jam-deck-archive-text:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); border-radius: var(--jd-radius-chip); }
+.jam-deck-archive-meta { font-size: var(--jd-font-meta, 10px); color: var(--jd-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+button.jam-deck-archive-action { padding: 3px 8px; border: 0; border-radius: var(--jd-radius-chip); background: transparent; box-shadow: none; color: var(--jd-muted); font-size: var(--jd-font-meta, 10px); cursor: pointer; opacity: 0; transition: opacity 120ms ease-out, background-color 120ms ease-out; }
+.jam-deck-archive-row:hover button.jam-deck-archive-action,
+.jam-deck-archive-row:focus-within button.jam-deck-archive-action { opacity: 1; }
+button.jam-deck-archive-action:hover { background: var(--jd-hover); color: var(--jd-ink); }
+button.jam-deck-archive-action:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
+button.jam-deck-archive-action.is-danger:hover { background: color-mix(in srgb, var(--text-error) 14%, transparent); color: var(--text-error); }
+.jam-deck-archive-footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--jd-line); text-align: right; }
+/* The footer action belongs to no row, so it stays visible and outlined. */
+.jam-deck-archive-footer button.jam-deck-archive-action { opacity: 1; padding: 6px 12px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-control); }
 
 @media (max-width: 650px) {
   .jam-deck-toolbar { padding: 0 8px; }
@@ -2050,8 +2126,7 @@ input.jam-deck-countdown-duration {
   .jam-deck-task-modal { max-height: calc(100vh - 16px); padding: 18px 14px; }
   .jam-deck-task-modal h2 { margin-right: 28px; font-size: var(--jd-font-title-small, 18px); }
   .jam-deck-task-modal-subtitle { margin-right: 28px; margin-bottom: 14px; }
-  .jam-deck-task-form { gap: 9px; }
-  .jam-deck-task-field { padding: 10px; }
+  .jam-deck-task-form { gap: 16px; }
   .jam-deck-task-modal .jam-deck-modal-actions { bottom: -18px; margin: 2px -14px -18px; padding: 10px 14px; }
   .jam-deck-archive-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .jam-deck-archive-meta { display: none; }
@@ -2814,8 +2889,7 @@ input.jam-deck-countdown-duration {
 
 
 /* Task detail and lightweight Spatial calendar — 0.7.2 */
-.jam-deck-task-meta-fields { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.jam-deck-task-field:focus-within { border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border)); }
+.jam-deck-task-meta-fields { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .jam-deck-task-field select,
 .jam-deck-task-field input[type="date"] { width: 100%; min-width: 0; margin: 0; }
 .jam-deck-task-due-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
@@ -2824,12 +2898,18 @@ input.jam-deck-countdown-duration {
   grid-template-columns: 42px minmax(0, 1fr) auto;
 }
 .jam-deck-task-field[tabindex="0"] { outline: none; }
-.jam-deck-task-field[tabindex="0"]:focus-visible { box-shadow: 0 0 0 2px var(--interactive-accent); }
+.jam-deck-task-field[tabindex="0"]:focus-visible { box-shadow: 0 0 0 2px var(--jd-accent); }
 .jam-deck-modal-actions-left,
 .jam-deck-modal-actions-right { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .jam-deck-modal-actions-left { margin-right: auto; }
 .jam-deck-modal-actions button.is-danger { color: var(--text-error); }
-.jam-deck-task-modal-archive { background: color-mix(in srgb, var(--interactive-accent) 88%, var(--background-primary)); color: var(--text-on-accent); }
+/* Archiving is a secondary action: outlined like cancel, never a second
+   filled button competing with save. */
+.jam-deck-task-modal .jam-deck-modal-actions button.jam-deck-task-modal-archive {
+  background: transparent;
+  border-color: var(--jd-line);
+  color: var(--jd-ink);
+}
 
 .jam-deck-root .jam-deck-task {
   min-height: 34px;
