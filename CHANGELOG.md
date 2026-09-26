@@ -2,6 +2,8 @@
 
 ## 1.2.0 — 2026-09-26（开发版）
 
+- 新增僵尸 CSS 运行时探测器 `scripts/audit-dead-css.js`。静态阅读无法判断一条规则是否真的渲染——扁平期旧规则会被 Spatial 重写版本按特异性完全压过，在源码里看起来完全正常。脚本改为在运行中的 Obsidian 里判定：先清空规则重读其声明属性的计算值，再塞哨兵值看计算值是否跟随，两遍都失败才判为被覆盖；第二遍用于排除「值与继承值巧合相同」的冗余声明。规则在 `finally` 中还原，不落盘、不改磁盘样式。首次运行（仅开工作台）覆盖 1022 条规则中的 26%，确证 29 条被覆盖、5 条冗余；因覆盖率不足，本次只产出名单不执行删除，脚本头部写明了这条纪律。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
+
 - 视觉规范去双份真相。`docs/VISUAL_DESIGN.md` 移除混入规则正文的版本号前缀（「1.1.2 起」「1.1.3 起」「1.1.8 按」「当前 0.32.12」）与重复写死的令牌数值（`--jd-radius-sm`「当前 10px」、`--jd-radius-md`「当前 14px」），规范只描述现状、只引用令牌名，像素值唯一来源为 `styles.css`，历史归 CHANGELOG。新增「设计令牌」一节，写入本次实测得到的硬规则：令牌作用域（弹窗在 `.jam-deck-root` 之外，共用令牌须定义在 `body` 块）、角色优先于尺寸、图标圆角是等比关系而非阶梯、给原生表单元素写样式必须带元素类型、以及改基础规则前须先确认是否存在 `.jam-deck-root` 重写版本。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
 
 - 设计令牌统一（第 1 批：色值与输入控件圆角）。新增跨作用域 `--jd-heading`，定义在 `body` 而非 `.jam-deck-root`——自有弹窗由 Obsidian Modal 挂载到工作台根节点之外，定义在根上会让弹窗侧解析失败；标题色不再是枚举白名单里的裸值 `#5c5c5c`。新增角色令牌 `--jd-radius-control` 收口文本输入控件圆角：此前 task-composer、browser-modal、task-form 用 6px，shortcut-form 用 9px，玻璃弹窗规则用 7px，同一种输入框在不同弹窗里形状不同，现统一为 7px。清理剪贴板僵尸样式：`.jam-deck-clip-text` 与 `.jam-deck-clip-text-time` 的扁平期规则（绿色左边框、绿色时间戳、4px 圆角）被 Spatial 重写的 `.jam-deck-root` 版本逐属性完全覆盖，长期不参与渲染，本次删除；灵动岛剪贴板使用独立类名，不受影响。修复倒计时输入格圆角长期被 Obsidian 主题覆盖的问题：`.jam-deck-countdown-duration` 是单类选择器（0,1,0），输给原生 `input[type="text"]`（0,1,1），常态实际取到主题的 `--input-radius`（本机 5px），而 `:focus`、`:disabled` 与运行态翻牌都是 7px，导致聚焦和启停时圆角跳变；选择器改为类型限定的 `input.jam-deck-countdown-duration`，输入格与翻牌一并接入 `--jd-radius-control`。玻璃皮肤的 `--jd-glass-heading` 覆盖优先级更高，行为不变。仓库卫生：删除游离的 `main.js.bak`、`pw-probe.txt`、`cleanup-check.txt`，`.gitignore` 补 `*.bak` 与 `tmp-*.txt` 防复发。npm run verify 全绿，并在 Obsidian 实机核对标题色与输入框圆角的计算值。纯样式改动，不涉及逻辑与持久化。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、审查与实现）。
