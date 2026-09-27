@@ -13802,6 +13802,7 @@ class JamDeckView extends ItemView {
       this.renderWidget(grid, widget);
     }
     this.enableLayoutSashes(grid);
+    this.restoreWidgetScrolls();
     const liveCanvasIds = new Set(this.plugin.settings.widgets
       .filter((widget) => widget.type === "canvas-embed")
       .map((widget) => widget.id));
@@ -14997,6 +14998,7 @@ class JamDeckView extends ItemView {
     const body = el.createDiv({ cls: "jam-deck-widget-body" });
     if (widget.type === "canvas-embed") body.addClass("jam-deck-canvas-embed-body");
     this.renderWidgetBody(body, widget);
+    this.keepBodyScroll(body, widget.id);
 
     if (this.plugin.settings.editMode) {
       el.addClass("is-editing");
@@ -15006,6 +15008,33 @@ class JamDeckView extends ItemView {
         header.createSpan({ text: "拖动", cls: "jam-deck-drag-hint" });
         this.enableDrag(header, el, widget);
       }
+    }
+  }
+
+  // 任何一次 renderAllViews 都会把组件 DOM 整个换掉（实测重绘前后的
+  // .jam-deck-widget-body 不是同一个节点），新节点的 scrollTop 自然是 0。
+  // 于是勾选一条滚动区外的待办时，列表会弹回顶部——笔触动画照样在视野外播完。
+  // 这里按 widget.id 记住滚动位置并在重绘后还原；恢复放进 rAF，确保布局
+  // 完成、元素已有可滚动高度，否则赋值会被丢弃。
+  keepBodyScroll(body, widgetId) {
+    const memory = (this.plugin.widgetScrollMemory ||= new Map());
+    // 不走 registerDomEvent：监听随被丢弃的节点一起回收，无需累积注册记录。
+    body.addEventListener("scroll", () => memory.set(widgetId, body.scrollTop), { passive: true });
+  }
+
+  // 还原各组件的滚动位置。必须在所有组件都构建完、栅格布局成型之后同步执行：
+  // 组件构建到一半时 body 还没有最终高度，赋值会被钳成 0。
+  // **不要改用 requestAnimationFrame**——窗口不在前台时 Electron 会暂停 rAF，
+  // 回调根本不执行（实测 600ms 内一帧未触发），滚动位置照样丢。
+  // 这里读 scrollHeight 会强制一次同步布局，拿到的就是最终值。
+  restoreWidgetScrolls() {
+    const memory = this.plugin.widgetScrollMemory;
+    if (!memory || !memory.size) return;
+    for (const el of this.contentEl.querySelectorAll(".jam-deck-widget")) {
+      const saved = memory.get(el.dataset.widgetId);
+      if (!saved) continue;
+      const body = el.querySelector(":scope > .jam-deck-widget-body");
+      if (body && body.scrollHeight > body.clientHeight) body.scrollTop = saved;
     }
   }
 

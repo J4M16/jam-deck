@@ -3707,6 +3707,19 @@ assert(pluginSource.includes("this.strikingTaskId = completed ? null : task.id;"
 // the visible area, which defeats the whole point of the animation.
 assert(!pluginSource.includes("for (const task of [...active, ...completed])"), "completed tasks must not be re-sorted to the end of the list on tick");
 assert(/const rows = \[\.\.\.shown\.filter\(\(task\) => !task\.routineId\), \.\.\.shown\.filter\(\(task\) => task\.routineId\)\];/.test(pluginSource), "row order must depend only on routine grouping, never on completion state");
+// A full re-render swaps the widget DOM, so the new body starts at scrollTop 0
+// and the list snaps back to the top — measured: 400 -> 0, sameNode false.
+assert(pluginSource.includes("keepBodyScroll(body, widget.id);") && pluginSource.includes("widgetScrollMemory"), "widget bodies must remember their scroll position across re-renders");
+// Restore runs synchronously after the whole grid is built. rAF is banned here:
+// Electron suspends it while the window is in the background (measured: not a
+// single frame in 600ms), so the scroll position would silently stay lost.
+assert(pluginSource.includes("restoreWidgetScrolls()") && /this\.enableLayoutSashes\(grid\);\s*this\.restoreWidgetScrolls\(\);/.test(pluginSource), "scroll restore must run after every widget is built, not per widget");
+{
+  const start = pluginSource.indexOf("restoreWidgetScrolls() {");
+  const restoreBody = pluginSource.slice(start, pluginSource.indexOf("\n  }", start));
+  assert(start > 0 && !restoreBody.includes("requestAnimationFrame"), "scroll restore must not depend on requestAnimationFrame; it never fires when the window is backgrounded");
+}
+assert(/for \(const el of this\.contentEl\.querySelectorAll\("\.jam-deck-widget"\)\)[\s\S]*?body\.scrollHeight > body\.clientHeight\) body\.scrollTop = saved;/.test(pluginSource), "restore must read scrollHeight to force layout and only write when the body can actually scroll");
 assert(/\.jam-deck-root \.jam-deck-task\.is-completed \.jam-deck-task-title \{\s*text-decoration: none;\s*background-image: linear-gradient/.test(styleSource), "completion must read as a marker stroke, not a plain line-through");
 assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 40%; \}/.test(styleSource), "the stroke must animate background-size only, staying inside the allowed property set");
 // Motion follows the plugin toggle, never the OS setting. Inside the workbench

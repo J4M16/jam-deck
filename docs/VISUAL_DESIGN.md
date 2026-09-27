@@ -45,6 +45,9 @@
 - 判定僵尸不能只靠 grep 同名类的重写版本。基础规则还会被**更宽泛的 root 规则按顺序压过**——`.jam-deck-widget.is-editing` 与 `.jam-deck-root .jam-deck-widget` 同为 (0,2,0)，靠后的赢，而 grep 查不出这种关系。静态搜索只能当线索，判定一律以运行时计算样式为准。
 - 勾选框不要靠 `accent-color`。Obsidian 自绘 checkbox：`appearance: none`，`:checked` 用 `background-color` 画底色、`::after` 用纯色方块配 SVG mask 画勾。`accent-color` 只作用于原生绘制的控件，对自绘控件**静默失效**——改了它计算值会如实变化，渲染却完全不看。要换色必须覆盖 `:checked` 的 `background-color` / `border-color` 与 `::after` 的 `background-color`；品牌绿上的勾必须用 `--jd-accent-ink`，白勾在 `--jd-accent` 上几乎不可见。覆盖选择器要逐个列举 Jam Deck 自有类名，不能用 `input[type="checkbox"]`，否则会命中内嵌 Canvas 笔记正文里的任务列表复选框。
 - 由此推广一条验收纪律：**读真正参与渲染的属性，而不是读自己刚改的那个属性。** 已知三种「计算样式骗人」的形态——滚动条伪元素（`getComputedStyle` 返回值与渲染无关）、`dev:screenshot` 返回缓存帧、以及当前绘制模式下被忽略的属性（如自绘控件上的 `accent-color`）。
+- 更普适的一条：**先把用户描述的现象翻译成可测量的指标，再去测它**，不要测「自己刚改的那个量」。例：用户说「点勾后跳到顶」，要测的是滚动容器的 `scrollTop`，而不是行的索引或 `getBoundingClientRect().top`——列表停在顶部时后两者根本不会变化，测了会得出"已修复"的错误结论。
+- **重绘后修正状态的逻辑不能依赖 `requestAnimationFrame`。** Electron 会暂停不可见窗口的 rAF（实测窗口在后台时 600ms 内一帧未触发），回调静默不执行。需要在重绘后还原滚动位置、尺寸等状态时，一律在整棵 DOM 构建完成后**同步**执行；读一次 `scrollHeight` 之类的属性即可强制布局，拿到最终值。
+- 组件重绘会把 `.jam-deck-widget-body` **整个节点换掉**（不是复用），因此一切挂在该节点上的浏览器状态（滚动位置、焦点、选区）都会丢失。新增可滚动组件时记得接入 `restoreWidgetScrolls()` 的记忆机制。
 
 ## 字号与阅读密度
 
