@@ -41,6 +41,9 @@
 - 图标圆角是等比关系而非阶梯：快捷方式图标在不同尺寸下保持大致相同的圆角比例，使弹窗预览与工作台实物形状一致；这类比例值不纳入阶梯令牌，也不与之归并。
 - 给原生表单元素（`input` / `textarea` / `select` / `button`）写样式必须带上元素类型，例如 `input.jam-deck-countdown-duration`。Obsidian 主题自带的 `input[type="text"]` 特异性为 (0,1,1)，裸单类 (0,1,0) 会被它压过，结果是常态取主题的 `--input-radius`、而 `:focus` 等伪类态取自己的值，产生肉眼可见的跳变。
 - 修改任何 `.jam-deck-*` 基础规则前，先确认是否存在 `.jam-deck-root .jam-deck-*` 的 Spatial 重写版本。扁平期遗留规则仍留在文件里，但特异性一律输给 root 版本；静态阅读会把僵尸规则误判为生效，结论以运行中 Obsidian 的计算样式为准。
+- 判定僵尸不能只靠 grep 同名类的重写版本。基础规则还会被**更宽泛的 root 规则按顺序压过**——`.jam-deck-widget.is-editing` 与 `.jam-deck-root .jam-deck-widget` 同为 (0,2,0)，靠后的赢，而 grep 查不出这种关系。静态搜索只能当线索，判定一律以运行时计算样式为准。
+- 勾选框不要靠 `accent-color`。Obsidian 自绘 checkbox：`appearance: none`，`:checked` 用 `background-color` 画底色、`::after` 用纯色方块配 SVG mask 画勾。`accent-color` 只作用于原生绘制的控件，对自绘控件**静默失效**——改了它计算值会如实变化，渲染却完全不看。要换色必须覆盖 `:checked` 的 `background-color` / `border-color` 与 `::after` 的 `background-color`；品牌绿上的勾必须用 `--jd-accent-ink`，白勾在 `--jd-accent` 上几乎不可见。覆盖选择器要逐个列举 Jam Deck 自有类名，不能用 `input[type="checkbox"]`，否则会命中内嵌 Canvas 笔记正文里的任务列表复选框。
+- 由此推广一条验收纪律：**读真正参与渲染的属性，而不是读自己刚改的那个属性。** 已知三种「计算样式骗人」的形态——滚动条伪元素（`getComputedStyle` 返回值与渲染无关）、`dev:screenshot` 返回缓存帧、以及当前绘制模式下被忽略的属性（如自绘控件上的 `accent-color`）。
 
 ## 字号与阅读密度
 

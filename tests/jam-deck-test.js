@@ -3698,9 +3698,24 @@ assert(pluginSource.includes('new RoutineManagerModal(this.app, this.plugin).ope
 assert(styleSource.includes(".modal.jam-deck-routine-modal-shell") && styleSource.includes(".jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb"), "the routine dialog must join the shared dialog material and the six scrollbar host lists");
 assert(!pluginSource.includes("dueDate: today") || !pluginSource.includes("task.routineId = routine.id"), "routine instances must not claim a due date and flood the calendar heat map");
 assert(pluginSource.includes("if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);"), "ticking a task must archive it in the same gesture instead of requiring a second click");
-assert(styleSource.includes(".jam-deck-task-check { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; accent-color: var(--jd-accent, var(--interactive-accent))"), "the task checkbox must use the brand green, not the theme's purple accent");
-assert(styleSource.includes("input.jam-deck-routine-toggle { margin: 0; accent-color: var(--jd-accent, var(--interactive-accent)); }"), "the routine toggle must use the brand green too");
-assert(!/\.jam-deck-task-(check|main|archive)[^{]*\{[^}]*var\(--interactive-accent\)(?!\))/.test(styleSource.replace(/var\(--jd-accent, var\(--interactive-accent\)\)/g, "TOKEN")), "no task control may fall back to the bare theme accent");
+// Obsidian draws checkboxes with `appearance: none` and paints :checked via
+// background-color plus a masked ::after, so accent-color is inert here.
+// These assertions pin the rules that actually render; an accent-color-only
+// assertion passed while the tick stayed purple.
+assert(styleSource.includes(".jam-deck-root :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):checked,")
+  && styleSource.includes(".jam-deck-routine-modal .jam-deck-routine-toggle:checked {")
+  && /:checked \{\s*background-color: var\(--jd-accent\);\s*border-color: var\(--jd-accent\);/.test(styleSource),
+  "every Jam Deck checkbox must paint its checked box with the brand green, not the theme accent");
+assert(/:checked::after,\s*\.jam-deck-routine-modal \.jam-deck-routine-toggle:checked::after \{\s*background-color: var\(--jd-accent-ink\);/.test(styleSource),
+  "the tick itself must switch to the dark ink counterpart; white on fluorescent green is unreadable");
+assert(!styleSource.includes("input[type=\"checkbox\"]:checked"), "checkbox overrides must list Jam Deck classes explicitly so embedded Canvas task lists stay untouched");
+assert(/\.modal\.jam-deck-routine-modal-shell \{[^}]*--jd-accent-ink: #183000;/.test(styleSource), "dialog shells must expose --jd-accent-ink, otherwise the tick colour cannot resolve outside .jam-deck-root");
+// Only states measured as live in a running Obsidian are pinned here. The edit
+// border and the task drop targets read ink/grey/transparent at runtime — the
+// .jam-deck-root layer wins on order — so they stay untouched zombies rather
+// than recoloured fakes.
+assert(!/\.jam-deck-(launcher-dropzone\.is-drop-target::after|picker-item:hover)[^{]*\{[^}]*var\(--interactive-accent\)/.test(styleSource.replace(/var\(--jd-accent, var\(--interactive-accent\)\)/g, "TOKEN")), "states confirmed live (launcher drop hint, widget picker hover) must use the brand green");
+assert(styleSource.includes("Dead rule: the later .jam-deck-root override wins"), "zombie accent rules must stay annotated instead of silently recoloured");
 
 function testRoutinePlanner() {
   const plan = JamDeckPlugin.planRoutineSpawns;

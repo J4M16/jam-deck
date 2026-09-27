@@ -190,6 +190,9 @@ body {
     border-color 180ms cubic-bezier(.22, 1, .36, 1);
 }
 
+/* Dead rule: the later .jam-deck-root override wins at equal specificity, so
+   the edit border actually renders grey. Left as-is — recolouring a zombie
+   only fakes a fix; removal belongs to scripts/audit-dead-css.js. */
 .jam-deck-widget.is-editing { border-style: dashed; border-color: var(--interactive-accent); }
 .jam-deck-widget.is-moving {
   opacity: 0.96;
@@ -565,8 +568,10 @@ input.jam-deck-countdown-duration {
 .jam-deck-task-foot { margin-top: 8px; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); text-align: center; }
 .jam-deck-task-dropzone,
 .jam-deck-launcher-dropzone { position: relative; }
-.jam-deck-launcher-dropzone.is-drop-target::after { content: "释放以添加"; position: absolute; inset: 5px; z-index: 12; display: grid; place-items: center; border: 1px dashed var(--interactive-accent); border-radius: var(--jd-radius-control); background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 650; pointer-events: none; backdrop-filter: blur(4px); }
+.jam-deck-launcher-dropzone.is-drop-target::after { content: "释放以添加"; position: absolute; inset: 5px; z-index: 12; display: grid; place-items: center; border: 1px dashed var(--jd-accent, var(--interactive-accent)); border-radius: var(--jd-radius-control); background: color-mix(in srgb, var(--background-primary) 88%, var(--jd-accent, var(--interactive-accent))); color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 650; pointer-events: none; backdrop-filter: blur(4px); }
 .jam-deck-task-create-drop { max-height: 0; min-height: 0; margin: 0; padding: 0 10px; overflow: hidden; box-sizing: border-box; display: grid; place-items: center; border: 1px dashed transparent; border-radius: var(--jd-radius-control); opacity: 0; color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 600; line-height: 1.3; pointer-events: none; transform: translateY(-4px); transition: max-height 0.18s ease, min-height 0.18s ease, margin 0.18s ease, padding 0.18s ease, opacity 0.15s ease, transform 0.18s ease, background 0.15s ease; }
+/* The next three are dead too — measured live, the task drop states render
+   ink/transparent from the .jam-deck-root layer. Same reasoning as above. */
 .jam-deck-task-dropzone.is-drag-active .jam-deck-task-create-drop { max-height: 38px; min-height: 34px; margin: 0 0 8px; padding: 7px 10px; border-color: var(--interactive-accent); opacity: 1; pointer-events: auto; transform: translateY(0); }
 .jam-deck-task-create-drop.is-drop-target { background: color-mix(in srgb, var(--background-primary) 82%, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, transparent 68%, var(--interactive-accent)); }
 .jam-deck-task.is-drop-target { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, transparent 72%, var(--interactive-accent)); }
@@ -598,7 +603,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-canvas-embed-state-path { max-width: 100%; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); overflow-wrap: anywhere; }
 .jam-deck-canvas-embed-state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 3px; }
 .jam-deck-canvas-embed-state-actions button { min-height: 28px; margin: 0; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: var(--background-secondary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
-.jam-deck-canvas-embed-state-actions button:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
+.jam-deck-canvas-embed-state-actions button:hover { border-color: var(--jd-accent, var(--interactive-accent)); color: var(--text-accent); }
 .jam-deck-canvas-embed-host.is-compact .jam-deck-canvas-embed-state { gap: 4px; }
 .jam-deck-canvas-embed-host.is-compact .jam-deck-canvas-embed-state-icon { font-size: 22px; }
 
@@ -1888,7 +1893,7 @@ input.jam-deck-countdown-duration {
 .jam-deck-picker p { margin: 0 0 16px; color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
 .jam-deck-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .jam-deck-picker-item { min-height: 68px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; }
-.jam-deck-picker-item:hover { border-color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.jam-deck-picker-item:hover { border-color: var(--jd-accent, var(--interactive-accent)); background: var(--background-modifier-hover); }
 .jam-deck-picker-icon { font-size: 18px; color: var(--text-accent); }
 .jam-deck-picker-label { font-size: var(--jd-font-body, 12px); }
 
@@ -1905,6 +1910,8 @@ input.jam-deck-countdown-duration {
   --jd-faint: color-mix(in srgb, var(--text-muted) 58%, transparent);
   --jd-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent); --jd-accent: #b8ff3d;
+  /* Paired with --jd-accent for anything drawn on top of the green (tick marks). */
+  --jd-accent-ink: #183000;
   border: 1px solid var(--jd-line); border-radius: var(--jd-radius-lg);
   background: var(--jd-paper); color: var(--jd-ink); box-shadow: 0 14px 48px rgb(15 20 18 / .16);
 }
@@ -2161,6 +2168,26 @@ input[type="text"].jam-deck-routine-draft:focus { outline: none; border-color: v
 button.jam-deck-routine-add { flex-shrink: 0; height: 34px; padding: 0 16px; border: 0; border-radius: var(--jd-radius-pill); background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer; }
 button.jam-deck-routine-add:hover { opacity: .86; }
 button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
+
+/* Checkbox ticks, workbench and dialogs alike. Obsidian draws checkboxes
+   itself: `appearance: none`, then `:checked` paints the box with the theme
+   accent and `::after` paints the tick as a white box behind an SVG mask.
+   `accent-color` only affects natively drawn controls, so it is silently
+   ignored here — the box and the tick have to be coloured directly.
+   Classes are listed one by one rather than using input[type="checkbox"] so
+   task-list checkboxes inside embedded Canvas notes stay untouched.
+   Specificity is (0,3,0), which beats Obsidian's (0,2,1). */
+.jam-deck-root :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):checked,
+.jam-deck-routine-modal .jam-deck-routine-toggle:checked {
+  background-color: var(--jd-accent);
+  border-color: var(--jd-accent);
+}
+/* A white tick is nearly invisible on the fluorescent green, so the mask gets
+   the dark ink counterpart instead. */
+.jam-deck-root :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):checked::after,
+.jam-deck-routine-modal .jam-deck-routine-toggle:checked::after {
+  background-color: var(--jd-accent-ink);
+}
 
 @media (max-width: 650px) {
   .jam-deck-toolbar { padding: 0 8px; }
@@ -4500,6 +4527,6 @@ body[data-jam-deck-skin="glass"] .jam-deck-task-modal :is(.jam-deck-task-field, 
 body[data-jam-deck-skin="glass"] .jam-deck-task-modal .jam-deck-task-field { border: 0; padding: 0; }
 body[data-jam-deck-skin="glass"] :is(.jam-deck-task-modal, .jam-deck-shortcut-modal, .jam-deck-browser-modal, .jam-deck-folder-rename-modal)
   :is(input[type="text"], input[type="url"], input[type="date"], textarea, select):focus-visible {
-  outline: 2px solid var(--interactive-accent);
+  outline: 2px solid var(--jd-accent, var(--interactive-accent));
   outline-offset: 2px;
 }
