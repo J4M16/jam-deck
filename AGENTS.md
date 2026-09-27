@@ -7,11 +7,12 @@
 - `D:\Project\JamDeck` 是唯一开发源；不要直接在 Vault 插件目录开发。
 - Obsidian 运行副本位于 `X:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
-- **热重载会留下僵尸实例，反复 reload 会丢运行数据（2026-09-27 实测事故）**：`plugin:reload` 之后旧插件实例不保证被彻底卸载，它的 `registerInterval` 轮询（尤其剪贴板轮询）可能继续运行，并持有**重载前的 settings 快照**。之后任何一次剪贴板变化都会让僵尸调 `saveSettings()` 全量写回 `data.json`，把新版本新增的字段连 key 一起抹掉——当天 `deckRoutines` 九条模板与全部实例就是这么丢的，现象是"用户复制一次东西，数据回滚一次"。
-  - 判定方法：读磁盘 `data.json` 的顶层 key 清单。若缺少当前代码一定会写入的字段（例如新版必有的 `deckRoutines`），说明最后一次写入来自旧实例；再比对 `clipboardItems[0].ts` 与文件 mtime 可坐实是哪次复制触发的。
-  - 一次会话内**不要连续多轮 reload**。同一批改动攒在一起，部署后只重载一次。
-  - 新增会被持久化的 settings 字段、或改动 `saveSettings` 相关链路时，**部署后必须整体重启 Obsidian**，不能只 `plugin:reload`。
-  - 种入或修改运行数据（走 eval 调插件方法）之前，先确认当前没有僵尸：重启一次最保险。种完立刻复核磁盘 key 清单。
+- **`data.json` 会被"旧结构"覆盖，新增的 settings 字段可能整段丢失（2026-09-27 两次事故，根因未定论）**。当天 `deckRoutines` 九条模板与全部实例丢了两次，第二次发生在整体重启、确认进程数归零之后，所以**不能简单归因为热重载僵尸**。已确证的事实与已排除项如下，下次遇到照这个清单走，别重复我的误判：
+  - **可靠判定手法**：读磁盘 `data.json` 的顶层 key 数与清单。当前代码的 `loadSettings` 一定会把 `deckRoutines` 补成数组，因此**磁盘缺这个 key 就说明最后一次写入不是当前实例做的**（事故时磁盘 37 个 key，运行中实例内存 38 个）。再对比文件 mtime 与 `clipboardItems[0].ts`：两次事故中它们都精确吻合到秒，且内容正是用户刚复制的文字。
+  - 已排除：插件重复注册（`app.plugins.manifests` 只有一条 `jam-deck`，指向正确目录）；部署备份目录被当插件加载（`.jam-deck-backup-*` 未出现在 manifests 里）；代码层面的丢字段路径（全仓只有一处 `this.settings = ...` 赋值，`saveSettings` / `setAppearance` / `pollClipboard` 全部保存 `this.settings` 全量）。
+  - 两个仍未排除的嫌疑：① `plugin:reload` 残留的旧实例仍在轮询剪贴板并持有旧 settings 快照；② **vault 位于坚果云 FUSE 挂载盘**（`X:` 卷标 `zhanghonglicloud`，`FileSystem=FUSE`，本机运行 `NutstoreDriverSvc`），云端把旧版本同步回来覆盖本地。第二次事故中同一句复制被记成两个不同时间戳（21:46:50 与 21:47:08），说明**存在两个各自写盘的写入方**，但本机进程列表只有一个 Obsidian。未见坚果云冲突副本。
+  - 因此操作纪律（无论最终根因是哪个都适用）：一次会话内**不要连续多轮 reload**，改动攒一起、部署后只重载一次；**新增会被持久化的 settings 字段、或改动 `saveSettings` 链路后，部署完整体重启 Obsidian**；种入或修改运行数据后**立刻复核磁盘 key 清单**，并在几分钟后再复核一次，确认没有被回滚；涉及运行数据的改动先备份 `data.json` 到 `debug-backups/`。
+  - 若再次复现，优先做这个判别实验：记下 mtime → 用 eval 让当前实例保存一次 → 立刻读磁盘确认 key 数为 38 → 静置观察 mtime 是否在无人操作时自行变化。mtime 自行变化即指向云同步；仅在复制后变化且 key 数掉回 37 即指向旧实例写入。
 - 修改后至少运行 `npm run verify`。
 - 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），`npm run deploy`（部署目标 = 环境变量 `JAM_DECK_TARGET_PLUGIN_DIR`，未设置则需 `npm run deploy -- -TargetPluginDir <目录>` 显式传参；脚本拒绝无目标静默执行）；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
 - Obsidian 启停：**GUI 启动用 `Obsidian.exe`**（不是 Obsidian.com——它只是 CLI wrapper）。**RDP 会话下 GPU 进程常崩溃**（`GPU process isn't usable`），必须带参数：
