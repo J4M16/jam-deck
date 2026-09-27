@@ -3750,15 +3750,27 @@ assert(/repeating-linear-gradient\(91deg,/.test(styleSource), "the fibre texture
 // Motion follows the plugin toggle, never the OS setting. Inside the workbench
 // .jam-deck-no-motion handles it; the receipt dialog mounts outside the root,
 // so the animation class is withheld in JS instead.
-assert(styleSource.includes("@keyframes jam-deck-receipt-feed"), "the receipt feed animation must exist");
-// Confirming the archive tears this copy off, then a fresh slip feeds out.
-assert(styleSource.includes("@keyframes jam-deck-receipt-tear") && styleSource.includes(".jam-deck-receipt.is-tearing"), "confirming the archive must tear the slip off, not silently swap the content");
-assert(pluginSource.includes("const JAM_DECK_RECEIPT_TEAR_MS = 460;") && /jam-deck-receipt-tear 460ms/.test(styleSource), "the tear duration must stay in sync between JS and CSS");
-assert(pluginSource.includes('paper.addClass("is-tearing");') && pluginSource.includes("this.printed = false;"), "the tear must play before the re-render, and the new slip must feed out again");
-assert(/if \(this\.plugin\.settings\.animationsEnabled !== false\) \{\s*paper\.addClass\("is-tearing"\);/.test(pluginSource), "with animations off the tear must be skipped instead of stalling the archive");
-assert(pluginSource.includes('if (this.plugin.settings.animationsEnabled !== false) paper.addClass("is-printing");'), "dialogs outside .jam-deck-root must gate animation on the plugin's own toggle");
+assert(pluginSource.includes("return this.plugin.settings.animationsEnabled !== false;")
+  && pluginSource.includes('if (this.animated) this.containerEl.addClass("is-animated");')
+  && pluginSource.includes('contentEl.toggleClass("is-printing", !this.printed && this.animated);'), "dialogs outside .jam-deck-root must gate animation on the plugin's own toggle");
+// The slip slides out of a printer slot in bursts: the clip inset tracks the
+// translate so the visible edge stays pinned under the slot, and the held
+// keyframe pairs are the stops between bursts.
+const receiptFeed = styleSource.match(/@keyframes jam-deck-receipt-feed \{[\s\S]*?\n\}/)?.[0] || "";
+assert(pluginSource.includes('contentEl.createDiv({ cls: "jam-deck-receipt-slot"') && styleSource.includes(".jam-deck-receipt-modal.is-printing .jam-deck-receipt-slot {"), "the slip must feed out of a printer slot");
+assert(receiptFeed.includes("transform: translateY(-100%); clip-path: inset(100% 0 0 0);") && (receiptFeed.match(/\d+%, \d+% \{/g) || []).length >= 3, "the feed must slide out of the slot in bursts with stops between them");
+// Opening and closing are animated too; Obsidian's close() removes the
+// container synchronously, so the dialog defers it until the exit plays.
+assert(styleSource.includes(".jam-deck-receipt-container.is-animated .modal-bg {") && styleSource.includes(".jam-deck-receipt-container.is-closing .modal {"), "the receipt dialog must animate its backdrop in and itself out");
+assert(/close\(\) \{\s*if \(this\.closing\) return;\s*this\.closing = true;\s*if \(!this\.animated\) \{\s*super\.close\(\);\s*return;\s*\}\s*this\.containerEl\.addClass\("is-closing"\);\s*window\.setTimeout\(\(\) => super\.close\(\), jamDeckAnimationMs\(this\.modalEl\)\);/.test(pluginSource), "close must wait for the exit animation, and close at once with animations off");
+// Settling is one timeline (seal, tugs, tear, swing, flick) and only plays
+// once every item archived; its length is read back from CSS, not duplicated.
+assert(styleSource.includes("@keyframes jam-deck-receipt-settle") && styleSource.includes("@keyframes jam-deck-receipt-seal") && styleSource.includes(".jam-deck-receipt-container.is-settling .jam-deck-receipt {"), "confirming the archive must seal and tear the slip off");
+assert(/if \(this\.animated\) \{\s*paper\.createDiv\(\{ text: "已 结 算", cls: "jam-deck-receipt-seal"[^\n]*\n\s*this\.containerEl\.addClass\("is-settling"\);\s*await new Promise\(\(resolve\) => window\.setTimeout\(resolve, jamDeckAnimationMs\(paper\)\)\);\s*\}\s*this\.close\(\);/.test(pluginSource), "the settle must play before closing, and be skipped with animations off");
+assert(/if \(failed\) \{\s*new Notice\([^\n]*\n\s*this\.render\(\);\s*return;\s*\}/.test(pluginSource), "a partial failure must not play the settle; the slip stays for a retry");
+assert(!/JAM_DECK_RECEIPT_\w+_MS/.test(pluginSource), "receipt animation durations must live only in styles.css");
 assert(!/\.jam-deck-(task\.is-striking|receipt)[^{]*\{[^}]*\}\s*\}?\s*@media \(prefers-reduced-motion/.test(styleSource), "new animations must not consult the OS reduced-motion setting");
-assert(fs.readFileSync(path.join(projectRoot, "docs", "VISUAL_DESIGN.md"), "utf8").includes("吐纸动画是限定例外"), "the receipt's transform/clip-path animation must be declared as a scoped exception in the spec");
+assert(fs.readFileSync(path.join(projectRoot, "docs", "VISUAL_DESIGN.md"), "utf8").includes("日结单动效是限定例外"), "the receipt's transform/clip-path animation must be declared as a scoped exception in the spec");
 assert(styleSource.includes(".jam-deck-receipt-modal:hover *::-webkit-scrollbar-thumb,") && styleSource.includes(".jam-deck-receipt-modal, .jam-deck-shortcut-modal"), "the receipt dialog must join every scrollbar host list");
 // Obsidian draws checkboxes with `appearance: none` and paints :checked via
 // background-color plus a masked ::after, so accent-color is inert here.

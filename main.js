@@ -2685,8 +2685,14 @@ class RoutineManagerModal extends Modal {
   }
 }
 
-// 撕票动画时长，与 styles.css 的 jam-deck-receipt-tear 保持一致。
-const JAM_DECK_RECEIPT_TEAR_MS = 460;
+// 元素当前动画的总时长（延迟 + 时长，取最长一段）。日结单的动画时长只写在
+// styles.css，JS 读计算样式再等，不另存一份常量。
+function jamDeckAnimationMs(el) {
+  const style = window.getComputedStyle(el);
+  const seconds = (value) => value.split(",").map((part) => parseFloat(part) || 0);
+  const delays = seconds(style.animationDelay);
+  return Math.max(0, ...seconds(style.animationDuration).map((duration, i) => (duration + (delays[i] || 0)) * 1000));
+}
 
 // 今天的结算清单。既包含还没归档的已完成项（本次归档的目标），也包含今天早些
 // 时候已经归档的——「下班结算」要看到一整天的产出，而不只是剩下这一批。
@@ -2717,12 +2723,33 @@ class DayReceiptModal extends Modal {
     this.plugin = plugin;
   }
 
+  // 弹窗挂在 .jam-deck-root 之外，工作台那条统一禁用动效的规则管不到，
+  // 因此读插件自己的动画开关 —— 与项目约定一致，不查系统设置。
+  get animated() {
+    return this.plugin.settings.animationsEnabled !== false;
+  }
+
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.containerEl.addClass("jam-deck-receipt-container");
+    if (this.animated) this.containerEl.addClass("is-animated");
     this.modalEl.addClass("jam-deck-receipt-modal-shell");
     contentEl.addClass("jam-deck-receipt-modal");
     this.render();
+  }
+
+  // Obsidian 的 close() 会同步摘掉整个容器，退场动画没有机会播。先挂退场类，
+  // 等它播完再真正关闭；动画关掉时直接关。
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+    if (!this.animated) {
+      super.close();
+      return;
+    }
+    this.containerEl.addClass("is-closing");
+    window.setTimeout(() => super.close(), jamDeckAnimationMs(this.modalEl));
   }
 
   render() {
@@ -2731,14 +2758,11 @@ class DayReceiptModal extends Modal {
     const today = this.plugin.formatLocalDate(new Date());
     const receipt = jamDeckCollectDayReceipt(this.plugin.settings.deckTasks, today);
 
+    // 吐纸只在弹窗打开时播一次；归档失败后的重绘不再重播。
+    contentEl.toggleClass("is-printing", !this.printed && this.animated);
+    this.printed = true;
+    contentEl.createDiv({ cls: "jam-deck-receipt-slot", attr: { "aria-hidden": "true" } });
     const paper = contentEl.createDiv({ cls: "jam-deck-receipt" });
-    // 吐纸动画只在弹窗打开时播一次；重绘（归档完成后）不再带这个类。
-    // 弹窗挂在 .jam-deck-root 之外，工作台那条统一禁用动效的规则管不到，
-    // 因此在这里读插件自己的动画开关 —— 与项目约定一致，不查系统设置。
-    if (!this.printed) {
-      if (this.plugin.settings.animationsEnabled !== false) paper.addClass("is-printing");
-      this.printed = true;
-    }
     const head = paper.createDiv({ cls: "jam-deck-receipt-head" });
     head.createDiv({ text: "JAM DECK", cls: "jam-deck-receipt-brand" });
     head.createDiv({ text: "日 结 单", cls: "jam-deck-receipt-subtitle" });
@@ -2793,14 +2817,15 @@ class DayReceiptModal extends Modal {
           this.render();
           return;
         }
-        // 撕票：把这一联撕走，再让 render 吐出结算后的新票（printed 复位，
-        // 新票会重新播吐纸动画）。动画关掉时不空等，直接重绘。
-        if (this.plugin.settings.animationsEnabled !== false) {
-          paper.addClass("is-tearing");
-          await new Promise((resolve) => window.setTimeout(resolve, JAM_DECK_RECEIPT_TEAR_MS));
+        // 结算：盖章 → 撕下这一联 → 甩走，然后收起弹窗。撕走了却没归档成功会
+        // 误导，所以只在全部成功后播；动画关掉时直接关。
+        archive.setText(`已 归 档 ${receipt.pending.length} 项`);
+        if (this.animated) {
+          paper.createDiv({ text: "已 结 算", cls: "jam-deck-receipt-seal", attr: { "aria-hidden": "true" } });
+          this.containerEl.addClass("is-settling");
+          await new Promise((resolve) => window.setTimeout(resolve, jamDeckAnimationMs(paper)));
         }
-        this.printed = false;
-        this.render();
+        this.close();
       });
     }
   }

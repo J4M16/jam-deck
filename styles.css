@@ -1991,6 +1991,8 @@ input.jam-deck-countdown-duration {
    narrow strip with torn edges, so it gets its own surface. Only the scrollbar
    rules are shared. */
 .modal.jam-deck-receipt-modal-shell {
+  --jd-slip-slot: 12px;
+  --jd-slip-tuck: 5px;
   width: min(348px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   max-height: min(760px, calc(100vh - 48px));
@@ -2001,13 +2003,32 @@ input.jam-deck-countdown-duration {
   overflow: visible;
 }
 .jam-deck-receipt-modal-shell > .modal-header { display: none; }
+/* The paper starts below the printer slot, so the close button moves down with it. */
+.jam-deck-receipt-modal-shell > .modal-header-button { top: calc(var(--size-2-3) + var(--jd-slip-slot) - var(--jd-slip-tuck)); }
 /* No gap, no extra wrapper: the shell is transparent so anything outside the
-   paper would show the workbench through the seam. */
-.jam-deck-receipt-modal { padding: 0; }
+   paper would show the workbench through the seam. The torn edges are a mask,
+   and a mask clips the element's own box-shadow away with them, so the soft
+   paper shadow is cast by this wrapper onto the already-cut outline. */
+.jam-deck-receipt-modal {
+  padding: 0;
+  filter: drop-shadow(0 1px 1px rgb(15 20 18 / .08)) drop-shadow(0 12px 24px rgb(15 20 18 / .16));
+}
+/* Printer slot the slip feeds out of and is torn off from. Wider than the
+   paper and tucked over its top teeth, so there is no seam between them. */
+.jam-deck-receipt-slot {
+  position: relative;
+  z-index: 1;
+  height: var(--jd-slip-slot);
+  margin: 0 -10px calc(var(--jd-slip-tuck) * -1);
+  border-radius: var(--jd-radius-pill);
+  background: linear-gradient(#4a4a45, #1d1d1b);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .16), inset 0 -2px 0 rgb(0 0 0 / .4);
+}
 .jam-deck-receipt {
   --jd-slip: #fbfaf6;
   --jd-slip-ink: #2b2b28;
   --jd-slip-faint: color-mix(in srgb, var(--jd-slip-ink) 46%, transparent);
+  position: relative;
   width: 100%;
   padding: 22px 20px 18px;
   background: var(--jd-slip);
@@ -2015,7 +2036,6 @@ input.jam-deck-countdown-duration {
   font-family: var(--font-monospace, ui-monospace, monospace);
   font-size: 11px;
   line-height: 1.7;
-  box-shadow: 0 10px 30px rgb(15 20 18 / .18);
   /* Torn top and bottom edges, cut out of the paper itself rather than drawn as
      an extra layer. */
   --jd-slip-teeth: 7px;
@@ -2025,29 +2045,80 @@ input.jam-deck-countdown-duration {
     linear-gradient(#000, #000) 0 var(--jd-slip-teeth) / 100% calc(100% - var(--jd-slip-teeth) * 2) no-repeat;
 }
 .theme-dark .jam-deck-receipt { --jd-slip: #edece7; }
-/* The slip feeding out of the printer. A transform/clip-path pair is the only
-   way to express this; declared as a scoped exception in VISUAL_DESIGN.md and
-   played once per dialog open. The dialog mounts outside .jam-deck-root, so the
-   workbench-wide no-motion rule cannot reach it — the class is withheld in JS
-   when the plugin's animation toggle is off, which keeps this on the plugin
-   preference rather than the OS setting. */
-.jam-deck-receipt.is-printing { animation: jam-deck-receipt-feed 480ms cubic-bezier(.22, 1, .36, 1) both; }
+/* Receipt motion — a scoped transform/clip-path exception in VISUAL_DESIGN.md.
+   The dialog mounts outside .jam-deck-root, so the workbench-wide no-motion
+   rule cannot reach it; JS withholds is-animated / is-printing / is-settling
+   when the plugin's animation toggle is off. Durations live only here: JS
+   reads them back from computed style before closing. */
+.jam-deck-receipt-container.is-animated .modal-bg { animation: jam-deck-receipt-fade-in 220ms ease-out both; }
+.jam-deck-receipt-container.is-animated .modal-header-button { animation: jam-deck-receipt-fade-in 200ms ease-out 240ms both; }
+@keyframes jam-deck-receipt-fade-in { from { opacity: 0; } }
+@keyframes jam-deck-receipt-fade-out { to { opacity: 0; } }
+/* Opening: the slot springs in with a small overshoot, then the slip slides
+   out of it as a whole — footer first — in four bursts with short stops
+   between, the way a thermal head prints block by block. The clip inset
+   tracks the translate so the visible top edge stays pinned under the slot. */
+.jam-deck-receipt-modal.is-printing .jam-deck-receipt-slot { animation: jam-deck-receipt-slot-in 260ms cubic-bezier(.2, .8, .3, 1) both; }
+@keyframes jam-deck-receipt-slot-in {
+  0% { opacity: 0; transform: scale(.6, .5); }
+  50% { opacity: 1; transform: scale(1.04, 1.12); }
+  100% { transform: scale(1); }
+}
+.jam-deck-receipt-modal.is-printing .jam-deck-receipt { animation: jam-deck-receipt-feed 2400ms cubic-bezier(.3, 0, .7, 1) 200ms both; }
 @keyframes jam-deck-receipt-feed {
-  from { clip-path: inset(0 0 100% 0); transform: translateY(-16px); }
-  to { clip-path: inset(0 0 0 0); transform: translateY(0); }
+  0% { transform: translateY(-100%); clip-path: inset(100% 0 0 0); }
+  17%, 24% { transform: translateY(-78%); clip-path: inset(78% 0 0 0); }
+  48%, 55% { transform: translateY(-48%); clip-path: inset(48% 0 0 0); }
+  79%, 86% { transform: translateY(-18%); clip-path: inset(18% 0 0 0); }
+  100% { transform: translateY(0); clip-path: inset(0 0 0 0); }
 }
-/* 撕票：确认归档后把这一联撕走，再吐出结算后的新票。前三帧是撕扯时的
-   拉拽抖动（提起→反向拉→断开），之后整张沿一点角度坠出视野。与吐纸同属
-   已登记的 transform 例外；时长与 JS 里的 JAM_DECK_RECEIPT_TEAR_MS 一致，
-   动画关掉时 JS 会跳过等待直接重绘。 */
-.jam-deck-receipt.is-tearing { animation: jam-deck-receipt-tear 460ms cubic-bezier(.36, 0, .2, 1) both; }
-@keyframes jam-deck-receipt-tear {
-  0% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
-  10% { transform: translate(-3px, -4px) rotate(-.9deg); }
-  22% { transform: translate(3px, -2px) rotate(.7deg); }
-  34% { transform: translate(-2px, 1px) rotate(-.4deg); opacity: 1; }
-  100% { transform: translate(1px, 44px) rotate(2.4deg); opacity: 0; }
+/* Settling, one timeline: the seal lands and the slip dips under it, a beat
+   of stillness, two tugs (the perforation holds once, then gives), the torn
+   slip swings like a pendulum from where it was grabbed, then gets flicked
+   away. The dialog closes when this ends. */
+.jam-deck-receipt-container.is-settling .modal-header-button { animation: jam-deck-receipt-fade-out 120ms ease-in both; }
+.jam-deck-receipt-container.is-settling .jam-deck-receipt { transform-origin: 50% 8%; animation: jam-deck-receipt-settle 1500ms both; }
+@keyframes jam-deck-receipt-settle {
+  0%, 10% { transform: translate(0, 0) rotate(0deg); opacity: 1; animation-timing-function: cubic-bezier(.2, 0, .4, 1); }
+  14% { transform: translate(0, 4px); animation-timing-function: cubic-bezier(.3, 0, .3, 1); }
+  21%, 40% { transform: translate(0, 0); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  46% { transform: translate(0, 7px); animation-timing-function: cubic-bezier(.3, 0, .5, 1); }
+  50% { transform: translate(0, 2px); animation-timing-function: cubic-bezier(.5, 0, .7, 1); }
+  55% { transform: translate(0, 12px) rotate(-1deg); animation-timing-function: cubic-bezier(.2, .7, .3, 1); }
+  68% { transform: translate(-30px, 34px) rotate(-11deg); animation-timing-function: cubic-bezier(.45, 0, .55, 1); }
+  86% { transform: translate(-14px, 38px) rotate(4deg); opacity: 1; animation-timing-function: cubic-bezier(.6, 0, .9, .5); }
+  100% { transform: translate(180px, -110px) rotate(22deg); opacity: 0; }
 }
+.jam-deck-receipt-seal {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  padding: 3px 12px;
+  border: 2px solid currentColor;
+  border-radius: var(--jd-radius-chip);
+  background: color-mix(in srgb, var(--jd-slip) 82%, transparent);
+  color: var(--jd-slip-ink);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .3em;
+  white-space: nowrap;
+  opacity: .78;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-9deg);
+  animation: jam-deck-receipt-seal 320ms both;
+}
+@keyframes jam-deck-receipt-seal {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(-16deg) scale(1.9); animation-timing-function: cubic-bezier(.55, 0, .85, .35); }
+  47% { opacity: .78; transform: translate(-50%, -50%) rotate(-9deg) scale(.92); animation-timing-function: cubic-bezier(.2, .8, .3, 1); }
+  72% { transform: translate(-50%, -50%) rotate(-9deg) scale(1.03); }
+  100% { opacity: .78; transform: translate(-50%, -50%) rotate(-9deg) scale(1); }
+}
+/* Closing — Esc, backdrop click, or the end of settling: shrink and fade,
+   quicker than the entrance. */
+.jam-deck-receipt-container.is-closing { pointer-events: none; }
+.jam-deck-receipt-container.is-closing .modal-bg { animation: jam-deck-receipt-fade-out 180ms ease-in both; }
+.jam-deck-receipt-container.is-closing .modal { animation: jam-deck-receipt-out 180ms cubic-bezier(.4, 0, 1, 1) both; }
+@keyframes jam-deck-receipt-out { to { opacity: 0; transform: translateY(6px) scale(.96); } }
 .jam-deck-receipt-head { text-align: center; }
 .jam-deck-receipt-brand { font-size: 15px; font-weight: 700; letter-spacing: .22em; }
 .jam-deck-receipt-subtitle { letter-spacing: .3em; color: var(--jd-slip-faint); }
