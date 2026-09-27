@@ -3697,6 +3697,10 @@ assert(pluginSource.includes("class RoutineManagerModal"), "daily routines must 
 assert(pluginSource.includes('new RoutineManagerModal(this.app, this.plugin).open()'), "the tasks widget must expose the routine manager");
 assert(styleSource.includes(".modal.jam-deck-routine-modal-shell") && styleSource.includes(".jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb"), "the routine dialog must join the shared dialog material and the six scrollbar host lists");
 assert(!pluginSource.includes("dueDate: today") || !pluginSource.includes("task.routineId = routine.id"), "routine instances must not claim a due date and flood the calendar heat map");
+assert(pluginSource.includes("if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);"), "ticking a task must archive it in the same gesture instead of requiring a second click");
+assert(styleSource.includes(".jam-deck-task-check { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; accent-color: var(--jd-accent, var(--interactive-accent))"), "the task checkbox must use the brand green, not the theme's purple accent");
+assert(styleSource.includes("input.jam-deck-routine-toggle { margin: 0; accent-color: var(--jd-accent, var(--interactive-accent)); }"), "the routine toggle must use the brand green too");
+assert(!/\.jam-deck-task-(check|main|archive)[^{]*\{[^}]*var\(--interactive-accent\)(?!\))/.test(styleSource.replace(/var\(--jd-accent, var\(--interactive-accent\)\)/g, "TOKEN")), "no task control may fall back to the bare theme accent");
 
 function testRoutinePlanner() {
   const plan = JamDeckPlugin.planRoutineSpawns;

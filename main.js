@@ -15116,7 +15116,10 @@ class JamDeckView extends ItemView {
       checkbox.addEventListener("click", (event) => event.stopPropagation());
       checkbox.addEventListener("change", async (event) => {
         event.stopPropagation();
-        await this.plugin.toggleDeckTask(task.id);
+        // 勾选即归档，省掉第二次点击。归档失败时任务停在「已完成」，
+        // 行上的归档按钮仍可重试；取消勾选走回退路径。
+        if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);
+        else await this.plugin.toggleDeckTask(task.id);
       });
       const taskMain = row.createEl("button", {
         cls: "jam-deck-task-main",

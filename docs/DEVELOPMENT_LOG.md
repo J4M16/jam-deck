@@ -1,5 +1,18 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-27 — 1.3.0 勾选框品牌色 + 勾选即归档
+
+- Jam 试用后提了两点：勾是紫色的、以及勾完还要再点一次归档。
+- **紫勾根因**：`.jam-deck-task-check { accent-color: var(--interactive-accent); }` 直接吃 Obsidian 主题强调色，本机解析成紫。而 `.jam-deck-countdown-toggle input` 早就写成 `var(--jd-accent, var(--interactive-accent))`——正确写法项目里本来就有，待办这组是漏网的。
+- 按规范先查有没有 `.jam-deck-root` 重写版本（静态阅读会把僵尸规则误判为生效）：`.jam-deck-task-check` / `-main` / `-archive` **一条重写都没有**，所以基础层的紫确实在渲染。作为对照，日历「今天」在基础层也写着主题色，但 root 层已重写为 `--jd-accent`——那条是僵尸，不用动。这次核对省下了一次无用改动。
+- 同组的两个紫色焦点环（`.jam-deck-task-main:focus-visible`、`.jam-deck-task-archive:focus-visible`）一起收口，否则绿勾配紫环更难看；上一轮新加的每日待办启用勾选框也补上同一令牌。范围就停在待办这一组，没有顺手去改日历、拖拽提示、picker 那些同样裸用主题色的地方。
+- **勾选即归档**：`completeAndArchiveDeckTask` 早就存在（待办详情弹窗的「完成并归档」用的就是它），只是从没接到列表的勾选框上。现在 `checkbox.checked` 为真时走它，取消勾选仍走 `toggleDeckTask` 退回进行中。
+- 主动核对了两个风险，都不需要额外处理：① 归档失败时任务停在 `completed`，该行的「归档」按钮仍在，是天然的重试入口，错误不被吞掉；② 误勾可完整回滚——`restoreArchivedTask` 会先 `removeArchivedTaskFromJournal` 删掉日记里那段 `jam-deck-life-task` 块再退回 active，不会留下孤儿记录。
+- 副作用：列表底部「已完成 N」在正常流程下恒为 0，因为完成态不再停留。保留不动——它现在的语义变成「归档卡住了几条」，反而有诊断价值。
+- 实机验收走了完整链路，而不是只看代码：新建一条临时待办 → 模拟点击勾选框 → `status` 变 `archived`、`archiveRef.notePath` 为 `Life/Daily.md`、行从列表消失 → 读 vault 确认日记块已写入 → `restoreArchivedTask` + `deleteDeckTask` 清理 → 复查日记无残留、任务已彻底删除。勾选框 `accent-color` 实测 `rgb(184, 255, 61)`，主题紫是 `hsl(255 - 1, ...)`。
+- 一个小坑：命令行 `grep` 查不到刚写入的 `__自动归档验证__`，因为归档写入会把下划线转义成 `\_\_`。验证日记内容要读实际文本，别用带特殊字符的关键词去 grep。
+- 工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、设计与实现）。
+
 ## 2026-09-27 — 1.3.0 每日固定待办
 
 - 需求入口是 Jam 想把一串日常习惯（睡 8 小时、3 个鸡蛋、50 深蹲 / 俯卧撑 / 仰卧起坐、AI 发 1 条作品、5000 步、英语播客，外加已有的戒糖）做成「固定的每天待办」。**动手前先查清两件事**：① 插件根本没有重复待办能力，`deckTask` 只有 text / description / category / dueDate；② 戒糖当前是一条 21:00 的自动化提醒，打卡结果由它自己写进 `Life/Daily.md`，**从未进过待办列表**。所以这不是配置问题，是功能缺口。
