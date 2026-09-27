@@ -3751,6 +3751,11 @@ assert(/repeating-linear-gradient\(91deg,/.test(styleSource), "the fibre texture
 // .jam-deck-no-motion handles it; the receipt dialog mounts outside the root,
 // so the animation class is withheld in JS instead.
 assert(styleSource.includes("@keyframes jam-deck-receipt-feed"), "the receipt feed animation must exist");
+// Confirming the archive tears this copy off, then a fresh slip feeds out.
+assert(styleSource.includes("@keyframes jam-deck-receipt-tear") && styleSource.includes(".jam-deck-receipt.is-tearing"), "confirming the archive must tear the slip off, not silently swap the content");
+assert(pluginSource.includes("const JAM_DECK_RECEIPT_TEAR_MS = 460;") && /jam-deck-receipt-tear 460ms/.test(styleSource), "the tear duration must stay in sync between JS and CSS");
+assert(pluginSource.includes('paper.addClass("is-tearing");') && pluginSource.includes("this.printed = false;"), "the tear must play before the re-render, and the new slip must feed out again");
+assert(/if \(this\.plugin\.settings\.animationsEnabled !== false\) \{\s*paper\.addClass\("is-tearing"\);/.test(pluginSource), "with animations off the tear must be skipped instead of stalling the archive");
 assert(pluginSource.includes('if (this.plugin.settings.animationsEnabled !== false) paper.addClass("is-printing");'), "dialogs outside .jam-deck-root must gate animation on the plugin's own toggle");
 assert(!/\.jam-deck-(task\.is-striking|receipt)[^{]*\{[^}]*\}\s*\}?\s*@media \(prefers-reduced-motion/.test(styleSource), "new animations must not consult the OS reduced-motion setting");
 assert(fs.readFileSync(path.join(projectRoot, "docs", "VISUAL_DESIGN.md"), "utf8").includes("吐纸动画是限定例外"), "the receipt's transform/clip-path animation must be declared as a scoped exception in the spec");

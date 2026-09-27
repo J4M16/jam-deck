@@ -2685,6 +2685,9 @@ class RoutineManagerModal extends Modal {
   }
 }
 
+// 撕票动画时长，与 styles.css 的 jam-deck-receipt-tear 保持一致。
+const JAM_DECK_RECEIPT_TEAR_MS = 460;
+
 // 今天的结算清单。既包含还没归档的已完成项（本次归档的目标），也包含今天早些
 // 时候已经归档的——「下班结算」要看到一整天的产出，而不只是剩下这一批。
 function jamDeckCollectDayReceipt(tasks, today) {
@@ -2785,7 +2788,18 @@ class DayReceiptModal extends Modal {
         archive.disabled = true;
         archive.setText("归 档 中…");
         const failed = await this.plugin.archiveCompletedTasks();
-        if (failed) new Notice(`Jam Deck：${failed} 项归档失败，可在待办列表重试`);
+        if (failed) {
+          new Notice(`Jam Deck：${failed} 项归档失败，可在待办列表重试`);
+          this.render();
+          return;
+        }
+        // 撕票：把这一联撕走，再让 render 吐出结算后的新票（printed 复位，
+        // 新票会重新播吐纸动画）。动画关掉时不空等，直接重绘。
+        if (this.plugin.settings.animationsEnabled !== false) {
+          paper.addClass("is-tearing");
+          await new Promise((resolve) => window.setTimeout(resolve, JAM_DECK_RECEIPT_TEAR_MS));
+        }
+        this.printed = false;
         this.render();
       });
     }

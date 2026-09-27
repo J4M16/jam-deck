@@ -2031,10 +2031,22 @@ input.jam-deck-countdown-duration {
    workbench-wide no-motion rule cannot reach it — the class is withheld in JS
    when the plugin's animation toggle is off, which keeps this on the plugin
    preference rather than the OS setting. */
-.jam-deck-receipt.is-printing { animation: jam-deck-receipt-feed 420ms cubic-bezier(.22, 1, .36, 1) both; }
+.jam-deck-receipt.is-printing { animation: jam-deck-receipt-feed 480ms cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes jam-deck-receipt-feed {
-  from { clip-path: inset(0 0 100% 0); transform: translateY(-10px); }
+  from { clip-path: inset(0 0 100% 0); transform: translateY(-16px); }
   to { clip-path: inset(0 0 0 0); transform: translateY(0); }
+}
+/* 撕票：确认归档后把这一联撕走，再吐出结算后的新票。前三帧是撕扯时的
+   拉拽抖动（提起→反向拉→断开），之后整张沿一点角度坠出视野。与吐纸同属
+   已登记的 transform 例外；时长与 JS 里的 JAM_DECK_RECEIPT_TEAR_MS 一致，
+   动画关掉时 JS 会跳过等待直接重绘。 */
+.jam-deck-receipt.is-tearing { animation: jam-deck-receipt-tear 460ms cubic-bezier(.36, 0, .2, 1) both; }
+@keyframes jam-deck-receipt-tear {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  10% { transform: translate(-3px, -4px) rotate(-.9deg); }
+  22% { transform: translate(3px, -2px) rotate(.7deg); }
+  34% { transform: translate(-2px, 1px) rotate(-.4deg); opacity: 1; }
+  100% { transform: translate(1px, 44px) rotate(2.4deg); opacity: 0; }
 }
 .jam-deck-receipt-head { text-align: center; }
 .jam-deck-receipt-brand { font-size: 15px; font-weight: 700; letter-spacing: .22em; }
