@@ -3728,6 +3728,15 @@ assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 62%, 
 // The band is wider than the glyphs, so it has to stay translucent enough to
 // read through; and the title must size to its text or the stroke overshoots.
 assert(!/var\(--jd-accent\) (6[0-9]|[7-9][0-9]|100)%, transparent\) \d+%,[\s\S]{0,400}?background-position: 0 46%/.test(styleSource), "no band may exceed ~60% opacity, otherwise the thicker stroke hides the text");
+// The checkbox celebrates on the same beat as the stroke, reusing .is-striking
+// so it fires exactly once. Only background-color / box-shadow / opacity, so no
+// transform exception is needed.
+assert(styleSource.includes(".jam-deck-root .jam-deck-task.is-striking .jam-deck-task-check {") && styleSource.includes("animation: jam-deck-check-fill"), "ticking must animate the checkbox, not just the title");
+assert(/@keyframes jam-deck-check-fill \{[\s\S]*?box-shadow: 0 0 0 0 color-mix[\s\S]*?box-shadow: 0 0 0 7px transparent;/.test(styleSource), "the fill must ripple out through box-shadow rather than a transform");
+assert(styleSource.includes("animation: jam-deck-check-mark 200ms cubic-bezier(.22, 1, .36, 1) 90ms both;") && /@keyframes jam-deck-check-mark \{\s*from \{ opacity: 0; \}/.test(styleSource), "the tick itself must fade in slightly after the box fills");
+// The two-step dimming was reverted at Jam's request.
+assert(/\.jam-deck-task\.is-completed \.jam-deck-task-main \{\s*color: var\(--jd-muted\);/.test(styleSource), "completed rows keep --jd-muted; the extra two-step dimming was rolled back");
+assert(!styleSource.includes("color-mix(in srgb, var(--jd-faint) 62%, transparent)"), "no leftover of the reverted two-step dimming");
 assert(styleSource.includes(".jam-deck-task-title { min-width: 0; flex: 0 1 auto;"), "the title must size to its content, otherwise the stroke runs past the text");
 // Obsidian centres native buttons; once the title stops growing that centring
 // becomes visible, so the row has to pin itself to the start explicitly.
@@ -3738,7 +3747,6 @@ assert(/\.jam-deck-task-due \{ flex: 0 0 auto; margin-left: auto;/.test(styleSou
 assert(styleSource.includes(".jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title::after {") && styleSource.includes(".jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title::after {"), "the marker stroke and its animation must target the pseudo-element, not the text node");
 assert(styleSource.includes("-webkit-mask-composite: source-in;") && styleSource.includes("mask-composite: intersect;"), "the two mask layers must intersect; added together they would brighten the band instead of chewing its edge");
 assert(/repeating-linear-gradient\(91deg,/.test(styleSource), "the fibre texture must sit slightly off-vertical so the edge does not read as machine-cut");
-assert(/\.jam-deck-task\.is-completed \.jam-deck-task-main \{\s*color: color-mix\(in srgb, var\(--jd-faint\) 62%, transparent\);/.test(styleSource), "completed titles must drop two steps below --jd-muted");
 // Motion follows the plugin toggle, never the OS setting. Inside the workbench
 // .jam-deck-no-motion handles it; the receipt dialog mounts outside the root,
 // so the animation class is withheld in JS instead.

@@ -3180,10 +3180,8 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 
 .jam-deck-calendar-task-marker.is-overdue { background: var(--text-error); }
 .jam-deck-calendar-more { position: absolute; right: 2px; bottom: 1px; color: var(--text-muted); font-size: var(--jd-font-micro, 7px); }
-/* 完成即退场：从 --jd-muted 再弱两档（--jd-faint 是第一档，这里在其上
-   再降一次），让划掉的条目沉到背景里，视线自然落在还没做的事情上。 */
 .jam-deck-root .jam-deck-task.is-completed .jam-deck-task-main {
-  color: color-mix(in srgb, var(--jd-faint) 62%, transparent);
+  color: var(--jd-muted);
   text-decoration: none;
 }
 /* Completion is drawn as a marker stroke through the title instead of a plain
@@ -3194,10 +3192,6 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title {
   text-decoration: none;
   position: relative;
-  /* 必须在这里显式压一次：标题被 .jam-deck-root :is(…, .jam-deck-task-title, …)
-     钉在固定的 --jd-heading 上 (0,2,0)，只改外层 .jam-deck-task-main 的 color
-     对它无效——实测完成态标题仍是 rgb(92,92,92)。本选择器 (0,4,0) 压得住。 */
-  color: color-mix(in srgb, var(--jd-faint) 62%, transparent);
 }
 /* 笔触画在伪元素上，而不是标题本身。毛边要靠 mask 从边缘啃出来，而 mask
    会连同文字一起啃掉——必须让它只作用在这层色带上。
@@ -3259,6 +3253,35 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
    once — re-renders (opening any dialog rebuilds the list) must not replay it. */
 .jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title::after {
   animation: jam-deck-marker-strike 340ms cubic-bezier(.22, 1, .36, 1) both;
+}
+/* 勾选框与笔触同一拍：方框先被品牌绿灌满、同时荡出一圈短促的波纹，勾随后
+   浮现。全部走 background-color / box-shadow / opacity，无需 transform 例外。
+   复用 .is-striking 这个一次性标记，所以只在刚勾上的那一下播放。 */
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-check {
+  animation: jam-deck-check-fill 300ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-check:checked::after {
+  animation: jam-deck-check-mark 200ms cubic-bezier(.22, 1, .36, 1) 90ms both;
+}
+@keyframes jam-deck-check-fill {
+  from {
+    background-color: transparent;
+    border-color: var(--jd-line);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--jd-accent) 55%, transparent);
+  }
+  45% {
+    background-color: var(--jd-accent);
+    border-color: var(--jd-accent);
+  }
+  to {
+    background-color: var(--jd-accent);
+    border-color: var(--jd-accent);
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+@keyframes jam-deck-check-mark {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 /* No reduced-motion query here on purpose: Jam Deck animations follow the
    plugin's own toggle, and .jam-deck-root.jam-deck-no-motion * already zeroes
@@ -4635,7 +4658,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   background: color-mix(in srgb, var(--jd-accent) 8%, transparent);
   box-shadow: inset 2px 0 var(--jd-accent);
 }
-.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task.is-completed .jam-deck-task-title { color: color-mix(in srgb, var(--jd-faint) 62%, transparent); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task.is-completed .jam-deck-task-title { color: var(--jd-muted); }
 .jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-delete, .jam-deck-widget-action.is-danger):hover:not(:disabled) {
   color: var(--jd-danger);
   background: color-mix(in srgb, var(--jd-danger) 8%, transparent);
