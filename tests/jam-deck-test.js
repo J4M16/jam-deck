@@ -3716,6 +3716,12 @@ assert(/\.modal\.jam-deck-routine-modal-shell \{[^}]*--jd-accent-ink: #183000;/.
 // than recoloured fakes.
 assert(!/\.jam-deck-(launcher-dropzone\.is-drop-target::after|picker-item:hover)[^{]*\{[^}]*var\(--interactive-accent\)/.test(styleSource.replace(/var\(--jd-accent, var\(--interactive-accent\)\)/g, "TOKEN")), "states confirmed live (launcher drop hint, widget picker hover) must use the brand green");
 assert(styleSource.includes("Dead rule: the later .jam-deck-root override wins"), "zombie accent rules must stay annotated instead of silently recoloured");
+// Row actions must not render as framed boxes. The flat-era rule claimed
+// `background: transparent` yet measured white with a border plus the theme's
+// inset outline, so the override needs the !important trio.
+assert(/\.jam-deck-root :is\(\.jam-deck-task-archive, \.jam-deck-task-delete\) \{\s*border: 0 !important;[\s\S]*?background: transparent !important;\s*box-shadow: none !important;/.test(styleSource), "task row actions must drop the theme's white fill, border and inset outline");
+assert(/\.jam-deck-root \.jam-deck-task-delete:hover \{\s*background: color-mix\(in srgb, var\(--text-error\) 12%, transparent\);\s*color: var\(--text-error\);/.test(styleSource), "the delete action must express danger through a low-contrast wash, not a permanent frame");
+assert(!/\.jam-deck-root \.jam-deck-task-(archive|delete):hover \{[^}]*!important/.test(styleSource), "row-action hover must stay free of !important so the glass skin's own danger palette keeps winning");
 
 function testRoutinePlanner() {
   const plan = JamDeckPlugin.planRoutineSpawns;

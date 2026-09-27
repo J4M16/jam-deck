@@ -3030,6 +3030,36 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-task-category.is-life { color: color-mix(in srgb, var(--jd-muted) 76%, #71d6c3); }
 .jam-deck-task-due { flex: 0 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-faint, var(--text-faint)); font-size: var(--jd-font-meta, 10px); }
 .jam-deck-task-due.is-overdue { color: var(--jd-danger, var(--text-error)); }
+/* Row actions carry no frame of their own — same quiet language as the archive
+   dialog and the calendar toolbar: transparent at rest, a low-contrast wash on
+   hover. The flat-era rules already said `background: transparent`, but measured
+   live the button rendered white with a 1px border and the theme's inset
+   box-shadow outline; background/border alone cannot remove that frame, so this
+   reuses the !important trio that .jam-deck-task-main and .jam-deck-calendar-date
+   already needed. Hit area stays 26px. */
+.jam-deck-root :is(.jam-deck-task-archive, .jam-deck-task-delete) {
+  border: 0 !important;
+  border-radius: var(--jd-radius-chip);
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--jd-muted, var(--text-muted));
+}
+/* Hover deliberately carries no !important: the glass skin tunes these two with
+   its own palette at higher specificity (--jd-danger at 8%), and an !important
+   here would silently override that. (0,3,0) is already enough to beat the
+   theme's own button:hover. */
+.jam-deck-root .jam-deck-task-archive:hover {
+  background: var(--jd-hover);
+  color: var(--jd-ink);
+}
+.jam-deck-root .jam-deck-task-delete:hover {
+  background: color-mix(in srgb, var(--text-error) 12%, transparent);
+  color: var(--text-error);
+}
+.jam-deck-root :is(.jam-deck-task-archive, .jam-deck-task-delete):focus-visible {
+  outline: 2px solid var(--jd-accent);
+  outline-offset: 1px;
+}
 
 .jam-deck-calendar-toolbar { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px 28px; align-items: center; gap: 3px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid color-mix(in srgb, var(--jd-line) 56%, transparent); }
 .jam-deck-calendar-toolbar button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--jd-radius-pill); background: transparent; color: var(--jd-muted, var(--text-muted)); box-shadow: none; }
