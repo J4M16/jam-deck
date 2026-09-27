@@ -2775,19 +2775,19 @@ class DayReceiptModal extends Modal {
     paper.createDiv({ text: "谢 谢 光 临 · 今 天 的 班 上 到 这 儿", cls: "jam-deck-receipt-footer" });
     paper.createDiv({ cls: "jam-deck-receipt-barcode", attr: { "aria-hidden": "true" } });
 
-    const actions = contentEl.createDiv({ cls: "jam-deck-receipt-actions" });
+    // 按钮留在纸面内部：弹窗外壳是透明的（只让一张小票漂浮），任何纸面之外的
+    // 元素都会在纸和按钮之间留下一道透过工作台的缝，看起来像渲染破了。
+    // 没有待归档项时不放按钮，靠右上角原生关闭键或 Esc 退出。
     if (receipt.pending.length) {
-      const archive = actions.createEl("button", { text: `归档 ${receipt.pending.length} 项`, cls: "jam-deck-receipt-confirm", attr: { type: "button" } });
+      const actions = paper.createDiv({ cls: "jam-deck-receipt-actions" });
+      const archive = actions.createEl("button", { text: `归 档 ${receipt.pending.length} 项`, cls: "jam-deck-receipt-confirm", attr: { type: "button" } });
       archive.addEventListener("click", async () => {
         archive.disabled = true;
-        archive.setText("归档中…");
+        archive.setText("归 档 中…");
         const failed = await this.plugin.archiveCompletedTasks();
         if (failed) new Notice(`Jam Deck：${failed} 项归档失败，可在待办列表重试`);
         this.render();
       });
-    } else {
-      actions.createEl("button", { text: "关闭", cls: "jam-deck-receipt-confirm", attr: { type: "button" } })
-        .addEventListener("click", () => this.close());
     }
   }
 

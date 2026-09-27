@@ -7,6 +7,11 @@
 - `D:\Project\JamDeck` 是唯一开发源；不要直接在 Vault 插件目录开发。
 - Obsidian 运行副本位于 `X:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
+- **热重载会留下僵尸实例，反复 reload 会丢运行数据（2026-09-27 实测事故）**：`plugin:reload` 之后旧插件实例不保证被彻底卸载，它的 `registerInterval` 轮询（尤其剪贴板轮询）可能继续运行，并持有**重载前的 settings 快照**。之后任何一次剪贴板变化都会让僵尸调 `saveSettings()` 全量写回 `data.json`，把新版本新增的字段连 key 一起抹掉——当天 `deckRoutines` 九条模板与全部实例就是这么丢的，现象是"用户复制一次东西，数据回滚一次"。
+  - 判定方法：读磁盘 `data.json` 的顶层 key 清单。若缺少当前代码一定会写入的字段（例如新版必有的 `deckRoutines`），说明最后一次写入来自旧实例；再比对 `clipboardItems[0].ts` 与文件 mtime 可坐实是哪次复制触发的。
+  - 一次会话内**不要连续多轮 reload**。同一批改动攒在一起，部署后只重载一次。
+  - 新增会被持久化的 settings 字段、或改动 `saveSettings` 相关链路时，**部署后必须整体重启 Obsidian**，不能只 `plugin:reload`。
+  - 种入或修改运行数据（走 eval 调插件方法）之前，先确认当前没有僵尸：重启一次最保险。种完立刻复核磁盘 key 清单。
 - 修改后至少运行 `npm run verify`。
 - 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），`npm run deploy`（部署目标 = 环境变量 `JAM_DECK_TARGET_PLUGIN_DIR`，未设置则需 `npm run deploy -- -TargetPluginDir <目录>` 显式传参；脚本拒绝无目标静默执行）；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
 - Obsidian 启停：**GUI 启动用 `Obsidian.exe`**（不是 Obsidian.com——它只是 CLI wrapper）。**RDP 会话下 GPU 进程常崩溃**（`GPU process isn't usable`），必须带参数：
@@ -14,6 +19,8 @@
   Obsidian.exe --disable-gpu --disable-gpu-sandbox --in-process-gpu
   ```
   其中 `--disable-gpu-sandbox` 是关键 flag（缺它会闪退）。带这三参启动时 Obsidian 1.13 不会进 CLI 模式，参数透传给 Electron，无 FATAL。**长期方案**：进入设置 → 外观 → 关闭「硬件加速」后，无参双击即可。优雅关闭用 `CloseMainWindow`。CLI 操作（plugin:reload / eval / dev:screenshot 等）走 `Obsidian.com <command> vault=Jamnote`。
+- **CLI 通道依赖启动方式（2026-09-27 实测）**：由脚本 / `Start-Process` 启动的 Obsidian **不注册 CLI 通道**，此后所有 `Obsidian.com <command>` 一律返回 `The CLI is unable to find Obsidian`，带不带那三个 GPU 参数都一样；无参启动在 RDP 下又必然 GPU FATAL 闪退。于是形成两难：agent 能把 GUI 拉起来，但拉起来的实例用不了 CLI。**结论：需要 CLI 时必须请 Jam 自己启动 Obsidian**（双击），agent 脚本启动只用于「把被自己关掉的窗口还原」这种兜底场景。CLI 不可用时，验证改走直接读 `data.json`（只读），视觉确认交给 Jam。
+- **唯一可以直接改 `data.json` 的窗口是 Obsidian 完全退出时**（无实例持有内存态）。这属于数据恢复等例外情形，且必须：先备份到 `debug-backups/`（已 gitignore）→ 读取-修改-写回而非整体覆盖 → 写后立刻重新解析并比对顶层 key 数、`deckTasks` 长度、`widgets` 与密钥字段完好 → 启动后复核插件是否正确读到。日常情况下仍然禁止碰它。
 - 保持 `manifest.json`、`package.json` 与 `CHANGELOG.md` 版本一致。
 - 每次功能变更同时更新 `docs/DEVELOPMENT_LOG.md` 和 Obsidian 的 `Work/Jam Deck.md`/`log.md`。
 - `docs/DEVELOPMENT_LOG.md`、`CHANGELOG.md` 和 Obsidian 的 `Work/Jam Deck.md` / `log.md` 中，每条新变更必须在末尾注明工具、模型与角色，格式为 `工具：<实际工具名>；处理模型签名：<模型标识>（<角色>）`。工具名必须明确写 Codex、Cursor、WorkBuddy 等实际执行工具，不能只写模型。若 Planner、Advisor、Designer、Executor 或其他子代理实际参与，同一行追加所有参与工具、模型与角色；不得猜测不可见的内部模型版本，无法确认时明确写 `具体模型标识不可见`，但不能因此省略已知工具名。

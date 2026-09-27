@@ -2000,9 +2000,10 @@ input.jam-deck-countdown-duration {
   box-shadow: none;
   overflow: visible;
 }
-.jam-deck-receipt-modal-shell > .modal-header,
-.jam-deck-receipt-modal-shell > .modal-close-button { display: none; }
-.jam-deck-receipt-modal { padding: 0; display: grid; gap: 14px; justify-items: center; }
+.jam-deck-receipt-modal-shell > .modal-header { display: none; }
+/* No gap, no extra wrapper: the shell is transparent so anything outside the
+   paper would show the workbench through the seam. */
+.jam-deck-receipt-modal { padding: 0; }
 .jam-deck-receipt {
   --jd-slip: #fbfaf6;
   --jd-slip-ink: #2b2b28;
@@ -2061,11 +2062,12 @@ input.jam-deck-countdown-duration {
     var(--jd-slip-ink) 12px 13px, transparent 13px 16px);
   opacity: .72;
 }
-.jam-deck-receipt-actions { display: flex; justify-content: center; }
+/* Sits on the slip itself, above the torn bottom edge. */
+.jam-deck-receipt-actions { display: flex; justify-content: center; margin-top: 14px; }
 button.jam-deck-receipt-confirm {
-  height: 36px; padding: 0 22px; border: 0; border-radius: var(--jd-radius-pill);
-  background: #222; color: #fff; box-shadow: none;
-  font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer;
+  height: 34px; padding: 0 20px; border: 0; border-radius: var(--jd-radius-chip);
+  background: var(--jd-slip-ink); color: var(--jd-slip); box-shadow: none;
+  font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: .08em; cursor: pointer;
 }
 button.jam-deck-receipt-confirm:hover:not(:disabled) { opacity: .86; }
 button.jam-deck-receipt-confirm:disabled { opacity: .5; cursor: wait; }
