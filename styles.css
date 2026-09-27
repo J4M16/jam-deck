@@ -3107,14 +3107,21 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
   -webkit-box-orient: vertical;
   cursor: pointer;
   align-items: baseline;
+  /* 原生 button 被主题设成 justify-content: center。标题过去用 flex: 1 1 auto
+     撑满整行，把这件事盖住了；改成按内容宽度后居中立刻暴露（实测标题左边
+     135px、按钮左边 98px）。text-align 对 flex 容器无效，必须显式写。 */
+  justify-content: flex-start;
   gap: 7px;
 }
-.jam-deck-task-title { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-body, 12px); line-height: 1.5; }
+/* flex 基准取内容宽度（0 1 auto，不增长只收缩）：标题若撑满剩余空间，
+   划线的笔触就会一路画到文案之外。长标题仍会收缩并省略。 */
+.jam-deck-task-title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-body, 12px); line-height: 1.5; }
 .jam-deck-task-category { flex: 0 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-muted, var(--text-muted)); font-size: var(--jd-font-meta, 10px); font-weight: 650; letter-spacing: .02em; }
 .jam-deck-task-category::after { content: "·"; margin-left: 5px; color: var(--jd-faint, var(--text-faint)); }
 .jam-deck-task-category.is-work { color: color-mix(in srgb, var(--jd-muted) 78%, #a993d8); }
 .jam-deck-task-category.is-life { color: color-mix(in srgb, var(--jd-muted) 76%, #71d6c3); }
-.jam-deck-task-due { flex: 0 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-faint, var(--text-faint)); font-size: var(--jd-font-meta, 10px); }
+/* 标题不再撑满，靠 margin-left: auto 把日期顶回右侧。 */
+.jam-deck-task-due { flex: 0 0 auto; margin-left: auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-faint, var(--text-faint)); font-size: var(--jd-font-meta, 10px); }
 .jam-deck-task-due.is-overdue { color: var(--jd-danger, var(--text-error)); }
 /* Row actions carry no frame of their own — same quiet language as the archive
    dialog and the calendar toolbar: transparent at rest, a low-contrast wash on
@@ -3173,8 +3180,10 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 
 .jam-deck-calendar-task-marker.is-overdue { background: var(--text-error); }
 .jam-deck-calendar-more { position: absolute; right: 2px; bottom: 1px; color: var(--text-muted); font-size: var(--jd-font-micro, 7px); }
+/* 完成即退场：从 --jd-muted 再弱两档（--jd-faint 是第一档，这里在其上
+   再降一次），让划掉的条目沉到背景里，视线自然落在还没做的事情上。 */
 .jam-deck-root .jam-deck-task.is-completed .jam-deck-task-main {
-  color: var(--jd-muted);
+  color: color-mix(in srgb, var(--jd-faint) 62%, transparent);
   text-decoration: none;
 }
 /* Completion is drawn as a marker stroke through the title instead of a plain
@@ -3184,27 +3193,81 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
    opacity/border/background/shadow set. */
 .jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title {
   text-decoration: none;
-  background-image: linear-gradient(to right,
-    color-mix(in srgb, var(--jd-accent) 52%, transparent),
-    color-mix(in srgb, var(--jd-accent) 90%, transparent) 14%,
-    color-mix(in srgb, var(--jd-accent) 72%, transparent) 55%,
-    color-mix(in srgb, var(--jd-accent) 88%, transparent) 84%,
-    color-mix(in srgb, var(--jd-accent) 46%, transparent));
+  position: relative;
+  /* 必须在这里显式压一次：标题被 .jam-deck-root :is(…, .jam-deck-task-title, …)
+     钉在固定的 --jd-heading 上 (0,2,0)，只改外层 .jam-deck-task-main 的 color
+     对它无效——实测完成态标题仍是 rgb(92,92,92)。本选择器 (0,4,0) 压得住。 */
+  color: color-mix(in srgb, var(--jd-faint) 62%, transparent);
+}
+/* 笔触画在伪元素上，而不是标题本身。毛边要靠 mask 从边缘啃出来，而 mask
+   会连同文字一起啃掉——必须让它只作用在这层色带上。
+   三层错位色带代替单一矩形：单层渐变两端不透明、上下边齐平，读起来就是
+   个几何色块；主笔身之外再加上下两道更细、断续位置各不相同的溢色，两端
+   收到**完全透明**——起笔与收笔的渐隐是笔触感最关键的一笔。
+   动画仍只改 background-size，不越出允许的属性集合；mask 是静态的。 */
+.jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26%;
+  height: 70%;
+  pointer-events: none;
+  /* 笔身比文字还粗一点才像马克笔；代价是会盖住字，所以整体不透明度压到
+     六成以下——划过的痕迹在字上面，但字依然读得清。 */
+  background-image:
+    linear-gradient(to right,
+      transparent 0,
+      color-mix(in srgb, var(--jd-accent) 26%, transparent) 3%,
+      color-mix(in srgb, var(--jd-accent) 58%, transparent) 11%,
+      color-mix(in srgb, var(--jd-accent) 40%, transparent) 34%,
+      color-mix(in srgb, var(--jd-accent) 56%, transparent) 58%,
+      color-mix(in srgb, var(--jd-accent) 43%, transparent) 79%,
+      color-mix(in srgb, var(--jd-accent) 21%, transparent) 94%,
+      transparent 100%),
+    linear-gradient(to right,
+      transparent 0 8%,
+      color-mix(in srgb, var(--jd-accent) 32%, transparent) 22%,
+      transparent 41%,
+      color-mix(in srgb, var(--jd-accent) 27%, transparent) 67%,
+      transparent 87%),
+    linear-gradient(to right,
+      transparent 0 15%,
+      color-mix(in srgb, var(--jd-accent) 29%, transparent) 31%,
+      transparent 53%,
+      color-mix(in srgb, var(--jd-accent) 23%, transparent) 75%,
+      transparent 93%);
   background-repeat: no-repeat;
-  background-position: 0 58%;
-  background-size: 100% 40%;
+  background-position: 0 46%, 0 2%, 0 92%;
+  background-size: 100% 62%, 100% 24%, 100% 20%;
+  /* 毛边 = 纵向纤维（马克笔笔头的丝缕，91deg 让它略微不垂直）× 上下缘柔化，
+     两层相交而不是相加，于是色带边缘被啃得参差不齐、内部也有笔道。 */
+  -webkit-mask-image:
+    repeating-linear-gradient(91deg,
+      #000 0 2.5px,
+      rgba(0, 0, 0, .5) 2.5px 3.6px,
+      #000 3.6px 6.2px,
+      rgba(0, 0, 0, .72) 6.2px 7.4px),
+    linear-gradient(to bottom,
+      rgba(0, 0, 0, .18) 0 5%,
+      #000 17% 78%,
+      rgba(0, 0, 0, .14) 95% 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
 }
 /* Only the row just ticked carries .is-striking, so the stroke plays exactly
    once — re-renders (opening any dialog rebuilds the list) must not replay it. */
-.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title {
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title::after {
   animation: jam-deck-marker-strike 340ms cubic-bezier(.22, 1, .36, 1) both;
 }
 /* No reduced-motion query here on purpose: Jam Deck animations follow the
    plugin's own toggle, and .jam-deck-root.jam-deck-no-motion * already zeroes
    every animation duration inside the workbench. */
+/* 溢色层刻意落后于主笔身，像笔尖带出来的墨，而不是三条一起平移的色块。 */
 @keyframes jam-deck-marker-strike {
-  from { background-size: 0% 40%; }
-  to { background-size: 100% 40%; }
+  from { background-size: 0% 62%, 0% 24%, 0% 20%; }
+  55% { background-size: 64% 62%, 51% 24%, 44% 20%; }
+  to { background-size: 100% 62%, 100% 24%, 100% 20%; }
 }
 
 @container (max-width: 270px) {
@@ -4572,7 +4635,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   background: color-mix(in srgb, var(--jd-accent) 8%, transparent);
   box-shadow: inset 2px 0 var(--jd-accent);
 }
-.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task.is-completed .jam-deck-task-title { color: var(--jd-muted); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task.is-completed .jam-deck-task-title { color: color-mix(in srgb, var(--jd-faint) 62%, transparent); }
 .jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-delete, .jam-deck-widget-action.is-danger):hover:not(:disabled) {
   color: var(--jd-danger);
   background: color-mix(in srgb, var(--jd-danger) 8%, transparent);

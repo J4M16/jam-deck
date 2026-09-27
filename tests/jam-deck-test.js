@@ -3720,8 +3720,25 @@ assert(pluginSource.includes("restoreWidgetScrolls()") && /this\.enableLayoutSas
   assert(start > 0 && !restoreBody.includes("requestAnimationFrame"), "scroll restore must not depend on requestAnimationFrame; it never fires when the window is backgrounded");
 }
 assert(/for \(const el of this\.contentEl\.querySelectorAll\("\.jam-deck-widget"\)\)[\s\S]*?body\.scrollHeight > body\.clientHeight\) body\.scrollTop = saved;/.test(pluginSource), "restore must read scrollHeight to force layout and only write when the body can actually scroll");
-assert(/\.jam-deck-root \.jam-deck-task\.is-completed \.jam-deck-task-title \{\s*text-decoration: none;\s*background-image: linear-gradient/.test(styleSource), "completion must read as a marker stroke, not a plain line-through");
-assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 40%; \}/.test(styleSource), "the stroke must animate background-size only, staying inside the allowed property set");
+assert(/\.jam-deck-root \.jam-deck-task\.is-completed \.jam-deck-task-title \{\s*text-decoration: none;/.test(styleSource), "completion must read as a marker stroke, not a plain line-through");
+// A single gradient with opaque ends reads as a geometric bar. Three offset
+// bands with fully transparent ends give the stroke a start and an end.
+assert(styleSource.includes("background-position: 0 46%, 0 2%, 0 92%;") && styleSource.includes("background-size: 100% 62%, 100% 24%, 100% 20%;"), "the stroke must be built from three offset bands, not one rectangle");
+assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 62%, 0% 24%, 0% 20%; \}\s*55% \{/.test(styleSource), "all three bands must animate background-size only, with the bleed layers lagging behind the main stroke");
+// The band is wider than the glyphs, so it has to stay translucent enough to
+// read through; and the title must size to its text or the stroke overshoots.
+assert(!/var\(--jd-accent\) (6[0-9]|[7-9][0-9]|100)%, transparent\) \d+%,[\s\S]{0,400}?background-position: 0 46%/.test(styleSource), "no band may exceed ~60% opacity, otherwise the thicker stroke hides the text");
+assert(styleSource.includes(".jam-deck-task-title { min-width: 0; flex: 0 1 auto;"), "the title must size to its content, otherwise the stroke runs past the text");
+// Obsidian centres native buttons; once the title stops growing that centring
+// becomes visible, so the row has to pin itself to the start explicitly.
+assert(/\.jam-deck-task-main \{[^}]*justify-content: flex-start;/.test(styleSource), "task rows must pin content to the start; the theme centres native buttons and text-align does not apply to flex containers");
+assert(/\.jam-deck-task-due \{ flex: 0 0 auto; margin-left: auto;/.test(styleSource), "the due date must be pushed right once the title stops growing");
+// The stroke lives on ::after because the ragged edge comes from a mask, and a
+// mask on the title itself would eat the text too.
+assert(styleSource.includes(".jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title::after {") && styleSource.includes(".jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title::after {"), "the marker stroke and its animation must target the pseudo-element, not the text node");
+assert(styleSource.includes("-webkit-mask-composite: source-in;") && styleSource.includes("mask-composite: intersect;"), "the two mask layers must intersect; added together they would brighten the band instead of chewing its edge");
+assert(/repeating-linear-gradient\(91deg,/.test(styleSource), "the fibre texture must sit slightly off-vertical so the edge does not read as machine-cut");
+assert(/\.jam-deck-task\.is-completed \.jam-deck-task-main \{\s*color: color-mix\(in srgb, var\(--jd-faint\) 62%, transparent\);/.test(styleSource), "completed titles must drop two steps below --jd-muted");
 // Motion follows the plugin toggle, never the OS setting. Inside the workbench
 // .jam-deck-no-motion handles it; the receipt dialog mounts outside the root,
 // so the animation class is withheld in JS instead.
