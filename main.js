@@ -1953,9 +1953,55 @@ const DEFAULT_SETTINGS = {
   ],
   clipboardItems: [],
   deckTasks: [],
+  // 每日固定待办模板。每天首次打开工作台时按模板生成当天的普通待办，勾选与归档走既有路径。
+  deckRoutines: [],
   musicLikes: [],
   musicLauncher: { schemaVersion: 1, lastConnectedProvider: null },
 };
+
+function jamDeckIsLocalDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]);
+}
+
+function jamDeckNormalizeRoutine(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    id: typeof source.id === "string" && source.id ? source.id : `routine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text: typeof source.text === "string" && source.text.trim() ? source.text.trim() : "未命名每日待办",
+    description: typeof source.description === "string" ? source.description : "",
+    category: ["work", "life"].includes(source.category) ? source.category : "life",
+    enabled: source.enabled !== false,
+    createdAt: Number(source.createdAt) || Date.now(),
+    lastSpawnDate: jamDeckIsLocalDate(source.lastSpawnDate) ? source.lastSpawnDate : null,
+  };
+}
+
+// 每日模板的生成计划。纯函数，便于回归测试覆盖幂等与跨日清理两条主路径。
+// - create：今天还没生成过实例的启用模板
+// - drop：早于今天且仍未完成的旧实例（过期未打卡不留尾巴，已完成/已归档的保留）
+function jamDeckPlanRoutineSpawns(routines, tasks, today) {
+  const plan = { create: [], drop: [] };
+  if (!jamDeckIsLocalDate(today)) return plan;
+  const list = Array.isArray(routines) ? routines : [];
+  const all = Array.isArray(tasks) ? tasks : [];
+  const spawnedToday = new Set(
+    all.filter((task) => task && task.routineId && task.spawnDate === today).map((task) => task.routineId),
+  );
+  for (const task of all) {
+    if (!task || !task.routineId || task.status !== "active") continue;
+    if (jamDeckIsLocalDate(task.spawnDate) && task.spawnDate < today) plan.drop.push(task.id);
+  }
+  for (const routine of list) {
+    if (!routine || routine.enabled === false) continue;
+    if (routine.lastSpawnDate === today && spawnedToday.has(routine.id)) continue;
+    if (spawnedToday.has(routine.id)) continue;
+    plan.create.push(routine);
+  }
+  return plan;
+}
 
 function jamDeckNormalizeIslandLeaveMs(value) {
   const n = Number(value);
@@ -2548,6 +2594,89 @@ class ArchiveViewerModal extends Modal {
     purgeAll.addEventListener("click", async () => {
       await this.plugin.deleteAllArchivedTasks();
       this.onOpen();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class RoutineManagerModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    jamDeckShieldModalTyping(this);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("jam-deck-routine-modal-shell");
+    contentEl.addClass("jam-deck-routine-modal");
+    contentEl.createEl("h2", { text: "每日固定待办" });
+    contentEl.createEl("p", {
+      text: "每天首次打开工作台自动生成；前一天没勾选的会被撤下，不累积。",
+      cls: "jam-deck-routine-hint",
+    });
+
+    const routines = this.plugin.settings.deckRoutines;
+    const list = contentEl.createDiv({ cls: "jam-deck-routine-list" });
+    if (!routines.length) list.createEl("p", { text: "还没有每日待办。", cls: "jam-deck-routine-empty" });
+
+    for (const routine of routines) {
+      const row = list.createDiv({ cls: routine.enabled ? "jam-deck-routine-row" : "jam-deck-routine-row is-off" });
+      const toggle = row.createEl("input", { type: "checkbox", cls: "jam-deck-routine-toggle", attr: { "aria-label": `启用：${routine.text}` } });
+      toggle.checked = routine.enabled;
+      toggle.addEventListener("change", async () => {
+        await this.plugin.updateDeckRoutine(routine.id, { enabled: toggle.checked });
+        this.onOpen();
+      });
+
+      const category = row.createEl("select", { cls: "jam-deck-routine-category", attr: { "aria-label": `分类：${routine.text}` } });
+      for (const [value, label] of [["life", "生活"], ["work", "工作"]]) {
+        const option = category.createEl("option", { text: label, value });
+        if (routine.category === value) option.selected = true;
+      }
+      category.addEventListener("change", () => {
+        void this.plugin.updateDeckRoutine(routine.id, { category: category.value });
+      });
+
+      const text = row.createEl("input", { type: "text", cls: "jam-deck-routine-text", attr: { "aria-label": "每日待办内容" } });
+      text.value = routine.text;
+      const commit = () => {
+        const value = text.value.trim();
+        if (!value || value === routine.text) {
+          text.value = routine.text;
+          return;
+        }
+        void this.plugin.updateDeckRoutine(routine.id, { text: value });
+      };
+      text.addEventListener("blur", commit);
+      text.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") text.blur();
+        if (event.key === "Escape") { text.value = routine.text; text.blur(); }
+      });
+
+      const remove = row.createEl("button", { text: "×", cls: "jam-deck-routine-action is-danger", attr: { type: "button", "aria-label": `删除每日待办：${routine.text}` } });
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`删除每日待办“${routine.text}”？\n\n已完成和已归档的打卡记录会保留。`)) return;
+        await this.plugin.removeDeckRoutine(routine.id);
+        this.onOpen();
+      });
+    }
+
+    const footer = contentEl.createDiv({ cls: "jam-deck-routine-footer" });
+    const draft = footer.createEl("input", { type: "text", cls: "jam-deck-routine-draft", attr: { placeholder: "新的每日待办…" } });
+    const add = footer.createEl("button", { text: "添加", cls: "jam-deck-routine-add", attr: { type: "button" } });
+    const submit = async () => {
+      if (!draft.value.trim()) return;
+      await this.plugin.addDeckRoutine(draft.value, "life");
+      this.onOpen();
+    };
+    add.addEventListener("click", submit);
+    draft.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") void submit();
     });
   }
 
@@ -14709,6 +14838,11 @@ class JamDeckView extends ItemView {
       });
     }
     if (widget.type === "tasks") {
+      const routines = headerActions.createEl("button", { text: "每日", cls: "jam-deck-widget-action", attr: { title: "管理每日固定待办" } });
+      routines.addEventListener("click", (event) => {
+        event.stopPropagation();
+        new RoutineManagerModal(this.app, this.plugin).open();
+      });
       const archive = headerActions.createEl("button", { text: "归档", cls: "jam-deck-widget-action", attr: { title: "查看归档待办" } });
       archive.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -14961,7 +15095,9 @@ class JamDeckView extends ItemView {
     const createDrop = body.createDiv({ cls: "jam-deck-task-create-drop", text: "＋ 创建新待办" });
     this.plugin.enableTaskDrop(body, null, createDrop);
 
-    const active = this.plugin.settings.deckTasks.filter((task) => task.status === "active");
+    // 每日打卡是日常背景，排在手动待办之后，避免每天早上把真正的项目待办压到列表底部。
+    const activeAll = this.plugin.settings.deckTasks.filter((task) => task.status === "active");
+    const active = [...activeAll.filter((task) => !task.routineId), ...activeAll.filter((task) => task.routineId)];
     const completed = this.plugin.settings.deckTasks.filter((task) => task.status === "completed");
     const archivedCount = this.plugin.settings.deckTasks.filter((task) => task.status === "archived").length;
     const list = body.createDiv({ cls: "jam-deck-task-list" });
@@ -16147,6 +16283,8 @@ class JamDeckPlugin extends Plugin {
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();
     this.primeClipboard();
+    await this.ensureRoutineTasksForToday();
+    this.startRoutineDayWatch();
 
     this.registerView(VIEW_TYPE, (leaf) => new JamDeckView(leaf, this));
     this.addSettingTab(new JamDeckSettingTab(this.app, this));
@@ -16240,6 +16378,9 @@ class JamDeckPlugin extends Plugin {
     this.settings.clipboardItems = Array.isArray(this.settings.clipboardItems) ? this.settings.clipboardItems : [];
     this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
       ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
+      : [];
+    this.settings.deckRoutines = Array.isArray(this.settings.deckRoutines)
+      ? this.settings.deckRoutines.map((routine) => jamDeckNormalizeRoutine(routine))
       : [];
     if (this.repairDuplicateDeckTaskIds()) {
       try { await this.saveSettings(); } catch (error) {
@@ -16515,14 +16656,14 @@ class JamDeckPlugin extends Plugin {
       archiveRef: source.archiveRef && typeof source.archiveRef === "object" ? source.archiveRef : null,
       pendingJournalOp: source.pendingJournalOp && typeof source.pendingJournalOp === "object" ? source.pendingJournalOp : null,
       tombstone: source.tombstone === true,
+      // 每日模板生成的实例才有这两个字段；手动待办保持 null。
+      routineId: typeof source.routineId === "string" ? source.routineId : null,
+      spawnDate: jamDeckIsLocalDate(source.spawnDate) ? source.spawnDate : null,
     };
   }
 
   isValidLocalDate(value) {
-    const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) return false;
-    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]);
+    return jamDeckIsLocalDate(value);
   }
 
   resolveTaskCategory(task) {
@@ -17923,6 +18064,90 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     this.settings.deckTasks.unshift(this.makeDeckTask(this.nextDeckTaskId(), text, "", []));
     await this.saveSettings();
     this.renderAllViews();
+  }
+
+  // 每日模板 —— 生成与跨日清理。
+  // 实例不写 dueDate：日历热度留给真正有期限的待办，归档仍按「完成当天」落盘。
+  async ensureRoutineTasksForToday() {
+    const today = this.formatLocalDate(new Date());
+    const plan = jamDeckPlanRoutineSpawns(this.settings.deckRoutines, this.settings.deckTasks, today);
+    if (!plan.create.length && !plan.drop.length) {
+      this.routineSpawnDate = today;
+      return false;
+    }
+    if (plan.drop.length) {
+      const stale = new Set(plan.drop);
+      this.settings.deckTasks = this.settings.deckTasks.filter((task) => !stale.has(task.id));
+    }
+    const used = new Set(this.settings.deckTasks.map((task) => task && task.id).filter(Boolean));
+    for (const routine of plan.create) {
+      const task = this.makeDeckTask(this.allocateDeckTaskId(used), routine.text, routine.description, [], {
+        category: routine.category,
+      });
+      task.routineId = routine.id;
+      task.spawnDate = today;
+      this.settings.deckTasks.unshift(task);
+      routine.lastSpawnDate = today;
+    }
+    await this.saveSettings();
+    this.routineSpawnDate = today;
+    this.renderAllViews();
+    return true;
+  }
+
+  // 每分钟一次的跨日守卫：工作台常驻开着，跨过零点后要自动换上当天的打卡卡。
+  startRoutineDayWatch() {
+    this.routineSpawnDate = null;
+    this.registerInterval(window.setInterval(() => {
+      if (this.routineSpawnDate === this.formatLocalDate(new Date())) return;
+      this.ensureRoutineTasksForToday().catch((error) => console.error("jam-deck routine spawn failed", error));
+    }, 60000));
+  }
+
+  async addDeckRoutine(text, category) {
+    const value = String(text || "").trim();
+    if (!value) return null;
+    const routine = jamDeckNormalizeRoutine({ text: value, category });
+    this.settings.deckRoutines.push(routine);
+    await this.saveSettings();
+    await this.ensureRoutineTasksForToday();
+    this.renderAllViews();
+    return routine.id;
+  }
+
+  async updateDeckRoutine(id, patch) {
+    const routine = this.settings.deckRoutines.find((item) => item.id === id);
+    if (!routine) return false;
+    Object.assign(routine, jamDeckNormalizeRoutine({ ...routine, ...patch, id: routine.id }));
+    await this.saveSettings();
+    // 停用后立刻撤下当天尚未完成的实例，避免「关了还在列表里」。
+    if (routine.enabled === false) {
+      const stale = new Set(this.settings.deckTasks
+        .filter((task) => task.routineId === routine.id && task.status === "active")
+        .map((task) => task.id));
+      if (stale.size) {
+        this.settings.deckTasks = this.settings.deckTasks.filter((task) => !stale.has(task.id));
+        await this.saveSettings();
+      }
+    } else {
+      await this.ensureRoutineTasksForToday();
+    }
+    this.renderAllViews();
+    return true;
+  }
+
+  // 删除模板只撤掉当天未完成的实例；已完成或已归档的打卡记录保留。
+  async removeDeckRoutine(id) {
+    const before = this.settings.deckRoutines.length;
+    this.settings.deckRoutines = this.settings.deckRoutines.filter((routine) => routine.id !== id);
+    if (this.settings.deckRoutines.length === before) return false;
+    const stale = new Set(this.settings.deckTasks
+      .filter((task) => task.routineId === id && task.status === "active")
+      .map((task) => task.id));
+    if (stale.size) this.settings.deckTasks = this.settings.deckTasks.filter((task) => !stale.has(task.id));
+    await this.saveSettings();
+    this.renderAllViews();
+    return true;
   }
 
   openNewTaskForDate(dueDate) {
@@ -21263,6 +21488,10 @@ JamDeckPlugin.wallpaperLuminance = jamDeckWallpaperLuminance;
 JamDeckPlugin.backgroundKind = jamDeckBackgroundKind;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
+JamDeckPlugin.RoutineManagerModal = RoutineManagerModal;
+JamDeckPlugin.normalizeRoutine = jamDeckNormalizeRoutine;
+JamDeckPlugin.planRoutineSpawns = jamDeckPlanRoutineSpawns;
+JamDeckPlugin.isLocalDate = jamDeckIsLocalDate;
 JamDeckPlugin.textSize = jamDeckTextSize;
 JamDeckPlugin.typographyValues = jamDeckTypographyValues;
 JamDeckPlugin.SettingTab = JamDeckSettingTab;

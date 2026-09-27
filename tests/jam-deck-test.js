@@ -3687,8 +3687,82 @@ async function testArchiveIntegration() {
   assert.strictEqual(customWorkRef.kind, "work-daily-v3", "work archive ref must use the unified simple kind");
 }
 
+// Daily routine templates: data shape, spawn idempotence and the cross-midnight
+// sweep. Source assertions alone cannot prove idempotence, so the plan helper and
+// the plugin method both run for real here.
+assert(pluginSource.includes("deckRoutines: []"), "settings must ship a daily routine template list");
+assert(pluginSource.includes("function jamDeckPlanRoutineSpawns"), "routine spawning must go through a testable pure planner");
+assert(pluginSource.includes("await this.ensureRoutineTasksForToday();") && pluginSource.includes("this.startRoutineDayWatch();"), "onload must spawn today's routines and keep watching for the date to roll over");
+assert(pluginSource.includes("class RoutineManagerModal"), "daily routines must have their own management dialog");
+assert(pluginSource.includes('new RoutineManagerModal(this.app, this.plugin).open()'), "the tasks widget must expose the routine manager");
+assert(styleSource.includes(".modal.jam-deck-routine-modal-shell") && styleSource.includes(".jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb"), "the routine dialog must join the shared dialog material and the six scrollbar host lists");
+assert(!pluginSource.includes("dueDate: today") || !pluginSource.includes("task.routineId = routine.id"), "routine instances must not claim a due date and flood the calendar heat map");
+
+function testRoutinePlanner() {
+  const plan = JamDeckPlugin.planRoutineSpawns;
+  const routines = [
+    JamDeckPlugin.normalizeRoutine({ id: "r-a", text: "A" }),
+    JamDeckPlugin.normalizeRoutine({ id: "r-b", text: "B", enabled: false }),
+  ];
+  assert.deepStrictEqual(plan(routines, [], "not-a-date"), { create: [], drop: [] }, "an invalid today must produce no plan at all");
+  const first = plan(routines, [], "2026-09-27");
+  assert.deepStrictEqual(first.create.map((r) => r.id), ["r-a"], "disabled templates must not spawn");
+  const spawned = [{ id: "t1", routineId: "r-a", spawnDate: "2026-09-27", status: "active" }];
+  assert.strictEqual(plan(routines, spawned, "2026-09-27").create.length, 0, "a template already spawned today must not spawn twice");
+  const next = plan(routines, spawned, "2026-09-28");
+  assert.deepStrictEqual(next.drop, ["t1"], "yesterday's unchecked routine card must be swept");
+  assert.deepStrictEqual(next.create.map((r) => r.id), ["r-a"], "a new day must spawn the template again");
+  const done = [{ id: "t1", routineId: "r-a", spawnDate: "2026-09-27", status: "completed" }];
+  assert.deepStrictEqual(plan(routines, done, "2026-09-28").drop, [], "completed check-ins are records and must survive the sweep");
+}
+
+async function testDailyRoutines() {
+  const plugin = new JamDeckPlugin();
+  plugin.settingsSaveQueue = Promise.resolve();
+  plugin.saveData = async () => {};
+  plugin.renderAllViews = () => {};
+  let today = "2026-09-27";
+  plugin.formatLocalDate = () => today;
+  plugin.settings = {
+    deckTasks: [{ id: "manual-1", text: "手动待办", status: "active", routineId: null, spawnDate: null }],
+    deckRoutines: [
+      JamDeckPlugin.normalizeRoutine({ id: "r-sleep", text: "睡够 8 小时", category: "life" }),
+      JamDeckPlugin.normalizeRoutine({ id: "r-ai", text: "AI 发布 1 条作品", category: "work" }),
+      JamDeckPlugin.normalizeRoutine({ id: "r-off", text: "停用项", enabled: false }),
+    ],
+  };
+
+  assert.strictEqual(await plugin.ensureRoutineTasksForToday(), true, "the first run of the day must spawn");
+  const spawned = plugin.settings.deckTasks.filter((task) => task.routineId);
+  assert.strictEqual(spawned.length, 2, "only enabled templates spawn");
+  assert(spawned.every((task) => task.dueDate === null), "routine instances must stay off the calendar heat map");
+  assert(spawned.every((task) => task.spawnDate === today), "routine instances must record the day they belong to");
+  assert.strictEqual(spawned.find((task) => task.routineId === "r-ai").category, "work", "the template category must reach the instance");
+
+  assert.strictEqual(await plugin.ensureRoutineTasksForToday(), false, "a second run on the same day must be a no-op");
+  assert.strictEqual(plugin.settings.deckTasks.filter((task) => task.routineId).length, 2, "re-entry must not duplicate today's cards");
+
+  // Yesterday: one checked off, one left untouched.
+  plugin.settings.deckTasks.find((task) => task.routineId === "r-sleep").status = "completed";
+  today = "2026-09-28";
+  assert.strictEqual(await plugin.ensureRoutineTasksForToday(), true, "crossing midnight must refresh the deck");
+  const yesterdayLeft = plugin.settings.deckTasks.filter((task) => task.spawnDate === "2026-09-27");
+  assert.deepStrictEqual(yesterdayLeft.map((task) => task.routineId), ["r-sleep"], "only the completed check-in survives the night");
+  assert.strictEqual(plugin.settings.deckTasks.filter((task) => task.spawnDate === "2026-09-28").length, 2, "the new day gets a fresh set");
+  assert(plugin.settings.deckTasks.some((task) => task.id === "manual-1"), "manual tasks must never be swept by the routine pass");
+
+  await plugin.updateDeckRoutine("r-ai", { enabled: false });
+  assert(!plugin.settings.deckTasks.some((task) => task.routineId === "r-ai" && task.status === "active"), "disabling a template must pull its unfinished card off the deck");
+
+  await plugin.removeDeckRoutine("r-sleep");
+  assert.strictEqual(plugin.settings.deckRoutines.length, 2, "removing a template must drop exactly one entry");
+  assert(plugin.settings.deckTasks.some((task) => task.routineId === "r-sleep" && task.status === "completed"), "deleting a template must keep the archived check-in history");
+  assert(!plugin.settings.deckTasks.some((task) => task.routineId === "r-sleep" && task.status === "active"), "deleting a template must pull its unfinished card");
+}
+
 testCanvasCreateName();
-testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
+testRoutinePlanner();
+testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testDailyRoutines()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
   console.error(error);

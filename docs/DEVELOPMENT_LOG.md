@@ -1,5 +1,21 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-27 — 1.3.0 每日固定待办
+
+- 需求入口是 Jam 想把一串日常习惯（睡 8 小时、3 个鸡蛋、50 深蹲 / 俯卧撑 / 仰卧起坐、AI 发 1 条作品、5000 步、英语播客，外加已有的戒糖）做成「固定的每天待办」。**动手前先查清两件事**：① 插件根本没有重复待办能力，`deckTask` 只有 text / description / category / dueDate；② 戒糖当前是一条 21:00 的自动化提醒，打卡结果由它自己写进 `Life/Daily.md`，**从未进过待办列表**。所以这不是配置问题，是功能缺口。
+- 粒度让 Jam 拍板（聚合 1 条 / 分 3 条主题 / 拆独立卡），他选了做重复能力 + 拆独立卡。
+- 数据层：`settings.deckRoutines` 存模板（`text` / `description` / `category` / `enabled` / `lastSpawnDate`），实例任务上加 `routineId` + `spawnDate` 两个字段。生成与清理抽成纯函数 `jamDeckPlanRoutineSpawns(routines, tasks, today)` → `{create, drop}`，插件方法只负责消费计划、落盘和重绘。顺手把 `isValidLocalDate` 的实现提成纯函数 `jamDeckIsLocalDate` 复用，避免纯函数里复制一份日期校验形成双份真相。
+- **决策一：实例不写 `dueDate`。** 起初想当然地设成当天，写完才想到日历那套完成量热度是「1/2/3/4/5+ 项 → 20%/40%/60%/80%/100% 绿」——九条打卡每天必然顶满 5+，热度会从「今天推进得怎么样」退化成常亮背景。查了归档链路确认 `archiveDeckTask` 里 `dateKey = formatLocalDate(new Date())`，取的是完成当天而不是 `dueDate`，所以去掉它落盘行为完全不变。测试里专门加了一条断言钉住这个性质。
+- **决策二：跨日只清未完成的旧实例。** 每日待办如果不清理，一周后列表里会堆着七份「深蹲 50 个」。清理边界是 `status === "active"` 且 `spawnDate < today`——已完成和已归档的是打卡记录，必须留；手动待办没有 `routineId`，永远不在扫描范围内。停用或删除模板时同样只撤当天未完成的那张卡，历史记录不动。
+- 换日靠 `registerInterval` 每 60 秒比对日期，工作台常驻开着也能在零点后自动换卡，不依赖重启；`onload` 里先跑一次。
+- 渲染顺序改了一处：active 列表拆成「无 `routineId` 的在前、有的在后」。否则 `unshift` 生成的九张打卡卡每天早上会把真正的项目待办压到滚动区外。
+- `RoutineManagerModal` 直接沿用归档弹窗的安静行语汇（规范里已固化的那套），没有发明新形态：单纸面、行透明、发丝分隔、行内删除仅 `:hover` / `:focus-within` 出现、全弹窗只有「添加」一个黑白主按钮。行内三个控件（启用勾选、分类下拉、文本输入）全部透明无底，按规范给原生表单元素写样式时都带了元素类型限定。shell 类一并加进共用底材、标题色、玻璃皮肤和**六段滚动条宿主清单**——规范明写漏一段就退回原生滚动条。
+- **部署踩了两个坑**：① 在 PowerShell 工具里直接 `& .\scripts\deploy.ps1` 会被执行策略挡住，而且异常让后续 `Set-Content` 从未执行，表现为「命令返回成功、输出文件却是上一次的内容」——真正的报错是把整段套进 `try/catch` 后才捞出来的。正解是先 `Set-ExecutionPolicy -Scope Process Bypass`（`package.json` 里的 `deploy` 脚本本就带 `-ExecutionPolicy Bypass`，手工调用时容易漏）。② 脚本收尾删除 staging 目录时被沙箱的 safe-delete 拦下并抛异常，但 detail 里写着 `OK`——目录其实已删、文件也已全部就位，属于误报的失败退出码。判断部署成败要看运行副本的 manifest 版本和文件内容，不能只看 exit code。
+- 验收：`npm run verify` 全绿；实机以计算样式为准（`dev:screenshot` 这次又返回了缓存帧，与既往记录一致）——shell 18px 圆角 + 纸白底，行 `rgba(0, 0, 0, 0)` + 1px 发丝线，九行里只有聚焦那行删除键 `opacity: 1`、其余八行 0，主按钮 `rgb(34, 34, 34)` 底白字 pill，标题 `rgb(92, 92, 92)`。
+- 种入数据走的是 `obsidian.com eval` 调插件自己的 `addDeckRoutine`，**没有碰盘上的 `data.json`**（运行中的插件持有内存态，直接改文件会被下次 saveSettings 覆盖）。eval 不 await 返回的 Promise，结果写 `window.__jamRoutine` 再发第二次 eval 读回确认：九条模板就位，当天九张卡生成，`dueDate` 全为 null。
+- 配套改了戒糖自动化：它不再自己写 `Life/Daily.md`，改为提醒 Jam 在 Deck 里勾选归档（破戒时把原因写进卡片「说明」字段）。否则同一天会出现两条戒糖记录——插件归档一条带 `jam-deck-life-task` 注释块，自动化一条不带，形成双份真相。
+- 遗留：待办组件当前高度只显示 2–3 行，九张打卡卡全在滚动区外，需要 Jam 自己把组件拉高或调整布局；这属于个人布局配置，没有替他改。工具：WorkBuddy；处理模型签名：具体模型标识不可见（主代理、设计与实现）。
+
 ## 2026-09-26 — 1.2.0 待办详情与归档弹窗按规范重做
 
 - 起点是先截图看现状，而不是读代码想象。两个弹窗都在违反「一个模块只保留一个主表面」：详情弹窗六个字段各自一张灰底圆角卡片；归档弹窗每行一个白底描边卡片，文字还被挤成居中。
