@@ -2685,6 +2685,117 @@ class RoutineManagerModal extends Modal {
   }
 }
 
+// 今天的结算清单。既包含还没归档的已完成项（本次归档的目标），也包含今天早些
+// 时候已经归档的——「下班结算」要看到一整天的产出，而不只是剩下这一批。
+function jamDeckCollectDayReceipt(tasks, today) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const onToday = (stamp) => {
+    if (!stamp) return false;
+    const date = new Date(Number(stamp));
+    if (Number.isNaN(date.getTime())) return false;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}` === today;
+  };
+  const pending = [];
+  const archived = [];
+  for (const task of list) {
+    if (!task || task.tombstone) continue;
+    if (task.status === "completed") pending.push(task);
+    else if (task.status === "archived" && (onToday(task.archivedAt) || task.archiveTargetDate === today)) archived.push(task);
+  }
+  const stamp = (task) => Number(task.completedAt) || Number(task.archivedAt) || 0;
+  pending.sort((a, b) => stamp(a) - stamp(b));
+  archived.sort((a, b) => stamp(a) - stamp(b));
+  return { pending, archived, total: pending.length + archived.length };
+}
+
+class DayReceiptModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("jam-deck-receipt-modal-shell");
+    contentEl.addClass("jam-deck-receipt-modal");
+    this.render();
+  }
+
+  render() {
+    const { contentEl } = this;
+    contentEl.empty();
+    const today = this.plugin.formatLocalDate(new Date());
+    const receipt = jamDeckCollectDayReceipt(this.plugin.settings.deckTasks, today);
+
+    const paper = contentEl.createDiv({ cls: "jam-deck-receipt" });
+    // 吐纸动画只在弹窗打开时播一次；重绘（归档完成后）不再带这个类。
+    // 弹窗挂在 .jam-deck-root 之外，工作台那条统一禁用动效的规则管不到，
+    // 因此在这里读插件自己的动画开关 —— 与项目约定一致，不查系统设置。
+    if (!this.printed) {
+      if (this.plugin.settings.animationsEnabled !== false) paper.addClass("is-printing");
+      this.printed = true;
+    }
+    const head = paper.createDiv({ cls: "jam-deck-receipt-head" });
+    head.createDiv({ text: "JAM DECK", cls: "jam-deck-receipt-brand" });
+    head.createDiv({ text: "日 结 单", cls: "jam-deck-receipt-subtitle" });
+    const now = new Date();
+    head.createDiv({
+      text: `${today}  ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+      cls: "jam-deck-receipt-stamp",
+    });
+
+    paper.createDiv({ cls: "jam-deck-receipt-rule" });
+
+    if (!receipt.total) {
+      paper.createDiv({ text: "今天还没有完成的事项。", cls: "jam-deck-receipt-empty" });
+    } else {
+      const lines = paper.createDiv({ cls: "jam-deck-receipt-lines" });
+      for (const task of [...receipt.archived, ...receipt.pending]) {
+        const line = lines.createDiv({ cls: "jam-deck-receipt-line" });
+        line.createSpan({ text: this.plugin.resolveTaskCategory(task) === "work" ? "工作" : "生活", cls: "jam-deck-receipt-tag" });
+        line.createSpan({ text: task.text, cls: "jam-deck-receipt-name" });
+        const stamp = Number(task.completedAt) || Number(task.archivedAt) || 0;
+        const time = stamp ? new Date(stamp) : null;
+        line.createSpan({
+          text: time ? `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}` : "--:--",
+          cls: "jam-deck-receipt-time",
+        });
+      }
+    }
+
+    paper.createDiv({ cls: "jam-deck-receipt-rule" });
+    const total = paper.createDiv({ cls: "jam-deck-receipt-total" });
+    total.createSpan({ text: "合计" });
+    total.createSpan({ text: `${receipt.total} 项`, cls: "jam-deck-receipt-total-value" });
+    if (receipt.pending.length) {
+      const sub = paper.createDiv({ cls: "jam-deck-receipt-note" });
+      sub.setText(`其中 ${receipt.pending.length} 项待归档`);
+    }
+    paper.createDiv({ text: "谢 谢 光 临 · 今 天 的 班 上 到 这 儿", cls: "jam-deck-receipt-footer" });
+    paper.createDiv({ cls: "jam-deck-receipt-barcode", attr: { "aria-hidden": "true" } });
+
+    const actions = contentEl.createDiv({ cls: "jam-deck-receipt-actions" });
+    if (receipt.pending.length) {
+      const archive = actions.createEl("button", { text: `归档 ${receipt.pending.length} 项`, cls: "jam-deck-receipt-confirm", attr: { type: "button" } });
+      archive.addEventListener("click", async () => {
+        archive.disabled = true;
+        archive.setText("归档中…");
+        const failed = await this.plugin.archiveCompletedTasks();
+        if (failed) new Notice(`Jam Deck：${failed} 项归档失败，可在待办列表重试`);
+        this.render();
+      });
+    } else {
+      actions.createEl("button", { text: "关闭", cls: "jam-deck-receipt-confirm", attr: { type: "button" } })
+        .addEventListener("click", () => this.close());
+    }
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 const JAM_DECK_SHORTCUT_FOLDER_COLORS = ["#C8C2B8", "#F0B5A2", "#E9C2CC", "#EFCF9E", "#AECBA4", "#A5C6D8"];
 const JAM_DECK_SHORTCUT_FOLDER_LEGACY_COLORS = new Map([
   ["#C1C1C1", "#C8C2B8"],
@@ -14843,10 +14954,15 @@ class JamDeckView extends ItemView {
         event.stopPropagation();
         new RoutineManagerModal(this.app, this.plugin).open();
       });
-      const archive = headerActions.createEl("button", { text: "归档", cls: "jam-deck-widget-action", attr: { title: "查看归档待办" } });
-      archive.addEventListener("click", (event) => {
+      const detail = headerActions.createEl("button", { text: "详情", cls: "jam-deck-widget-action", attr: { title: "查看已归档待办" } });
+      detail.addEventListener("click", (event) => {
         event.stopPropagation();
         new ArchiveViewerModal(this.app, this.plugin).open();
+      });
+      const archive = headerActions.createEl("button", { text: "归档", cls: "jam-deck-widget-action", attr: { title: "结算今天：把已完成的待办归档" } });
+      archive.addEventListener("click", (event) => {
+        event.stopPropagation();
+        new DayReceiptModal(this.app, this.plugin).open();
       });
     }
     if (widget.type === "launcher") {
@@ -15108,6 +15224,11 @@ class JamDeckView extends ItemView {
 
     for (const task of [...active, ...completed]) {
       const row = list.createDiv({ cls: task.status === "completed" ? "jam-deck-task is-completed" : "jam-deck-task" });
+      // 标记只消费一次：动画播完后的重绘不再带它。
+      if (task.id === this.plugin.strikingTaskId) {
+        row.addClass("is-striking");
+        this.plugin.strikingTaskId = null;
+      }
       const isArchiving = this.plugin.archivingTaskIds.has(task.id);
       if (isArchiving) row.addClass("is-archiving");
       const checkbox = row.createEl("input", { type: "checkbox", cls: "jam-deck-task-check" });
@@ -15116,10 +15237,7 @@ class JamDeckView extends ItemView {
       checkbox.addEventListener("click", (event) => event.stopPropagation());
       checkbox.addEventListener("change", async (event) => {
         event.stopPropagation();
-        // 勾选即归档，省掉第二次点击。归档失败时任务停在「已完成」，
-        // 行上的归档按钮仍可重试；取消勾选走回退路径。
-        if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);
-        else await this.plugin.toggleDeckTask(task.id);
+        await this.plugin.toggleDeckTask(task.id);
       });
       const taskMain = row.createEl("button", {
         cls: "jam-deck-task-main",
@@ -18185,6 +18303,22 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     }
   }
 
+  // 批量归档已完成项。逐条串行走既有归档链路（写日记本身已排队），
+  // 失败的留在「已完成」不动，返回失败条数交给调用方提示。
+  async archiveCompletedTasks() {
+    const ids = this.settings.deckTasks.filter((task) => task.status === "completed").map((task) => task.id);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        if (!await this.archiveDeckTask(id)) failed += 1;
+      } catch (error) {
+        console.error("jam-deck batch archive failed", error);
+        failed += 1;
+      }
+    }
+    return failed;
+  }
+
   async completeAndArchiveDeckTask(id) {
     const task = this.getDeckTask(id);
     if (!task || task.status === "archived") return false;
@@ -18221,6 +18355,9 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     }
     task.status = completed ? "active" : "completed";
     task.completedAt = completed ? null : Date.now();
+    // 只给刚勾上的这一条挂动画标记。列表在每次 renderAllViews 时整体重建，
+    // 若把动画绑在 .is-completed 上，打开任意弹窗都会让所有已完成项重播划线。
+    this.strikingTaskId = completed ? null : task.id;
     await this.saveSettings();
     this.renderAllViews();
   }
@@ -21492,6 +21629,8 @@ JamDeckPlugin.backgroundKind = jamDeckBackgroundKind;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
 JamDeckPlugin.RoutineManagerModal = RoutineManagerModal;
+JamDeckPlugin.DayReceiptModal = DayReceiptModal;
+JamDeckPlugin.collectDayReceipt = jamDeckCollectDayReceipt;
 JamDeckPlugin.normalizeRoutine = jamDeckNormalizeRoutine;
 JamDeckPlugin.planRoutineSpawns = jamDeckPlanRoutineSpawns;
 JamDeckPlugin.isLocalDate = jamDeckIsLocalDate;

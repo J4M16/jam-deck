@@ -1987,6 +1987,90 @@ input.jam-deck-countdown-duration {
   padding: 0;
   overflow: hidden;
 }
+/* Day receipt. Deliberately not the shared paper material: a thermal slip is a
+   narrow strip with torn edges, so it gets its own surface. Only the scrollbar
+   rules are shared. */
+.modal.jam-deck-receipt-modal-shell {
+  width: min(348px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.jam-deck-receipt-modal-shell > .modal-header,
+.jam-deck-receipt-modal-shell > .modal-close-button { display: none; }
+.jam-deck-receipt-modal { padding: 0; display: grid; gap: 14px; justify-items: center; }
+.jam-deck-receipt {
+  --jd-slip: #fbfaf6;
+  --jd-slip-ink: #2b2b28;
+  --jd-slip-faint: color-mix(in srgb, var(--jd-slip-ink) 46%, transparent);
+  width: 100%;
+  padding: 22px 20px 18px;
+  background: var(--jd-slip);
+  color: var(--jd-slip-ink);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.7;
+  box-shadow: 0 10px 30px rgb(15 20 18 / .18);
+  /* Torn top and bottom edges, cut out of the paper itself rather than drawn as
+     an extra layer. */
+  --jd-slip-teeth: 7px;
+  -webkit-mask:
+    radial-gradient(var(--jd-slip-teeth) at 50% 0, transparent 99%, #000) 0 0 / 14px 100% repeat-x,
+    radial-gradient(var(--jd-slip-teeth) at 50% 100%, transparent 99%, #000) 0 100% / 14px 100% repeat-x,
+    linear-gradient(#000, #000) 0 var(--jd-slip-teeth) / 100% calc(100% - var(--jd-slip-teeth) * 2) no-repeat;
+}
+.theme-dark .jam-deck-receipt { --jd-slip: #edece7; }
+/* The slip feeding out of the printer. A transform/clip-path pair is the only
+   way to express this; declared as a scoped exception in VISUAL_DESIGN.md and
+   played once per dialog open. The dialog mounts outside .jam-deck-root, so the
+   workbench-wide no-motion rule cannot reach it — the class is withheld in JS
+   when the plugin's animation toggle is off, which keeps this on the plugin
+   preference rather than the OS setting. */
+.jam-deck-receipt.is-printing { animation: jam-deck-receipt-feed 420ms cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes jam-deck-receipt-feed {
+  from { clip-path: inset(0 0 100% 0); transform: translateY(-10px); }
+  to { clip-path: inset(0 0 0 0); transform: translateY(0); }
+}
+.jam-deck-receipt-head { text-align: center; }
+.jam-deck-receipt-brand { font-size: 15px; font-weight: 700; letter-spacing: .22em; }
+.jam-deck-receipt-subtitle { letter-spacing: .3em; color: var(--jd-slip-faint); }
+.jam-deck-receipt-stamp { margin-top: 4px; color: var(--jd-slip-faint); font-variant-numeric: tabular-nums; }
+.jam-deck-receipt-rule { margin: 12px 0; border-top: 1px dashed color-mix(in srgb, var(--jd-slip-ink) 34%, transparent); }
+.jam-deck-receipt-empty { padding: 8px 0; color: var(--jd-slip-faint); text-align: center; }
+.jam-deck-receipt-lines { display: grid; gap: 5px; }
+.jam-deck-receipt-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
+.jam-deck-receipt-tag { color: var(--jd-slip-faint); font-size: 10px; }
+.jam-deck-receipt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jam-deck-receipt-time { color: var(--jd-slip-faint); font-variant-numeric: tabular-nums; }
+.jam-deck-receipt-total { display: flex; align-items: baseline; justify-content: space-between; font-weight: 700; letter-spacing: .1em; }
+.jam-deck-receipt-total-value { font-variant-numeric: tabular-nums; }
+.jam-deck-receipt-note { margin-top: 2px; color: var(--jd-slip-faint); text-align: right; }
+.jam-deck-receipt-footer { margin-top: 14px; color: var(--jd-slip-faint); text-align: center; font-size: 10px; }
+/* Stand-in barcode: stripes of varying width, no scannable data. */
+.jam-deck-receipt-barcode {
+  height: 26px;
+  margin-top: 10px;
+  background-image: repeating-linear-gradient(to right,
+    var(--jd-slip-ink) 0 2px, transparent 2px 4px,
+    var(--jd-slip-ink) 4px 5px, transparent 5px 8px,
+    var(--jd-slip-ink) 8px 11px, transparent 11px 12px,
+    var(--jd-slip-ink) 12px 13px, transparent 13px 16px);
+  opacity: .72;
+}
+.jam-deck-receipt-actions { display: flex; justify-content: center; }
+button.jam-deck-receipt-confirm {
+  height: 36px; padding: 0 22px; border: 0; border-radius: var(--jd-radius-pill);
+  background: #222; color: #fff; box-shadow: none;
+  font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer;
+}
+button.jam-deck-receipt-confirm:hover:not(:disabled) { opacity: .86; }
+button.jam-deck-receipt-confirm:disabled { opacity: .5; cursor: wait; }
+button.jam-deck-receipt-confirm:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent, #b8ff3d); }
+
 .modal.jam-deck-routine-modal-shell {
   width: min(520px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
@@ -3091,7 +3175,35 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
   color: var(--jd-muted);
   text-decoration: none;
 }
-.jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title { text-decoration: line-through; }
+/* Completion is drawn as a marker stroke through the title instead of a plain
+   line-through: uneven alpha along the gradient reads as pen pressure, and the
+   two ends are the lightest, like a stroke laid down in one motion.
+   This animates background-size only, which stays inside the allowed
+   opacity/border/background/shadow set. */
+.jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title {
+  text-decoration: none;
+  background-image: linear-gradient(to right,
+    color-mix(in srgb, var(--jd-accent) 52%, transparent),
+    color-mix(in srgb, var(--jd-accent) 90%, transparent) 14%,
+    color-mix(in srgb, var(--jd-accent) 72%, transparent) 55%,
+    color-mix(in srgb, var(--jd-accent) 88%, transparent) 84%,
+    color-mix(in srgb, var(--jd-accent) 46%, transparent));
+  background-repeat: no-repeat;
+  background-position: 0 58%;
+  background-size: 100% 40%;
+}
+/* Only the row just ticked carries .is-striking, so the stroke plays exactly
+   once — re-renders (opening any dialog rebuilds the list) must not replay it. */
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title {
+  animation: jam-deck-marker-strike 340ms cubic-bezier(.22, 1, .36, 1) both;
+}
+/* No reduced-motion query here on purpose: Jam Deck animations follow the
+   plugin's own toggle, and .jam-deck-root.jam-deck-no-motion * already zeroes
+   every animation duration inside the workbench. */
+@keyframes jam-deck-marker-strike {
+  from { background-size: 0% 40%; }
+  to { background-size: 100% 40%; }
+}
 
 @container (max-width: 270px) {
   .jam-deck-calendar-days { grid-auto-rows: minmax(30px, 1fr); gap-inline: 1px; }
@@ -3387,10 +3499,12 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
    host has to be named here; add new surfaces to all four host lists below. */
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar,
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar {
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar {
   width: 6px !important;
   height: 6px !important;
   background: transparent !important;
@@ -3398,25 +3512,31 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-track,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-track,
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-corner,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-corner,
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-track,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-track,
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-corner {
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-button,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-button,
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-button {
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-button {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
@@ -3427,10 +3547,12 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-thumb,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-thumb,
 :is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
   .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
-  .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal, .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-thumb {
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-thumb {
   min-width: 6px !important;
   min-height: 18px !important;
   border: 2px solid transparent !important;
@@ -3487,6 +3609,10 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb,
 .jam-deck-routine-modal:focus-within::-webkit-scrollbar-thumb,
 .jam-deck-routine-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:focus-within *::-webkit-scrollbar-thumb,
 .jam-deck-shortcut-modal:hover::-webkit-scrollbar-thumb,
 .jam-deck-shortcut-modal:hover *::-webkit-scrollbar-thumb,
 .jam-deck-shortcut-modal:focus-within::-webkit-scrollbar-thumb,
@@ -3526,6 +3652,8 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-archive-modal *::-webkit-scrollbar-thumb:hover,
 .jam-deck-routine-modal::-webkit-scrollbar-thumb:hover,
 .jam-deck-routine-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-receipt-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-receipt-modal *::-webkit-scrollbar-thumb:hover,
 .jam-deck-shortcut-modal::-webkit-scrollbar-thumb:hover,
 .jam-deck-shortcut-modal *::-webkit-scrollbar-thumb:hover,
 .jam-deck-shortcut-editor-modal::-webkit-scrollbar-thumb:hover,

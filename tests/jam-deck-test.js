@@ -3697,7 +3697,22 @@ assert(pluginSource.includes("class RoutineManagerModal"), "daily routines must 
 assert(pluginSource.includes('new RoutineManagerModal(this.app, this.plugin).open()'), "the tasks widget must expose the routine manager");
 assert(styleSource.includes(".modal.jam-deck-routine-modal-shell") && styleSource.includes(".jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb"), "the routine dialog must join the shared dialog material and the six scrollbar host lists");
 assert(!pluginSource.includes("dueDate: today") || !pluginSource.includes("task.routineId = routine.id"), "routine instances must not claim a due date and flood the calendar heat map");
-assert(pluginSource.includes("if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);"), "ticking a task must archive it in the same gesture instead of requiring a second click");
+// Ticking marks complete; archiving is a separate end-of-day settlement.
+assert(!pluginSource.includes("if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);"), "ticking must only mark the task complete; archiving is the deliberate settlement step");
+assert(pluginSource.includes('makeToolbarLabel') || pluginSource.includes('text: "详情"'), "the archive viewer must now sit behind 详情");
+assert(pluginSource.includes('text: "归档", cls: "jam-deck-widget-action", attr: { title: "结算今天：把已完成的待办归档" }') && pluginSource.includes("new DayReceiptModal(this.app, this.plugin).open()"), "归档 must open the day-settlement receipt");
+assert(pluginSource.includes("async archiveCompletedTasks()") && /failed \+= 1;/.test(pluginSource), "batch archiving must run per task and report failures instead of silently dropping them");
+assert(pluginSource.includes("this.strikingTaskId = completed ? null : task.id;") && pluginSource.includes("this.plugin.strikingTaskId = null;"), "the marker stroke must be a one-shot flag consumed at render, or every re-render replays it on all completed rows");
+assert(/\.jam-deck-root \.jam-deck-task\.is-completed \.jam-deck-task-title \{\s*text-decoration: none;\s*background-image: linear-gradient/.test(styleSource), "completion must read as a marker stroke, not a plain line-through");
+assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 40%; \}/.test(styleSource), "the stroke must animate background-size only, staying inside the allowed property set");
+// Motion follows the plugin toggle, never the OS setting. Inside the workbench
+// .jam-deck-no-motion handles it; the receipt dialog mounts outside the root,
+// so the animation class is withheld in JS instead.
+assert(styleSource.includes("@keyframes jam-deck-receipt-feed"), "the receipt feed animation must exist");
+assert(pluginSource.includes('if (this.plugin.settings.animationsEnabled !== false) paper.addClass("is-printing");'), "dialogs outside .jam-deck-root must gate animation on the plugin's own toggle");
+assert(!/\.jam-deck-(task\.is-striking|receipt)[^{]*\{[^}]*\}\s*\}?\s*@media \(prefers-reduced-motion/.test(styleSource), "new animations must not consult the OS reduced-motion setting");
+assert(fs.readFileSync(path.join(projectRoot, "docs", "VISUAL_DESIGN.md"), "utf8").includes("吐纸动画是限定例外"), "the receipt's transform/clip-path animation must be declared as a scoped exception in the spec");
+assert(styleSource.includes(".jam-deck-receipt-modal:hover *::-webkit-scrollbar-thumb,") && styleSource.includes(".jam-deck-receipt-modal, .jam-deck-shortcut-modal"), "the receipt dialog must join every scrollbar host list");
 // Obsidian draws checkboxes with `appearance: none` and paints :checked via
 // background-color plus a masked ::after, so accent-color is inert here.
 // These assertions pin the rules that actually render; an accent-color-only
@@ -3722,6 +3737,28 @@ assert(styleSource.includes("Dead rule: the later .jam-deck-root override wins")
 assert(/\.jam-deck-root :is\(\.jam-deck-task-archive, \.jam-deck-task-delete\) \{\s*border: 0 !important;[\s\S]*?background: transparent !important;\s*box-shadow: none !important;/.test(styleSource), "task row actions must drop the theme's white fill, border and inset outline");
 assert(/\.jam-deck-root \.jam-deck-task-delete:hover \{\s*background: color-mix\(in srgb, var\(--text-error\) 12%, transparent\);\s*color: var\(--text-error\);/.test(styleSource), "the delete action must express danger through a low-contrast wash, not a permanent frame");
 assert(!/\.jam-deck-root \.jam-deck-task-(archive|delete):hover \{[^}]*!important/.test(styleSource), "row-action hover must stay free of !important so the glass skin's own danger palette keeps winning");
+
+function testDayReceipt() {
+  const collect = JamDeckPlugin.collectDayReceipt;
+  const at = (h) => new Date(2026, 8, 27, h, 30).getTime();
+  const yesterday = new Date(2026, 8, 26, 21, 0).getTime();
+  const tasks = [
+    { id: "a", text: "早", status: "completed", completedAt: at(9) },
+    { id: "b", text: "晚", status: "completed", completedAt: at(18) },
+    { id: "c", text: "今天已归档", status: "archived", archivedAt: at(12) },
+    { id: "d", text: "昨天归档", status: "archived", archivedAt: yesterday },
+    { id: "e", text: "靠 targetDate 认领", status: "archived", archivedAt: null, archiveTargetDate: "2026-09-27" },
+    { id: "f", text: "还没做", status: "active" },
+    { id: "g", text: "墓碑", status: "completed", completedAt: at(10), tombstone: true },
+  ];
+  const receipt = collect(tasks, "2026-09-27");
+  assert.deepStrictEqual(receipt.pending.map((t) => t.id), ["a", "b"], "pending must hold today's completed-but-unarchived tasks in time order");
+  assert.deepStrictEqual(receipt.archived.map((t) => t.id).sort(), ["c", "e"], "archived must pick up today's slips by timestamp or by archive target date");
+  assert(!receipt.archived.some((t) => t.id === "d"), "yesterday's archive must not leak into today's receipt");
+  assert(!receipt.pending.some((t) => t.id === "g"), "tombstoned tasks must never reach the receipt");
+  assert.strictEqual(receipt.total, 4, "total counts the whole day, both freshly finished and already filed");
+  assert.deepStrictEqual(collect(null, "2026-09-27"), { pending: [], archived: [], total: 0 }, "a missing task list must not throw");
+}
 
 function testRoutinePlanner() {
   const plan = JamDeckPlugin.planRoutineSpawns;
@@ -3787,6 +3824,7 @@ async function testDailyRoutines() {
 
 testCanvasCreateName();
 testRoutinePlanner();
+testDayReceipt();
 testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testDailyRoutines()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
