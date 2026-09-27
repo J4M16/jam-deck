@@ -3703,6 +3703,10 @@ assert(pluginSource.includes('makeToolbarLabel') || pluginSource.includes('text:
 assert(pluginSource.includes('text: "归档", cls: "jam-deck-widget-action", attr: { title: "结算今天：把已完成的待办归档" }') && pluginSource.includes("new DayReceiptModal(this.app, this.plugin).open()"), "归档 must open the day-settlement receipt");
 assert(pluginSource.includes("async archiveCompletedTasks()") && /failed \+= 1;/.test(pluginSource), "batch archiving must run per task and report failures instead of silently dropping them");
 assert(pluginSource.includes("this.strikingTaskId = completed ? null : task.id;") && pluginSource.includes("this.plugin.strikingTaskId = null;"), "the marker stroke must be a one-shot flag consumed at render, or every re-render replays it on all completed rows");
+// Ticking must not reorder the list: a row that jumps plays its stroke outside
+// the visible area, which defeats the whole point of the animation.
+assert(!pluginSource.includes("for (const task of [...active, ...completed])"), "completed tasks must not be re-sorted to the end of the list on tick");
+assert(/const rows = \[\.\.\.shown\.filter\(\(task\) => !task\.routineId\), \.\.\.shown\.filter\(\(task\) => task\.routineId\)\];/.test(pluginSource), "row order must depend only on routine grouping, never on completion state");
 assert(/\.jam-deck-root \.jam-deck-task\.is-completed \.jam-deck-task-title \{\s*text-decoration: none;\s*background-image: linear-gradient/.test(styleSource), "completion must read as a marker stroke, not a plain line-through");
 assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 40%; \}/.test(styleSource), "the stroke must animate background-size only, staying inside the allowed property set");
 // Motion follows the plugin toggle, never the OS setting. Inside the workbench

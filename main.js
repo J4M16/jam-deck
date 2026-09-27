@@ -15211,18 +15211,22 @@ class JamDeckView extends ItemView {
     const createDrop = body.createDiv({ cls: "jam-deck-task-create-drop", text: "＋ 创建新待办" });
     this.plugin.enableTaskDrop(body, null, createDrop);
 
-    // 每日打卡是日常背景，排在手动待办之后，避免每天早上把真正的项目待办压到列表底部。
-    const activeAll = this.plugin.settings.deckTasks.filter((task) => task.status === "active");
-    const active = [...activeAll.filter((task) => !task.routineId), ...activeAll.filter((task) => task.routineId)];
-    const completed = this.plugin.settings.deckTasks.filter((task) => task.status === "completed");
+    // 勾选只改变外观，不改变行的位置。此前已完成项被排到列表末尾，勾一下就位移，
+    // 划线动画于是在视野外播放（组件通常只露 2–3 行），仪式感白做；原地划掉也正是
+    // 纸笔清单的真实体验。已完成项停留时间很短（点「归档」就结算），混在原位无妨。
+    // 唯一保留的分组是「每日打卡整组排在手动待办之后」，避免每天早上把项目待办挤走。
+    const shown = this.plugin.settings.deckTasks.filter((task) => task.status === "active" || task.status === "completed");
+    const rows = [...shown.filter((task) => !task.routineId), ...shown.filter((task) => task.routineId)];
+    const active = shown.filter((task) => task.status === "active");
+    const completed = shown.filter((task) => task.status === "completed");
     const archivedCount = this.plugin.settings.deckTasks.filter((task) => task.status === "archived").length;
     const list = body.createDiv({ cls: "jam-deck-task-list" });
 
-    if (!active.length && !completed.length) {
+    if (!rows.length) {
       list.createDiv({ text: "没有待办，点击日历日期创建。", cls: "jam-deck-task-empty" });
     }
 
-    for (const task of [...active, ...completed]) {
+    for (const task of rows) {
       const row = list.createDiv({ cls: task.status === "completed" ? "jam-deck-task is-completed" : "jam-deck-task" });
       // 标记只消费一次：动画播完后的重绘不再带它。
       if (task.id === this.plugin.strikingTaskId) {
