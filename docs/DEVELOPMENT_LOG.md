@@ -1,5 +1,15 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-09-28 — 日结单露出矩形阴影框
+
+- Jam：「便签打印出来和飞走的时候会露出底下的阴影边框。」
+- 实测（打开日结单、快进动画后读计算样式）：透明外壳 `.modal` 的 `box-shadow` 是 Obsidian 的多层 `--shadow-l`。遍历样式表找命中规则，只有两条：Obsidian `app.css` 的 `.modal-container.mod-dim .modal`（0,3,0）和我们的 `.modal.jam-deck-receipt-modal-shell { box-shadow: none }`（0,2,0），前者胜出。
+- 为什么以前没人看到：纸面与外壳同宽，铺满时把这个矩形挡住了；新动效里送纸中途纸面只露一部分、甩走后纸面完全离开，矩形就露了出来。
+- 修法：`.modal-container.jam-deck-receipt-container > .modal.jam-deck-receipt-modal-shell { box-shadow: none; }`，借弹窗打开时挂上的容器类把特异性提到 (0,4,0)。不用 `!important`，与规范「`!important` 只给必须压主题、且皮肤层不再调的基态」一致，这里用特异性就够了。
+- 上一轮漏掉的原因：测试页只仿了弹窗结构，没带 Obsidian 的原生弹窗规则。已记入视觉规范：验证透明外壳时要么在 Obsidian 实测，要么把原生规则一起带进测试页。
+- 验证：`npm run verify` 全绿，新增回归断言；Obsidian 实测 `mod-dim` 存在时外壳 `box-shadow: none`、边框 0、底色透明，纸面 `drop-shadow` 仍在；关闭后剩余 `.modal-container` 为 0；只热重载一次，`data.json` 38 个 key、9 条每日模板完好。
+- 工具：Cursor；处理模型签名：Claude Opus 5.5（主代理、诊断与修复）。
+
 ## 2026-09-27 — 日结单动效按原片与 Spatial 重做，弹窗补上进出场
 
 - Jam：「动画感很微弱，没啥节奏，弹窗也没动画。参考我的主要竞品和这个视频来优化。」竞品确认为 **Spatial**（44x Design 出的 Mac 画布笔记应用，也是本项目视觉规范的原型）。

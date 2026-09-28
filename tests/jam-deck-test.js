@@ -3769,6 +3769,9 @@ assert(styleSource.includes("@keyframes jam-deck-receipt-settle") && styleSource
 assert(/if \(this\.animated\) \{\s*paper\.createDiv\(\{ text: "已 结 算", cls: "jam-deck-receipt-seal"[^\n]*\n\s*this\.containerEl\.addClass\("is-settling"\);\s*await new Promise\(\(resolve\) => window\.setTimeout\(resolve, jamDeckAnimationMs\(paper\)\)\);\s*\}\s*this\.close\(\);/.test(pluginSource), "the settle must play before closing, and be skipped with animations off");
 assert(/if \(failed\) \{\s*new Notice\([^\n]*\n\s*this\.render\(\);\s*return;\s*\}/.test(pluginSource), "a partial failure must not play the settle; the slip stays for a retry");
 assert(!/JAM_DECK_RECEIPT_\w+_MS/.test(pluginSource), "receipt animation durations must live only in styles.css");
+// Obsidian's `.modal-container.mod-dim .modal` (0,3,0) shadows the shell; the
+// rectangle shows through while the slip feeds and after it is flicked away.
+assert(styleSource.includes(".modal-container.jam-deck-receipt-container > .modal.jam-deck-receipt-modal-shell { box-shadow: none; }"), "the transparent receipt shell must out-rank Obsidian's dimmed-modal shadow");
 assert(!/\.jam-deck-(task\.is-striking|receipt)[^{]*\{[^}]*\}\s*\}?\s*@media \(prefers-reduced-motion/.test(styleSource), "new animations must not consult the OS reduced-motion setting");
 assert(fs.readFileSync(path.join(projectRoot, "docs", "VISUAL_DESIGN.md"), "utf8").includes("日结单动效是限定例外"), "the receipt's transform/clip-path animation must be declared as a scoped exception in the spec");
 assert(styleSource.includes(".jam-deck-receipt-modal:hover *::-webkit-scrollbar-thumb,") && styleSource.includes(".jam-deck-receipt-modal, .jam-deck-shortcut-modal"), "the receipt dialog must join every scrollbar host list");

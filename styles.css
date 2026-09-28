@@ -1999,9 +1999,12 @@ input.jam-deck-countdown-duration {
   padding: 0;
   border: 0;
   background: transparent;
-  box-shadow: none;
   overflow: visible;
 }
+/* Obsidian's `.modal-container.mod-dim .modal` (0,3,0) paints --shadow-l on
+   the shell; it shows as a rectangle whenever the slip does not cover it —
+   mid-feed and after the flick. The container class lifts this above it. */
+.modal-container.jam-deck-receipt-container > .modal.jam-deck-receipt-modal-shell { box-shadow: none; }
 .jam-deck-receipt-modal-shell > .modal-header { display: none; }
 /* The paper starts below the printer slot, so the close button moves down with it. */
 .jam-deck-receipt-modal-shell > .modal-header-button { top: calc(var(--size-2-3) + var(--jd-slip-slot) - var(--jd-slip-tuck)); }

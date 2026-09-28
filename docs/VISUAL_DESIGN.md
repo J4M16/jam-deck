@@ -102,6 +102,7 @@
   - 关闭（Esc、点遮罩、结算结束）一律先缩小淡出再移除，比入场更快。Obsidian 的 `close()` 会同步摘掉容器，因此由弹窗自己延后真正关闭。
   - 时长只写在 `styles.css`，JS 从计算样式读回再等待，不另存常量。纸面齿边是 mask 挖的，mask 会连带裁掉自身的 `box-shadow`，所以纸面阴影由外层 `filter: drop-shadow` 投在挖好的轮廓上。
   - 除打印口、纸面、印章与弹窗进出外，小票内部不得再增加动效。
+  - 外壳是透明的，但 Obsidian 的 `.modal-container.mod-dim .modal`（0,3,0）会给它画 `--shadow-l`；纸面平时盖住它看不出，一到送纸中途或甩走后就露出一圈矩形阴影。外壳的 `box-shadow: none` 必须用容器类提到 (0,4,0)。测试页若不带 Obsidian 原生弹窗规则，查不出这类问题。
 - 关掉动效走插件自己的「动画效果」开关，不查系统 `prefers-reduced-motion`（只有壁纸/光学模块例外）。工作台内的动画由 `.jam-deck-root.jam-deck-no-motion *` 统一归零；自有弹窗挂在根节点之外，够不着那条规则，必须在 JS 里按设置决定是否挂动画类。
 
 ## 时钟
