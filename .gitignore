@@ -4,6 +4,8 @@ data.json
 Thumbs.db
 *.log
 *.tmp
+*.bak
+tmp-*.txt
 .cache/
 coverage/
 dist/

@@ -1,0 +1,23 @@
+name: Build island capture
+on:
+  push:
+    branches: [develop]
+    paths: ['native/island-capture/main.swift', '.github/workflows/island-capture.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Apple Silicon capture helper
+        run: |
+          mkdir -p dist/island-capture
+          xcrun swiftc -parse-as-library -O -target arm64-apple-macos15.0 native/island-capture/main.swift -o dist/island-capture/island-capture-macos-arm64
+          codesign --force --sign - --identifier com.jamdeck.island-capture dist/island-capture/island-capture-macos-arm64
+          shasum -a 256 dist/island-capture/island-capture-macos-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: island-capture-macos-arm64
+          path: dist/island-capture/island-capture-macos-arm64

@@ -211,8 +211,8 @@ assert(pluginSource.includes("typeof this.canvas.requestPushHistory.run"), "auto
 assert(pluginSource.includes("stableFrames >= 3"), "auto-snap must wait for three stable world-rect samples");
 assert(pluginSource.includes("Date.now() - drag.releaseTime >= 210"), "auto-snap must stay inside the native Canvas history coalescing window");
 assert(pluginSource.includes("jamDeckCanvasStackOverlapRatio"), "Canvas stacks must use world-geometry overlap");
-assert(styleSource.includes("--jd-canvas-image-radius: var(--jd-radius-sm, 10px)"), "Canvas image radius must reuse the launcher icon radius token");
-assert(styleSource.includes("--jd-canvas-group-radius: var(--jd-radius-md, 14px)"), "Canvas group radius must use the next Spatial radius tier");
+assert(styleSource.includes("--jd-canvas-image-radius: var(--jd-radius-sm)"), "Canvas image radius must reuse the launcher icon radius token");
+assert(styleSource.includes("--jd-canvas-group-radius: var(--jd-radius-md)"), "Canvas group radius must use the next Spatial radius tier");
 assert(styleSource.includes(".jam-deck-canvas-leaf .canvas-node:has(> .canvas-group-label)"), "Canvas group styling must stay inside the embedded leaf");
 assert(styleSource.includes(".jam-deck-canvas-stack-overlay"), "Canvas stacks must render hover previews in a dedicated overlay");
 assert(styleSource.includes(".jam-deck-canvas-stack-preview {") && styleSource.includes("pointer-events: auto;"), "an open stack preview must isolate the Canvas below it");
@@ -415,7 +415,9 @@ assert(styleSource.includes(".jam-deck-music-player:hover .jam-deck-music-contro
 assert(pluginSource.includes("jam-deck-music-transport-stage") && styleSource.includes(".jam-deck-music-transport-stage"), "transport controls and timeline must share one overlay stage");
 assert(styleSource.includes("color-mix(in srgb, var(--jd-surface) 94%, transparent)") && styleSource.includes("justify-self: start") && styleSource.includes("text-align: left"), "hover transport must veil the timeline and metadata must follow the screenshot's left-aligned beside-disc layout");
 assert(styleSource.includes("@container (max-width: 270px)"), "the music widget must adapt to narrow dashboard columns");
-assert(!pluginSource.includes("prefers-reduced-motion"), "JS must not consult the OS reduced-motion media query");
+const existingAnimationSource = pluginSource.slice(0, pluginSource.indexOf("function jamDeckCreateGlassEngine("))
+  + pluginSource.slice(pluginSource.indexOf("const DEFAULT_SETTINGS = {"));
+assert(!existingAnimationSource.includes("prefers-reduced-motion"), "existing animations keep the app preference; only the new wallpaper/optics module may consult reduced motion");
 assert(!pluginSource.includes("GameDeck") && !styleSource.includes(".game-deck-"), "Game Deck now ships as its own plugin; Jam Deck must stay 2D only");
 assert(pluginSource.includes("function jamDeckCollectFillSlots"), "dashboard insert must collect fillable gaps");
 assert(pluginSource.includes("function jamDeckPickFillSlot"), "dashboard insert must pick the hovered gap slot");
@@ -489,20 +491,23 @@ function makeIslandDragHarness() {
     body: element(), documentElement: element(), createElement: element,
     getElementById: (id) => nodes[id],
   });
+  document.body.style = { setProperty(name, value) { this[name] = value; } };
   const window = Object.assign(element(), {
     setTimeout(callback) { timers.set(++timerId, callback); return timerId; },
     clearTimeout(id) { timers.delete(id); },
   });
   const controller = new JamDeckPlugin.IslandModeController({ app: {} });
   controller.actionChannel = "island-drag-test";
-  const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1];
+  // Capture lifecycle is exercised separately; this fixture isolates existing clipboard drag semantics.
+  const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1]
+    .replace(/window\.jamDeckIslandOptics = jamDeckCreateIslandOptics[^\n]+/, "window.jamDeckIslandOptics = {update(){},frame(){},dispose(){}};");
   vm.runInNewContext(script, {
     document, window, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
     require: () => ({ ipcRenderer: { send: (_channel, payload) => sent.push(payload), on() {} } }),
   });
   return {
     sent,
-    render(items) { window.jamDeckIslandSetState({ items, collapsed: false, leaveMs: 1000 }); },
+    render(items) { window.jamDeckIslandSetState({ items, collapsed: false, leaveMs: 1000, textBrightness: JamDeckPlugin.textBrightnessValues(50) }); },
     chip(index = 0) { return nodes.rail.children[index]; },
     drag(chip, type, transfer = true) {
       const data = new Map();
@@ -567,6 +572,26 @@ function makeIslandDragHarness() {
   assert.strictEqual(harness.sent.at(-1).type, "collapse");
 }
 
+{
+  const controller = new JamDeckPlugin.IslandModeController({ app: {}, settings: {} });
+  controller.computeIslandBounds = () => ({ x: 0, y: 0, width: 1600, height: 72 });
+  const handlers = new Map();
+  const remote = { BrowserWindow: class {
+    constructor() {
+      this.webContents = { id: 7, session: { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} }, on() {} };
+    }
+    on(name, fn) { handlers.set(name, fn); }
+    setContentProtection() {}
+  } };
+  const oldWindow = controller.createIslandWindow(remote);
+  const newWindow = {};
+  controller.islandWindow = newWindow; controller.active = true;
+  controller.finishExit = () => assert.fail("old close event must not exit the replacement island");
+  handlers.get("closed")();
+  assert.strictEqual(controller.islandWindow, newWindow, "late closure must preserve the replacement window");
+  assert.notStrictEqual(oldWindow, newWindow);
+}
+
 function makeIslandLifecycleHarness() {
   const body = { classList: { contains: () => false }, ownerDocument: { documentElement: { classList: { contains: () => false } } } };
   const view = {
@@ -602,6 +627,8 @@ function makeIslandLifecycleHarness() {
     openDeck: async () => {},
     formatTime: () => "",
     imageMimeFromName: () => "image/png",
+    appearanceCalls: 0,
+    applyAppearance() { this.appearanceCalls += 1; },
   };
   const controller = new JamDeckPlugin.IslandModeController(plugin);
   const children = [];
@@ -633,6 +660,77 @@ function makeIslandLifecycleHarness() {
 async function testIslandLifecycle() {
   {
     const harness = makeIslandLifecycleHarness();
+    harness.plugin.settings.skin = "glass";
+    harness.controller.loadIslandWindow = async () => {};
+    let ready, stopped = 0;
+    harness.controller.createGlassMaterial = () => ({ start: () => new Promise(resolve => { ready = resolve; }), update() {}, stop() { stopped++; } });
+    const entering = harness.controller.enter();
+    await Promise.resolve();
+    assert.equal(harness.mainWindow.hideCalls, 0, "workbench stays visible while native material starts");
+    harness.controller.destroy();
+    ready();
+    assert.equal(await entering, false, "native readiness after unload cannot resurrect the island");
+    assert.equal(stopped, 1, "unload stops a starting native helper");
+    assert.equal(harness.mainWindow.hideCalls, 0);
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    harness.plugin.settings.skin = "glass";
+    harness.controller.loadIslandWindow = async () => {};
+    let stopped = 0;
+    harness.controller.createGlassMaterial = () => ({ start: async () => { throw Error("native launch failed"); }, update() {}, stop() { stopped++; } });
+    const original = console.error; console.error = () => {};
+    try { assert.equal(await harness.controller.enter(), false); } finally { console.error = original; }
+    assert.equal(stopped, 1);
+    assert.equal(harness.mainWindow.hideCalls, 0, "native failure leaves workbench accessible");
+    assert(harness.children[0].destroyed);
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
+    harness.plugin.settings.skin = "glass";
+    harness.controller.loadIslandWindow = async () => {};
+    let stopped = 0;
+    const updates = [];
+    harness.controller.createGlassMaterial = () => ({ start: async () => {}, update: visible => updates.push(visible), stop() { stopped++; } });
+    assert(await harness.controller.enter());
+    assert.equal(updates.at(-1), true);
+    harness.controller.syncGlassMaterial({ glass: true, collapsed: true });
+    assert.equal(updates.at(-1), false, "collapse removes the full native blur surface");
+    harness.controller.finishExit(true);
+    assert.equal(stopped, 1, "external island window close also releases native material");
+    assert.equal(harness.mainWindow.showCalls, 1);
+  }
+  {
+    const {controller, plugin}=makeIslandLifecycleHarness();
+    plugin.settings.skin="glass";
+    controller.displayBounds={x:0,y:0,width:1920,height:1080};
+    controller.getElectronRemote=()=>({nativeTheme:{shouldUseDarkColors:true}});
+    const effects=[],bounds=[],passthrough=[];
+    controller.islandWindow={isDestroyed:()=>false,setBounds:b=>bounds.push(b),setBackgroundColor(){},
+      setBackgroundMaterial:m=>effects.push(m),setVibrancy:m=>effects.push(m),
+      setIgnoreMouseEvents:v=>passthrough.push(v),focus(){}};
+    controller.active=true;
+    controller.startLeaveWatch=()=>{};
+    controller.sendState=()=>controller.syncWindowBounds(controller.buildSurfaceState());
+    const state=controller.buildSurfaceState();
+    assert(state.glass&&state.dark,"clear glass text follows the native system theme");
+    controller.sendState();controller.sendState();
+    assert.equal(bounds.length,1,"countdown updates must not resize the window");
+    assert.equal(bounds[0].height,72,"glass window matches its visible surface");
+    assert.equal(bounds[0].width,1600);
+    controller.collapse();
+    assert.equal(bounds.at(-1).height,10,"collapsed native window immediately releases the tall hit area");
+    assert.equal(bounds.at(-1).width,1120);
+    assert.equal(passthrough.at(-1),true);
+    assert.equal(controller.peekBoundsTimer,0,"glass does not leave a morph timer pending");
+    controller.expand();
+    assert.equal(bounds.at(-1).height,72);assert.equal(passthrough.at(-1),false);
+    plugin.settings.skin="spatial";controller.sendState();
+    assert.equal(bounds.at(-1).height,112,"switching back restores the paper shadow geometry");
+    assert.equal(effects.length,0,"no rectangular OS backdrop may be added in either skin");
+  }
+  {
+    const harness = makeIslandLifecycleHarness();
     let releaseLoad;
     harness.controller.loadIslandWindow = () => new Promise((resolve) => { releaseLoad = resolve; });
     const first = harness.controller.enter();
@@ -641,6 +739,7 @@ async function testIslandLifecycle() {
     assert.strictEqual(harness.children.length, 1, "double-click must create only one island BrowserWindow");
     releaseLoad();
     assert.strictEqual(await first, true, "first island enter should complete after its child is ready");
+    assert.strictEqual(harness.plugin.appearanceCalls, 1, "entering island mode must explicitly suspend wallpaper even when Electron visibility stays visible");
     assert.strictEqual(harness.mainWindow.hideCalls, 1, "workbench must hide only after island load succeeds");
     assert.deepStrictEqual(harness.mainWindow.webContents.throttleCalls, [false], "hidden workbench renderer must disable throttling");
     harness.controller.exit();
@@ -3589,8 +3688,207 @@ async function testArchiveIntegration() {
   assert.strictEqual(customWorkRef.kind, "work-daily-v3", "work archive ref must use the unified simple kind");
 }
 
+// Daily routine templates: data shape, spawn idempotence and the cross-midnight
+// sweep. Source assertions alone cannot prove idempotence, so the plan helper and
+// the plugin method both run for real here.
+assert(pluginSource.includes("deckRoutines: []"), "settings must ship a daily routine template list");
+assert(pluginSource.includes("function jamDeckPlanRoutineSpawns"), "routine spawning must go through a testable pure planner");
+assert(pluginSource.includes("await this.ensureRoutineTasksForToday();") && pluginSource.includes("this.startRoutineDayWatch();"), "onload must spawn today's routines and keep watching for the date to roll over");
+assert(pluginSource.includes("class RoutineManagerModal"), "daily routines must have their own management dialog");
+assert(pluginSource.includes('new RoutineManagerModal(this.app, this.plugin).open()'), "the tasks widget must expose the routine manager");
+assert(styleSource.includes(".modal.jam-deck-routine-modal-shell") && styleSource.includes(".jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb"), "the routine dialog must join the shared dialog material and the six scrollbar host lists");
+assert(!pluginSource.includes("dueDate: today") || !pluginSource.includes("task.routineId = routine.id"), "routine instances must not claim a due date and flood the calendar heat map");
+// Ticking marks complete; archiving is a separate end-of-day settlement.
+assert(!pluginSource.includes("if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);"), "ticking must only mark the task complete; archiving is the deliberate settlement step");
+assert(pluginSource.includes('makeToolbarLabel') || pluginSource.includes('text: "详情"'), "the archive viewer must now sit behind 详情");
+assert(pluginSource.includes('text: "归档", cls: "jam-deck-widget-action", attr: { title: "结算今天：把已完成的待办归档" }') && pluginSource.includes("new DayReceiptModal(this.app, this.plugin).open()"), "归档 must open the day-settlement receipt");
+assert(pluginSource.includes("async archiveCompletedTasks()") && /failed \+= 1;/.test(pluginSource), "batch archiving must run per task and report failures instead of silently dropping them");
+assert(pluginSource.includes("this.strikingTaskId = completed ? null : task.id;") && pluginSource.includes("this.plugin.strikingTaskId = null;"), "the marker stroke must be a one-shot flag consumed at render, or every re-render replays it on all completed rows");
+// Ticking must not reorder the list: a row that jumps plays its stroke outside
+// the visible area, which defeats the whole point of the animation.
+assert(!pluginSource.includes("for (const task of [...active, ...completed])"), "completed tasks must not be re-sorted to the end of the list on tick");
+assert(/const rows = \[\.\.\.shown\.filter\(\(task\) => !task\.routineId\), \.\.\.shown\.filter\(\(task\) => task\.routineId\)\];/.test(pluginSource), "row order must depend only on routine grouping, never on completion state");
+// A full re-render swaps the widget DOM, so the new body starts at scrollTop 0
+// and the list snaps back to the top — measured: 400 -> 0, sameNode false.
+assert(pluginSource.includes("keepBodyScroll(body, widget.id);") && pluginSource.includes("widgetScrollMemory"), "widget bodies must remember their scroll position across re-renders");
+// Restore runs synchronously after the whole grid is built. rAF is banned here:
+// Electron suspends it while the window is in the background (measured: not a
+// single frame in 600ms), so the scroll position would silently stay lost.
+assert(pluginSource.includes("restoreWidgetScrolls()") && /this\.enableLayoutSashes\(grid\);\s*this\.restoreWidgetScrolls\(\);/.test(pluginSource), "scroll restore must run after every widget is built, not per widget");
+{
+  const start = pluginSource.indexOf("restoreWidgetScrolls() {");
+  const restoreBody = pluginSource.slice(start, pluginSource.indexOf("\n  }", start));
+  assert(start > 0 && !restoreBody.includes("requestAnimationFrame"), "scroll restore must not depend on requestAnimationFrame; it never fires when the window is backgrounded");
+}
+assert(/for \(const el of this\.contentEl\.querySelectorAll\("\.jam-deck-widget"\)\)[\s\S]*?body\.scrollHeight > body\.clientHeight\) body\.scrollTop = saved;/.test(pluginSource), "restore must read scrollHeight to force layout and only write when the body can actually scroll");
+assert(/\.jam-deck-root \.jam-deck-task\.is-completed \.jam-deck-task-title \{\s*text-decoration: none;/.test(styleSource), "completion must read as a marker stroke, not a plain line-through");
+// A single gradient with opaque ends reads as a geometric bar. Three offset
+// bands with fully transparent ends give the stroke a start and an end.
+assert(styleSource.includes("background-position: 0 46%, 0 2%, 0 92%;") && styleSource.includes("background-size: 100% 62%, 100% 24%, 100% 20%;"), "the stroke must be built from three offset bands, not one rectangle");
+assert(/@keyframes jam-deck-marker-strike \{\s*from \{ background-size: 0% 62%, 0% 24%, 0% 20%; \}\s*55% \{/.test(styleSource), "all three bands must animate background-size only, with the bleed layers lagging behind the main stroke");
+// The band is wider than the glyphs, so it has to stay translucent enough to
+// read through; and the title must size to its text or the stroke overshoots.
+assert(!/var\(--jd-accent\) (6[0-9]|[7-9][0-9]|100)%, transparent\) \d+%,[\s\S]{0,400}?background-position: 0 46%/.test(styleSource), "no band may exceed ~60% opacity, otherwise the thicker stroke hides the text");
+// The checkbox celebrates on the same beat as the stroke, reusing .is-striking
+// so it fires exactly once. Only background-color / box-shadow / opacity, so no
+// transform exception is needed.
+assert(styleSource.includes(".jam-deck-root .jam-deck-task.is-striking .jam-deck-task-check {") && styleSource.includes("animation: jam-deck-check-fill"), "ticking must animate the checkbox, not just the title");
+assert(/@keyframes jam-deck-check-fill \{[\s\S]*?box-shadow: 0 0 0 0 color-mix[\s\S]*?box-shadow: 0 0 0 7px transparent;/.test(styleSource), "the fill must ripple out through box-shadow rather than a transform");
+assert(styleSource.includes("animation: jam-deck-check-mark 200ms cubic-bezier(.22, 1, .36, 1) 90ms both;") && /@keyframes jam-deck-check-mark \{\s*from \{ opacity: 0; \}/.test(styleSource), "the tick itself must fade in slightly after the box fills");
+// The two-step dimming was reverted at Jam's request.
+assert(/\.jam-deck-task\.is-completed \.jam-deck-task-main \{\s*color: var\(--jd-muted\);/.test(styleSource), "completed rows keep --jd-muted; the extra two-step dimming was rolled back");
+assert(!styleSource.includes("color-mix(in srgb, var(--jd-faint) 62%, transparent)"), "no leftover of the reverted two-step dimming");
+assert(styleSource.includes(".jam-deck-task-title { min-width: 0; flex: 0 1 auto;"), "the title must size to its content, otherwise the stroke runs past the text");
+// Obsidian centres native buttons; once the title stops growing that centring
+// becomes visible, so the row has to pin itself to the start explicitly.
+assert(/\.jam-deck-task-main \{[^}]*justify-content: flex-start;/.test(styleSource), "task rows must pin content to the start; the theme centres native buttons and text-align does not apply to flex containers");
+assert(/\.jam-deck-task-due \{ flex: 0 0 auto; margin-left: auto;/.test(styleSource), "the due date must be pushed right once the title stops growing");
+// The stroke lives on ::after because the ragged edge comes from a mask, and a
+// mask on the title itself would eat the text too.
+assert(styleSource.includes(".jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title::after {") && styleSource.includes(".jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title::after {"), "the marker stroke and its animation must target the pseudo-element, not the text node");
+assert(styleSource.includes("-webkit-mask-composite: source-in;") && styleSource.includes("mask-composite: intersect;"), "the two mask layers must intersect; added together they would brighten the band instead of chewing its edge");
+assert(/repeating-linear-gradient\(91deg,/.test(styleSource), "the fibre texture must sit slightly off-vertical so the edge does not read as machine-cut");
+// Motion follows the plugin toggle, never the OS setting. Inside the workbench
+// .jam-deck-no-motion handles it; the receipt dialog mounts outside the root,
+// so the animation class is withheld in JS instead.
+assert(pluginSource.includes("return this.plugin.settings.animationsEnabled !== false;")
+  && pluginSource.includes('if (this.animated) this.containerEl.addClass("is-animated");')
+  && pluginSource.includes('contentEl.toggleClass("is-printing", !this.printed && this.animated);'), "dialogs outside .jam-deck-root must gate animation on the plugin's own toggle");
+// The slip slides out of a printer slot in bursts: the clip inset tracks the
+// translate so the visible edge stays pinned under the slot, and the held
+// keyframe pairs are the stops between bursts.
+const receiptFeed = styleSource.match(/@keyframes jam-deck-receipt-feed \{[\s\S]*?\n\}/)?.[0] || "";
+assert(pluginSource.includes('contentEl.createDiv({ cls: "jam-deck-receipt-slot"') && styleSource.includes(".jam-deck-receipt-modal.is-printing .jam-deck-receipt-slot {"), "the slip must feed out of a printer slot");
+assert(receiptFeed.includes("transform: translateY(-100%); clip-path: inset(100% 0 0 0);") && (receiptFeed.match(/\d+%, \d+% \{/g) || []).length >= 3, "the feed must slide out of the slot in bursts with stops between them");
+// Opening and closing are animated too; Obsidian's close() removes the
+// container synchronously, so the dialog defers it until the exit plays.
+assert(styleSource.includes(".jam-deck-receipt-container.is-animated .modal-bg {") && styleSource.includes(".jam-deck-receipt-container.is-closing .modal {"), "the receipt dialog must animate its backdrop in and itself out");
+assert(/close\(\) \{\s*if \(this\.closing\) return;\s*this\.closing = true;\s*if \(!this\.animated\) \{\s*super\.close\(\);\s*return;\s*\}\s*this\.containerEl\.addClass\("is-closing"\);\s*window\.setTimeout\(\(\) => super\.close\(\), jamDeckAnimationMs\(this\.modalEl\)\);/.test(pluginSource), "close must wait for the exit animation, and close at once with animations off");
+// Settling is one timeline (seal, tugs, tear, swing, flick) and only plays
+// once every item archived; its length is read back from CSS, not duplicated.
+assert(styleSource.includes("@keyframes jam-deck-receipt-settle") && styleSource.includes("@keyframes jam-deck-receipt-seal") && styleSource.includes(".jam-deck-receipt-container.is-settling .jam-deck-receipt {"), "confirming the archive must seal and tear the slip off");
+assert(/if \(this\.animated\) \{\s*paper\.createDiv\(\{ text: "已 结 算", cls: "jam-deck-receipt-seal"[^\n]*\n\s*this\.containerEl\.addClass\("is-settling"\);\s*await new Promise\(\(resolve\) => window\.setTimeout\(resolve, jamDeckAnimationMs\(paper\)\)\);\s*\}\s*this\.close\(\);/.test(pluginSource), "the settle must play before closing, and be skipped with animations off");
+assert(/if \(failed\) \{\s*new Notice\([^\n]*\n\s*this\.render\(\);\s*return;\s*\}/.test(pluginSource), "a partial failure must not play the settle; the slip stays for a retry");
+assert(!/JAM_DECK_RECEIPT_\w+_MS/.test(pluginSource), "receipt animation durations must live only in styles.css");
+// Obsidian's `.modal-container.mod-dim .modal` (0,3,0) shadows the shell; the
+// rectangle shows through while the slip feeds and after it is flicked away.
+assert(styleSource.includes(".modal-container.jam-deck-receipt-container > .modal.jam-deck-receipt-modal-shell { box-shadow: none; }"), "the transparent receipt shell must out-rank Obsidian's dimmed-modal shadow");
+assert(!/\.jam-deck-(task\.is-striking|receipt)[^{]*\{[^}]*\}\s*\}?\s*@media \(prefers-reduced-motion/.test(styleSource), "new animations must not consult the OS reduced-motion setting");
+assert(fs.readFileSync(path.join(projectRoot, "docs", "VISUAL_DESIGN.md"), "utf8").includes("日结单动效是限定例外"), "the receipt's transform/clip-path animation must be declared as a scoped exception in the spec");
+assert(styleSource.includes(".jam-deck-receipt-modal:hover *::-webkit-scrollbar-thumb,") && styleSource.includes(".jam-deck-receipt-modal, .jam-deck-shortcut-modal"), "the receipt dialog must join every scrollbar host list");
+// Obsidian draws checkboxes with `appearance: none` and paints :checked via
+// background-color plus a masked ::after, so accent-color is inert here.
+// These assertions pin the rules that actually render; an accent-color-only
+// assertion passed while the tick stayed purple.
+assert(styleSource.includes(".jam-deck-root :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):checked,")
+  && styleSource.includes(".jam-deck-routine-modal .jam-deck-routine-toggle:checked {")
+  && /:checked \{\s*background-color: var\(--jd-accent\);\s*border-color: var\(--jd-accent\);/.test(styleSource),
+  "every Jam Deck checkbox must paint its checked box with the brand green, not the theme accent");
+assert(/:checked::after,\s*\.jam-deck-routine-modal \.jam-deck-routine-toggle:checked::after \{\s*background-color: var\(--jd-accent-ink\);/.test(styleSource),
+  "the tick itself must switch to the dark ink counterpart; white on fluorescent green is unreadable");
+assert(!styleSource.includes("input[type=\"checkbox\"]:checked"), "checkbox overrides must list Jam Deck classes explicitly so embedded Canvas task lists stay untouched");
+assert(/\.modal\.jam-deck-routine-modal-shell \{[^}]*--jd-accent-ink: #183000;/.test(styleSource), "dialog shells must expose --jd-accent-ink, otherwise the tick colour cannot resolve outside .jam-deck-root");
+// Only states measured as live in a running Obsidian are pinned here. The edit
+// border and the task drop targets read ink/grey/transparent at runtime — the
+// .jam-deck-root layer wins on order — so they stay untouched zombies rather
+// than recoloured fakes.
+assert(!/\.jam-deck-(launcher-dropzone\.is-drop-target::after|picker-item:hover)[^{]*\{[^}]*var\(--interactive-accent\)/.test(styleSource.replace(/var\(--jd-accent, var\(--interactive-accent\)\)/g, "TOKEN")), "states confirmed live (launcher drop hint, widget picker hover) must use the brand green");
+assert(styleSource.includes("Dead rule: the later .jam-deck-root override wins"), "zombie accent rules must stay annotated instead of silently recoloured");
+// Row actions must not render as framed boxes. The flat-era rule claimed
+// `background: transparent` yet measured white with a border plus the theme's
+// inset outline, so the override needs the !important trio.
+assert(/\.jam-deck-root :is\(\.jam-deck-task-archive, \.jam-deck-task-delete\) \{\s*border: 0 !important;[\s\S]*?background: transparent !important;\s*box-shadow: none !important;/.test(styleSource), "task row actions must drop the theme's white fill, border and inset outline");
+assert(/\.jam-deck-root \.jam-deck-task-delete:hover \{\s*background: color-mix\(in srgb, var\(--text-error\) 12%, transparent\);\s*color: var\(--text-error\);/.test(styleSource), "the delete action must express danger through a low-contrast wash, not a permanent frame");
+assert(!/\.jam-deck-root \.jam-deck-task-(archive|delete):hover \{[^}]*!important/.test(styleSource), "row-action hover must stay free of !important so the glass skin's own danger palette keeps winning");
+
+function testDayReceipt() {
+  const collect = JamDeckPlugin.collectDayReceipt;
+  const at = (h) => new Date(2026, 8, 27, h, 30).getTime();
+  const yesterday = new Date(2026, 8, 26, 21, 0).getTime();
+  const tasks = [
+    { id: "a", text: "早", status: "completed", completedAt: at(9) },
+    { id: "b", text: "晚", status: "completed", completedAt: at(18) },
+    { id: "c", text: "今天已归档", status: "archived", archivedAt: at(12) },
+    { id: "d", text: "昨天归档", status: "archived", archivedAt: yesterday },
+    { id: "e", text: "靠 targetDate 认领", status: "archived", archivedAt: null, archiveTargetDate: "2026-09-27" },
+    { id: "f", text: "还没做", status: "active" },
+    { id: "g", text: "墓碑", status: "completed", completedAt: at(10), tombstone: true },
+  ];
+  const receipt = collect(tasks, "2026-09-27");
+  assert.deepStrictEqual(receipt.pending.map((t) => t.id), ["a", "b"], "pending must hold today's completed-but-unarchived tasks in time order");
+  assert.deepStrictEqual(receipt.archived.map((t) => t.id).sort(), ["c", "e"], "archived must pick up today's slips by timestamp or by archive target date");
+  assert(!receipt.archived.some((t) => t.id === "d"), "yesterday's archive must not leak into today's receipt");
+  assert(!receipt.pending.some((t) => t.id === "g"), "tombstoned tasks must never reach the receipt");
+  assert.strictEqual(receipt.total, 4, "total counts the whole day, both freshly finished and already filed");
+  assert.deepStrictEqual(collect(null, "2026-09-27"), { pending: [], archived: [], total: 0 }, "a missing task list must not throw");
+}
+
+function testRoutinePlanner() {
+  const plan = JamDeckPlugin.planRoutineSpawns;
+  const routines = [
+    JamDeckPlugin.normalizeRoutine({ id: "r-a", text: "A" }),
+    JamDeckPlugin.normalizeRoutine({ id: "r-b", text: "B", enabled: false }),
+  ];
+  assert.deepStrictEqual(plan(routines, [], "not-a-date"), { create: [], drop: [] }, "an invalid today must produce no plan at all");
+  const first = plan(routines, [], "2026-09-27");
+  assert.deepStrictEqual(first.create.map((r) => r.id), ["r-a"], "disabled templates must not spawn");
+  const spawned = [{ id: "t1", routineId: "r-a", spawnDate: "2026-09-27", status: "active" }];
+  assert.strictEqual(plan(routines, spawned, "2026-09-27").create.length, 0, "a template already spawned today must not spawn twice");
+  const next = plan(routines, spawned, "2026-09-28");
+  assert.deepStrictEqual(next.drop, ["t1"], "yesterday's unchecked routine card must be swept");
+  assert.deepStrictEqual(next.create.map((r) => r.id), ["r-a"], "a new day must spawn the template again");
+  const done = [{ id: "t1", routineId: "r-a", spawnDate: "2026-09-27", status: "completed" }];
+  assert.deepStrictEqual(plan(routines, done, "2026-09-28").drop, [], "completed check-ins are records and must survive the sweep");
+}
+
+async function testDailyRoutines() {
+  const plugin = new JamDeckPlugin();
+  plugin.settingsSaveQueue = Promise.resolve();
+  plugin.saveData = async () => {};
+  plugin.renderAllViews = () => {};
+  let today = "2026-09-27";
+  plugin.formatLocalDate = () => today;
+  plugin.settings = {
+    deckTasks: [{ id: "manual-1", text: "手动待办", status: "active", routineId: null, spawnDate: null }],
+    deckRoutines: [
+      JamDeckPlugin.normalizeRoutine({ id: "r-sleep", text: "睡够 8 小时", category: "life" }),
+      JamDeckPlugin.normalizeRoutine({ id: "r-ai", text: "AI 发布 1 条作品", category: "work" }),
+      JamDeckPlugin.normalizeRoutine({ id: "r-off", text: "停用项", enabled: false }),
+    ],
+  };
+
+  assert.strictEqual(await plugin.ensureRoutineTasksForToday(), true, "the first run of the day must spawn");
+  const spawned = plugin.settings.deckTasks.filter((task) => task.routineId);
+  assert.strictEqual(spawned.length, 2, "only enabled templates spawn");
+  assert(spawned.every((task) => task.dueDate === null), "routine instances must stay off the calendar heat map");
+  assert(spawned.every((task) => task.spawnDate === today), "routine instances must record the day they belong to");
+  assert.strictEqual(spawned.find((task) => task.routineId === "r-ai").category, "work", "the template category must reach the instance");
+
+  assert.strictEqual(await plugin.ensureRoutineTasksForToday(), false, "a second run on the same day must be a no-op");
+  assert.strictEqual(plugin.settings.deckTasks.filter((task) => task.routineId).length, 2, "re-entry must not duplicate today's cards");
+
+  // Yesterday: one checked off, one left untouched.
+  plugin.settings.deckTasks.find((task) => task.routineId === "r-sleep").status = "completed";
+  today = "2026-09-28";
+  assert.strictEqual(await plugin.ensureRoutineTasksForToday(), true, "crossing midnight must refresh the deck");
+  const yesterdayLeft = plugin.settings.deckTasks.filter((task) => task.spawnDate === "2026-09-27");
+  assert.deepStrictEqual(yesterdayLeft.map((task) => task.routineId), ["r-sleep"], "only the completed check-in survives the night");
+  assert.strictEqual(plugin.settings.deckTasks.filter((task) => task.spawnDate === "2026-09-28").length, 2, "the new day gets a fresh set");
+  assert(plugin.settings.deckTasks.some((task) => task.id === "manual-1"), "manual tasks must never be swept by the routine pass");
+
+  await plugin.updateDeckRoutine("r-ai", { enabled: false });
+  assert(!plugin.settings.deckTasks.some((task) => task.routineId === "r-ai" && task.status === "active"), "disabling a template must pull its unfinished card off the deck");
+
+  await plugin.removeDeckRoutine("r-sleep");
+  assert.strictEqual(plugin.settings.deckRoutines.length, 2, "removing a template must drop exactly one entry");
+  assert(plugin.settings.deckTasks.some((task) => task.routineId === "r-sleep" && task.status === "completed"), "deleting a template must keep the archived check-in history");
+  assert(!plugin.settings.deckTasks.some((task) => task.routineId === "r-sleep" && task.status === "active"), "deleting a template must pull its unfinished card");
+}
+
 testCanvasCreateName();
-testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
+testRoutinePlanner();
+testDayReceipt();
+testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testDailyRoutines()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
   console.error(error);

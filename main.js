@@ -903,8 +903,1047 @@ function jamDeckTypographyValues(settings = {}) {
   return values;
 }
 
+/* Hyalite 0.5.0, commit b9f27192a7256bf5295bf027b582b86864f9b59d.
+ * https://github.com/VII-Cae/hyalite--liquid-glass
+ * Bundled here to preserve Obsidian's standard three-file installation.
+ * Jam Deck changes: window-scoped factory, unique IDs, bounded idle cache, complete disposal.
+MIT License
+
+Copyright (c) 2026 VII-Cae (VII)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+function jamDeckCreateGlassEngine(ownerWindow) {
+  const { document, navigator, CSS, ResizeObserver, MutationObserver, performance } = ownerWindow;
+  const getComputedStyle = ownerWindow.getComputedStyle.bind(ownerWindow);
+  const matchMedia = ownerWindow.matchMedia.bind(ownerWindow);
+  const requestAnimationFrame = ownerWindow.requestAnimationFrame.bind(ownerWindow);
+  const setTimeout = ownerWindow.setTimeout.bind(ownerWindow);
+  const clearTimeout = ownerWindow.clearTimeout.bind(ownerWindow);
+  const instanceId = crypto.randomUUID();
+  const VAR = '--hyalite', VAR_EDGE = '--hyalite-edge';
+  const N_GLASS = 1.5;             // refractive index of ordinary glass
+  /* Defaults are the set VII-Cae tuned by eye on 2026-09-10: a narrow bevel over a very thick slab,
+     with a folding slope. The centre stays clear while the edge concentrates the backdrop into a
+     coloured band; the folding is confined to that narrow rim, where blur and dispersion cover the
+     staircase Chromium's nearest-neighbour sampler leaves behind. */
+  const DEFAULTS = { bevel: 37, thickness: 59, slope: 2.7, shape: 'squircle', blur: 1, dispersion: 1.6,
+                     shade: 0.46, rim: 1.76, edgeW: 8, sat: 0.86, edge: 0.32, light: -140, smooth: 1,
+                     materialize: 0, settle: 0, self: false };
+  const LIMITS = { bevel: [1, 400], thickness: [0, 400], slope: [0.2, 4], blur: [0, 64], dispersion: [0, 8],
+                   shade: [0, 2], rim: [0, 4], edgeW: [0.5, 64], sat: [0, 3], edge: [0, 2], light: [-180, 180],
+                   smooth: [0, 4], materialize: [0, 10000], settle: [0, 10000] };
+  const SHAPES = ['circle', 'squircle', 'lip'];
+  /* Ratios inside `shade` and `rim`, and the three constants that came out of the same tuning pass.
+     They are deliberately not options: the *balance* between them is what took the tuning, and two
+     knobs that have to move together are worse than one. Change them here if you disagree.
+     `sat` is an option rather than a constant because it fights a different thing — folding plus
+     dispersion muddies the colour along the rim, and how much depends on what is behind the glass. */
+  const ABSORB = 0.50 / 0.46;      // Fresnel transmission loss, as a share of `shade`
+  const GLOW = 0.40 / 1.76;        // the wide Fresnel glow, as a share of `rim`
+  const SHARP = 44;                // exponent of the tight specular line
+  const LIP = 0.3;                 // how far the lip profile dips in the middle
+  const AA_SLOPE = 0.3;            // rule 4: the ring blur is fully on where the inner pass still stretches ≥ ~1.4×
+  const LIVE_MIN_MS = 90;          // live mode: at most one rebuild per this many ms while the size keeps moving
+  const MAX_MAP_PX = 320000;       // ≈ 565×565: larger elements get a downsampled map
+  const QZ = 1.02, QZ_MIN = 64;    // map size buckets: ≤ 2 % per side; elements this small stay exact
+  const LOG_QZ = Math.log(QZ);
+  const MAX_IDLE_MAPS = 8;        // maps nobody uses stay warm this many deep, then go oldest-first
+
+  let host = null;                 // hidden <svg> holding every <filter>
+  let seq = 0, optsGen = 0, lastInfo = null;
+  const filters = new Map();       // filterKey → { id, refs, el, mapKey }
+  const maps = new Map();          // mapKey → { url, maxd, refs, key }
+  const idleMaps = new Map();      // the subset of `maps` with refs === 0, in eviction order
+  const bound = new Map();         // element → state
+  const watchers = new Set();
+
+  /* Light direction from an angle: 0° = straight above, positive = clockwise (screen y points down) */
+  const lightOf = (deg) => { const a = deg * Math.PI / 180; return [Math.sin(a), -Math.cos(a)]; };
+  /* Size bucket: monotone, never below v, within QZ of it. Small elements are returned untouched. */
+  const qz = (v) => v <= QZ_MIN ? v : Math.max(v, Math.ceil(Math.pow(QZ, Math.ceil(Math.log(v) / LOG_QZ - 1e-9))));
+
+  function sanitize(o) {
+    const s = Object.assign({}, o);
+    for (const k in LIMITS) if (k in s) {
+      const v = +s[k], lim = LIMITS[k];
+      s[k] = Number.isFinite(v) ? Math.min(lim[1], Math.max(lim[0], v)) : DEFAULTS[k];
+    }
+    if ('self' in s) s.self = !!s.self;
+    if ('shape' in s && SHAPES.indexOf(s.shape) < 0) s.shape = DEFAULTS.shape;
+    return s;
+  }
+
+  function ensureHost() {
+    if (host) return host;
+    host = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    host.setAttribute('aria-hidden', 'true');
+    host.classList.add('jam-deck-glass-filters');
+    // must not be display:none — Blink ignores <filter>s inside a display:none <svg>
+    host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  /* Signed distance to a rounded rect with per-corner radii (negative inside). r = [tl, tr, br, bl] */
+  function makeSDF(W, H, r) {
+    const cx = W / 2, cy = H / 2;
+    return (x, y) => {
+      const dx = x - cx, dy = y - cy;
+      const R = dx < 0 ? (dy < 0 ? r[0] : r[3]) : (dy < 0 ? r[1] : r[2]);
+      const qx = Math.abs(dx) - (W / 2 - R), qy = Math.abs(dy) - (H / 2 - R);
+      const ox = Math.max(qx, 0), oy = Math.max(qy, 0);
+      return Math.min(Math.max(qx, qy), 0) + Math.hypot(ox, oy) - R;
+    };
+  }
+
+  /* Bevel surface height H(x): x = 0 at the outer rim (lowest), 1 at the inner edge where it meets
+     the slab. Only H' matters for the tilt; H itself gives the glass left above the ray. */
+  const Hc = (t) => Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t)));            // quarter circle
+  const Hs = (t) => Math.pow(Math.max(0, 1 - Math.pow(1 - t, 4)), 0.25);      // squircle — Apple's
+  function heightFn(shape) {
+    if (shape !== 'lip') return shape === 'squircle' ? Hs : Hc;
+    /* A raised rim over a shallow dip. The perturbation has to reach zero in *both* value and
+       slope at each end, or the bevel does not meet the slab and the join shows as a crease:
+       sin²(πt)·cos(πt) is 0 with 0 derivative at t = 0 and 1, and changes sign in the middle —
+       which is what tips the surface back the other way and gives the second pair of bands. */
+    return (t) => Hc(t) + LIP * Math.pow(Math.sin(Math.PI * t), 2) * Math.cos(Math.PI * t);
+  }
+  /* Fresnel reflectance, unpolarised average: → 1 at grazing incidence, 0.04 head-on. */
+  function fresnel(a) {
+    a = Math.abs(a);
+    const st = Math.sin(a) / N_GLASS;
+    if (st >= 1) return 1;
+    if (a < 1e-4) return 0.04;
+    const b = Math.asin(st);
+    const rs = Math.sin(a - b) / Math.sin(a + b), rp = Math.tan(a - b) / Math.tan(a + b);
+    return Math.min(1, (rs * rs + rp * rp) / 2);
+  }
+  /* Refraction profile (Snell's law): a slab of thickness T0 under a bevel of width and height B.
+     A vertical view ray refracts toward the surface normal, then crosses the glass left above it:
+     offset = remaining thickness × tan(α − β). With `lip` the tilt goes negative in the middle and
+     the offset pushes outward instead — the height used for the thickness stays the monotone
+     quarter-circle envelope, since only the tilt reverses, not the amount of glass. */
+  function profile(d, B, T0, H) {
+    const x = Math.min(1, Math.max(0, d / B)), e = 1e-3;
+    const x1 = Math.min(1, x + e), x0 = Math.max(0, x - e);
+    const alpha = Math.atan((H(x1) - H(x0)) / (x1 - x0));
+    const beta = Math.sign(alpha) * Math.asin(Math.min(1, Math.sin(Math.abs(alpha)) / N_GLASS));
+    return { disp: (T0 + B * Hc(x)) * Math.tan(alpha - beta), alpha };
+  }
+
+  /* Build the maps. Returns { url, maxd, inner: { url, maxd }, split, twoPass }
+     `url` is the one-pass field: R/G = offset ÷ maxd, B = the signed edge profile (128 = neutral,
+     above = additive light, below = multiplicative shade). `inner` is the first pass of rule 4. */
+  function buildMap(W, H, radii, o) {
+    /* Rule 2 used to clamp the bevel to the largest corner radius. It no longer does: Apple's glass
+       is a lens across the whole element — a circular key bends all the way to its centre — and a
+       bevel locked to the radius can never get there. The clamp is the short side's half; near a
+       corner tighter than the bevel the depth field still kinks on the medial axis, but the
+       direction field below is taken from a larger rectangle, so the crease stays faint. */
+    const B = Math.max(1, Math.min(o.bevel, Math.floor(Math.min(W, H) / 2) - 1));
+    const Hf = heightFn(o.shape);
+    // Displacement table with the slope constraint, built from the inner edge outward. Above 1 the
+    // field folds: the same backdrop appears twice, which is where the liquid swirls come from.
+    const STEP = 0.25, N = Math.ceil(B / STEP);
+    const tab = new Float64Array(N + 1); tab[N] = 0;
+    for (let i = N - 1; i >= 0; i--) tab[i] = Math.min(profile(i * STEP, B, o.thickness, Hf).disp, tab[i + 1] + o.slope * STEP);
+    const MAXD = Math.max(...Array.from(tab, Math.abs), 1e-6);
+    const lerp = (t, d) => { const f = Math.min(N - 1e-6, Math.max(0, d) / STEP), i = Math.floor(f), u = f - i; return t[i] * (1 - u) + t[i + 1] * u; };
+    const mAt = (d) => lerp(tab, d);
+
+    /* The signed edge profile. Positive is added as light, negative multiplies the backdrop down.
+       · caustic — the screen point at depth d samples d + m(d), so ds/dd = 1 + m′ < 1: the backdrop
+         is magnified and its energy spread thin. Derived from the field, not a taste knob. The
+         filter chain interpolates in sRGB, so the linear-light ratio has to be re-encoded (^1/2.2)
+         or a gain of 0.15 comes out as a near-black outline instead of a shade.
+       · loss — the share Fresnel reflects away instead of transmitting.
+       · glow + line — what comes back: a wide Fresnel sheen and a tight specular line at the rim.
+       All four are windowed to `edgeW` px. That window is in absolute pixels on purpose: a white
+       line and the dark hairline under it are one or two pixels of real glass whatever the bevel
+       is, and scaling them with the bevel is what turns a 41px rim into a grey band. */
+    const edge = new Float64Array(N + 1), gains = new Float64Array(N + 1);
+    for (let i = 0; i <= N; i++) {
+      const d = i * STEP, p = profile(d, B, o.thickness, Hf);
+      const gain = Math.max(0.02, 1 + (tab[Math.min(N, i + 1)] - tab[i]) / STEP);
+      const gainS = Math.pow(gain, 1 / 2.2); gains[i] = gainS;
+      const win = Math.exp(-2.5 * d / o.edgeW);
+      const t = Math.max(0, Math.sin(p.alpha));            // only an outward-facing slope catches the light
+      edge[i] = ((fresnel(p.alpha) * o.rim * GLOW + Math.pow(t, SHARP) * o.rim)
+               - ((1 - gainS) * o.shade + fresnel(p.alpha) * o.shade * ABSORB)) * win;
+    }
+    const eAt = (d) => lerp(edge, d);
+
+    // Rule 4 (two passes that melt the nearest-neighbour staircase) needs the field to be
+    // invertible; once it folds there is no split that composes back. Fold ⇒ single pass.
+    const twoPass = o.slope <= 1;
+    let sMax = 0;
+    for (let i = 0; i < N; i++) sMax = Math.max(sMax, (tab[i] - tab[i + 1]) / STEP);
+    const split = twoPass && sMax > 1e-6 ? (1 - Math.sqrt(1 - sMax)) / sMax : 0.5;
+    const tab1 = new Float64Array(N + 1);
+    if (twoPass) for (let j = 0; j <= N; j++) {
+      const y = j * STEP;
+      let lo = 0, hi = y <= split * MAXD ? 0 : B;
+      for (let it = 0; it < 24 && hi > lo; it++) { const mid = (lo + hi) / 2; if (mid + split * mAt(mid) < y) lo = mid; else hi = mid; }
+      tab1[j] = (1 - split) * mAt(hi);
+    }
+    const MAXD1 = Math.max(tab1[0], 1e-6);
+    const m1At = (d) => lerp(tab1, d);
+    const wAt = (d) => { const i = Math.floor(Math.min(N - 1e-6, Math.max(0, d) / STEP)); return Math.min(1, (tab1[i] - tab1[i + 1]) / STEP / AA_SLOPE); };
+
+    const sdf = makeSDF(W, H, radii);
+    /* Rule 3 widens the radii to smooth the direction field, capped at half the short side: past
+       that makeSDF's rounded-rect formula stops holding (W/2 − R goes negative) and the gradient
+       turns discontinuous on the axes — a circle showed it as a cross-shaped seam. */
+    const cap = Math.min(W, H) / 2 - 0.5;
+    const sdfDir = makeSDF(W, H, radii.map((R) => Math.min(R + B, cap)));
+    const k = Math.min(1, Math.sqrt(MAX_MAP_PX / (W * H)));
+    const MW = Math.max(2, Math.round(W * k)), MH = Math.max(2, Math.round(H * k));
+    const c = document.createElement('canvas'); c.width = MW; c.height = MH;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(MW, MH), d = img.data;
+    const img1 = ctx.createImageData(MW, MH), d1 = img1.data;
+    const e = 0.5, L = lightOf(o.light);
+    let m = 0, m1 = 0, w = 0, ee = 0;
+    const put = (x, y, ux, uy, lit) => {
+      const i = (y * MW + x) * 4;
+      d[i] = Math.round(128 + ux * m / MAXD * 127);
+      d[i + 1] = Math.round(128 + uy * m / MAXD * 127);
+      d[i + 2] = Math.round(Math.max(0, Math.min(255, 128 + lit * 127)));   // signed: 128 = neutral
+      d[i + 3] = 255;
+      d1[i] = Math.round(128 + ux * m1 / MAXD1 * 127);
+      d1[i + 1] = Math.round(128 + uy * m1 / MAXD1 * 127);
+      d1[i + 2] = Math.round(255 * w);
+      d1[i + 3] = 255;
+    };
+    /* Only the lit half is steered by the light — a shade is what the geometry took away and is the
+       same all round. Not mirror-symmetric, but recovering it costs one dot product per quadrant. */
+    const litOf = (gx, gy) => { if (ee <= 0) return ee; const f = gx * L[0] + gy * L[1]; return ee * (Math.max(0, f) * 0.78 + Math.max(0, -f) * 0.30); };
+    const sym = radii[0] === radii[1] && radii[1] === radii[2] && radii[2] === radii[3];
+    const XN = sym ? Math.ceil(MW / 2) : MW, YN = sym ? Math.ceil(MH / 2) : MH;
+    for (let y = 0; y < YN; y++) for (let x = 0; x < XN; x++) {
+      const px = (x + .5) / k, py = (y + .5) / k;
+      const depth = -sdf(px, py);
+      let gx = 0, gy = 0;
+      m = 0; m1 = 0; w = 0; ee = 0;
+      if (depth < B) {
+        const dd = Math.max(0, depth);
+        m = mAt(dd); m1 = twoPass ? m1At(dd) : 0; w = twoPass ? wAt(dd) : 0; ee = eAt(dd);
+        gx = (sdfDir(px + e, py) - sdfDir(px - e, py)) / (2 * e);
+        gy = (sdfDir(px, py + e) - sdfDir(px, py - e)) / (2 * e);
+        const gl = Math.hypot(gx, gy) || 1; gx /= gl; gy /= gl;   // outward normal
+      }
+      put(x, y, -gx, -gy, litOf(gx, gy));                          // sample inward → the rim magnifies
+      if (sym) {
+        const mx = MW - 1 - x, my = MH - 1 - y;
+        if (mx !== x) put(mx, y, gx, -gy, litOf(-gx, gy));
+        if (my !== y) put(x, my, -gx, gy, litOf(gx, -gy));
+        if (mx !== x && my !== y) put(mx, my, gx, gy, litOf(-gx, -gy));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const url = c.toDataURL('image/png');
+    let url1 = '';
+    if (twoPass) { ctx.putImageData(img1, 0, 0); url1 = c.toDataURL('image/png'); }
+    lastInfo = { maxDisplacement: MAXD, bevel: B, mapSize: [MW, MH], radii: radii.slice(),
+                 map: url, mapInner: url1, split, twoPass, folds: o.slope > 1,
+                 // sampled every STEP px from the outer rim inward — enough to plot the edge
+                 profile: { step: STEP, m: Array.from(tab), edge: Array.from(edge), gain: Array.from(gains) } };
+    return { url, maxd: MAXD, inner: { url: url1, maxd: MAXD1 }, split, twoPass };
+  }
+
+  const SVG = 'http://www.w3.org/2000/svg';
+  function prim(name, attrs) {
+    const el = document.createElementNS(SVG, name);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+  const ONLY = { R: '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0',
+                 G: '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
+                 B: '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0' };
+
+  /* Assemble a <filter>: map → blur → [inner displacement → ring blur (rule 4)] → outer displacement
+     (one pass per channel when dispersion > 0) → the edge profile, shade first then light.
+     `self` mode is displacement only (see notes).
+     The region is the element's own box (objectBoundingBox 0 0 1 1), not the pixel size the map was
+     built for: a feImage with no subregion of its own fills the region, and `preserveAspectRatio:
+     none` stretches the map to it — so an element that grows keeps its glass, stretched, until the
+     next rebuild (rule 6). The primitives stay in user space: blur radii and displacement scales
+     are pixels. */
+  function buildFilter(id, map, o) {
+    const f = prim('filter', { id, filterUnits: 'objectBoundingBox', primitiveUnits: 'userSpaceOnUse',
+                               x: 0, y: 0, width: 1, height: 1, 'color-interpolation-filters': 'sRGB' });
+    const image = (url, result) => {
+      const img = prim('feImage', { preserveAspectRatio: 'none', result });
+      img.setAttribute('href', url);
+      img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', url);
+      return img;
+    };
+    f.appendChild(image(map.url, 'map'));
+    const S = 2 * map.maxd;
+    if (o.self) {
+      f.appendChild(prim('feDisplacementMap', { in: 'SourceGraphic', in2: 'map', scale: S.toFixed(2),
+                                                xChannelSelector: 'R', yChannelSelector: 'G' }));
+      return f;
+    }
+    f.appendChild(prim('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: o.blur, result: 'softA' }));
+    /* Rule 7: the backdrop handed to a reference filter stops dead at the element's box, so the blur
+       fades its outermost rows into transparency. The dispersion pass sums three premultiplied
+       images, which is only exact for opaque pixels — on those rows the alpha is clamped and the
+       colour comes out up to three times too bright: a white hairline along the rim whenever the
+       rim samples its own boundary, i.e. while the displacement is still near zero at the start of
+       a materialize ramp (one or two frames, caught on a frame-by-frame recording of the island).
+       feColorMatrix works on unpremultiplied colour, so pinning alpha to 1 here keeps the blurred
+       colour and simply drops the fade — the rows are extended, not darkened. */
+    f.appendChild(prim('feColorMatrix', { in: 'softA', type: 'matrix', values: '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0 1', result: 'soft' }));
+    let src = 'soft', scale = S;
+    if (map.twoPass && o.smooth > 0) {                             // rule 4: inner pass, ring blur, then the outer pass
+      f.appendChild(image(map.inner.url, 'inner'));
+      f.appendChild(prim('feDisplacementMap', { in: 'soft', in2: 'inner', scale: (2 * map.inner.maxd).toFixed(2),
+                                                xChannelSelector: 'R', yChannelSelector: 'G', result: 'bent' }));
+      f.appendChild(prim('feGaussianBlur', { in: 'bent', stdDeviation: o.smooth, result: 'bentSoft' }));
+      f.appendChild(prim('feColorMatrix', { in: 'inner', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'ring' }));
+      const inv = prim('feComponentTransfer', { in: 'ring', result: 'ringInv' });
+      inv.appendChild(prim('feFuncA', { type: 'table', tableValues: '1 0' }));
+      f.appendChild(inv);
+      f.appendChild(prim('feComposite', { in: 'bentSoft', in2: 'ring', operator: 'in', result: 'ringIn' }));
+      f.appendChild(prim('feComposite', { in: 'bent', in2: 'ringInv', operator: 'in', result: 'ringOut' }));
+      f.appendChild(prim('feComposite', { in: 'ringIn', in2: 'ringOut', operator: 'arithmetic', k1: 0, k2: 1, k3: 1, k4: 0, result: 'mid' }));
+      src = 'mid'; scale = S * map.split;
+    }
+    /* Dispersion is a fixed number of pixels, not a share of the displacement: the refractive index
+       of glass differs between red and blue by a material constant, which has nothing to do with how
+       strong the lens is. A scale difference of 2·sep moves the sample by sep. */
+    if (o.dispersion > 0) {
+      const d2 = 2 * o.dispersion;
+      const scales = { R: scale - d2, G: scale, B: scale + d2 };
+      for (const ch of ['R', 'G', 'B']) {
+        f.appendChild(prim('feDisplacementMap', { in: src, in2: 'map', scale: scales[ch].toFixed(2),
+                                                  xChannelSelector: 'R', yChannelSelector: 'G', result: 'd' + ch }));
+        f.appendChild(prim('feColorMatrix', { in: 'd' + ch, type: 'matrix', values: ONLY[ch], result: 'c' + ch }));
+      }
+      f.appendChild(prim('feComposite', { in: 'cR', in2: 'cG', operator: 'arithmetic', k1: 0, k2: 1, k3: 1, k4: 0, result: 'cRG' }));
+      f.appendChild(prim('feComposite', { in: 'cRG', in2: 'cB', operator: 'arithmetic', k1: 0, k2: 1, k3: 1, k4: 0, result: 'glass' }));
+    } else {
+      f.appendChild(prim('feDisplacementMap', { in: src, in2: 'map', scale: scale.toFixed(2),
+                                                xChannelSelector: 'R', yChannelSelector: 'G', result: 'glass' }));
+    }
+    /* The edge profile lives in the map's blue channel, signed around 128. Below neutral it darkens,
+       and it has to darken by *multiplying*: subtracting would drive an already dark backdrop
+       negative. feBlend multiply is used rather than feComposite arithmetic because arithmetic
+       multiplies alpha too, and dimming the backdrop's alpha punches a hole in it. */
+    f.appendChild(prim('feColorMatrix', { in: 'map', type: 'matrix',
+      values: '0 0 1 0 0  0 0 1 0 0  0 0 1 0 0  0 0 0 0 1', result: 'edgeRGB' }));   // RGB ← B, A ← 1
+    const sh = prim('feComponentTransfer', { in: 'edgeRGB', result: 'shadeLayer' });
+    for (const ch of ['R', 'G', 'B']) sh.appendChild(prim('feFunc' + ch, { type: 'table', tableValues: '0 1 1' }));
+    f.appendChild(sh);
+    f.appendChild(prim('feBlend', { in: 'glass', in2: 'shadeLayer', mode: 'multiply', result: 'shaded' }));
+    /* Saturation, inside the bevel ring only. Folding shows the same backdrop twice and dispersion
+       pulls the channels apart, which together muddy the colour along the rim; pulling saturation
+       down there cleans it without touching the centre (rule 1 of the recipe: never restyle what is
+       behind the glass). The ring mask needs no extra channel — the centre has zero displacement,
+       so |R − ½| + |G − ½| *is* the ring. */
+    let base = 'shaded';
+    if (o.sat !== 1) {
+      for (const [ch, row] of [['R', '1 0 0 0 0'], ['G', '0 1 0 0 0']]) {
+        f.appendChild(prim('feColorMatrix', { in: 'map', type: 'matrix',
+          values: `0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  ${row}`, result: 'rg' + ch }));   // RGB ← white, A ← that channel
+        const tf = prim('feComponentTransfer', { in: 'rg' + ch, result: 'ring' + ch });
+        tf.appendChild(prim('feFuncA', { type: 'table', tableValues: '1 0 1' }));      // |v − ½| × 2
+        f.appendChild(tf);
+      }
+      f.appendChild(prim('feComposite', { in: 'ringR', in2: 'ringG', operator: 'arithmetic', k1: 0, k2: 1, k3: 1, k4: 0, result: 'ring' }));
+      f.appendChild(prim('feColorMatrix', { in: 'shaded', type: 'saturate', values: o.sat, result: 'satd' }));
+      const inv = prim('feComponentTransfer', { in: 'ring', result: 'ringInv' });
+      inv.appendChild(prim('feFuncA', { type: 'table', tableValues: '1 0' }));
+      f.appendChild(inv);
+      f.appendChild(prim('feComposite', { in: 'satd', in2: 'ring', operator: 'in', result: 'satIn' }));
+      f.appendChild(prim('feComposite', { in: 'shaded', in2: 'ringInv', operator: 'in', result: 'satOut' }));
+      f.appendChild(prim('feComposite', { in: 'satIn', in2: 'satOut', operator: 'arithmetic', k1: 0, k2: 1, k3: 1, k4: 0, result: 'glassSat' }));
+      base = 'glassSat';
+    }
+    // Above neutral it is light the glass sends back, so it adds. The table takes the upper half;
+    // the linear pass after it is what `materialize` ramps.
+    f.appendChild(prim('feColorMatrix', { in: 'map', type: 'matrix',
+      values: '0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 0', result: 'litA' }));      // RGB ← white, A ← B
+    const lt = prim('feComponentTransfer', { in: 'litA', result: 'litHalf' });
+    lt.appendChild(prim('feFuncA', { type: 'table', tableValues: '0 0 1' }));
+    f.appendChild(lt);
+    const lg = prim('feComponentTransfer', { in: 'litHalf', result: 'litLayer' });
+    lg.appendChild(prim('feFuncA', { type: 'linear', slope: 1, intercept: 0 }));
+    f.appendChild(lg);
+    f.appendChild(prim('feComposite', { in: 'litLayer', in2: base, operator: 'over' }));
+    return f;
+  }
+
+  /* The sharp outer line is CSS, not filter: feImage downsamples large maps and Chromium samples the
+     bent picture nearest-neighbour, and a half-pixel line survives neither. Inset shadows are drawn
+     on the element itself, so they stay crisp and follow border-radius for free — and they show up
+     in Safari and Firefox too, which get no refraction at all. */
+  function edgeShadow(o) {
+    const a = o.edge;
+    if (a <= 0) return 'none';
+    const rad = o.light * Math.PI / 180, dx = Math.sin(rad).toFixed(2), dy = (-Math.cos(rad)).toFixed(2);
+    return [
+      `inset 0 0 0 .5px rgba(255,255,255,${(0.72 * a).toFixed(3)})`,                  // the line itself
+      `inset ${dx}px ${dy}px 0 .5px rgba(255,255,255,${(0.55 * a).toFixed(3)})`,      // brighter into the light
+      `inset 0 0 0 1.5px rgba(0,0,0,${(0.16 * a).toFixed(3)})`,                       // the hairline of dark under it
+      `inset 0 0 6px 2px rgba(255,255,255,${(0.07 * a).toFixed(3)})`,                 // one faint band further in
+    ].join(',');
+  }
+
+  /* Corner radii in px. Computed values may be "16px", "50%" or "16px 20px" (elliptical — the
+     horizontal one is used); percentages resolve against the shorter side.
+     CSS shrinks radii by one *shared* factor when two of them do not fit on the edge they share; it
+     does not clamp each corner on its own. Clamping each to half the short side gets a 320×40 card
+     with `border-radius: 24px 24px 0 0` wrong — those corners really are 24px. */
+  function radiiOf(el, W, H) {
+    const cs = getComputedStyle(el);
+    const one = (v) => {
+      const t = String(v).trim().split(/\s+/)[0] || '0';
+      const n = parseFloat(t);
+      if (!Number.isFinite(n)) return 0;
+      return Math.max(0, t.endsWith('%') ? n / 100 * Math.min(W, H) : n);
+    };
+    const r = [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius].map(one);
+    let f = 1;
+    for (const [len, sum] of [[W, r[0] + r[1]], [H, r[1] + r[2]], [W, r[2] + r[3]], [H, r[3] + r[0]]])
+      if (sum > len) f = Math.min(f, len / sum);
+    return f < 1 ? r.map((v) => v * f) : r;
+  }
+  function sizeOf(el) {        // layout box (transform-proof); fall back to the rect for inline / SVG elements
+    let W = el.offsetWidth, H = el.offsetHeight;
+    if (!W || !H) { const r = el.getBoundingClientRect(); W = r.width; H = r.height; }
+    return [Math.round(W), Math.round(H)];
+  }
+
+  /* A map depends only on geometry + bevel + thickness + light, so a filter rebuilt for a new blur
+     or rim reuses it. Sizes go into buckets so that near-identical elements — a column of chat
+     bubbles, say — share one map. The radii are *not* rescaled to match: pre-scaling them would put
+     the element's own width back into the key and defeat the whole thing. feImage squeezes the map
+     by up to QZ instead, which shrinks the outline by under half a pixel at ordinary radii. */
+  function acquireMap(W, H, radii, o) {
+    const BW = qz(W), BH = qz(H);
+    const br = radii.map((r) => +r.toFixed(2));                    // quantised so the key and the map agree
+    const key = `${BW}x${BH}|${br.join(',')}|${o.bevel}|${o.thickness}|${o.slope}|${o.shape}|${o.shade}|${o.rim}|${o.edgeW}|${o.light}`;
+    let rec = maps.get(key);
+    if (rec) idleMaps.delete(key);
+    else {
+      rec = buildMap(BW, BH, br, o);
+      rec.refs = 0; rec.key = key;
+      maps.set(key, rec);
+      lastInfo.radii = radii.slice();          // report the element's own radii, not the bucketed ones
+      if (typeof o.onBuild === 'function') o.onBuild(lastInfo);
+    }
+    rec.refs++;
+    return rec;
+  }
+  function releaseMap(key) {
+    const rec = maps.get(key);
+    if (!rec || --rec.refs > 0) return;
+    idleMaps.set(key, rec);                    // keep it warm: a retune or a resize back usually wants it again
+    for (const k of idleMaps.keys()) {
+      if (idleMaps.size <= MAX_IDLE_MAPS) break;
+      idleMaps.delete(k); maps.delete(k);
+    }
+  }
+
+  function acquire(key, W, H, radii, o) {
+    let rec = filters.get(key);
+    if (!rec) {
+      const id = 'jd-glass-' + instanceId + '-' + (++seq);
+      const map = acquireMap(W, H, radii, o);
+      rec = { id, refs: 0, el: buildFilter(id, map, o), mapKey: map.key };
+      ensureHost().appendChild(rec.el);
+      filters.set(key, rec);
+    }
+    rec.refs++;
+    return rec;
+  }
+  function release(key) {
+    const rec = filters.get(key);
+    if (!rec) return;
+    if (--rec.refs <= 0) { rec.el.remove(); filters.delete(key); releaseMap(rec.mapKey); }
+  }
+
+  const setFallback = (el, st) => el.style.setProperty(VAR, st.opts.self ? 'none' : `blur(${st.opts.blur}px)`);
+  const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+
+  /* (Re)build for the current geometry and point the element at its filter. `ramp` > 0 animates in. */
+  function apply(el, ramp) {
+    const st = bound.get(el);
+    if (!st) return;
+    const [W, H] = sizeOf(el);
+    if (W < 4 || H < 4) return;                       // not laid out yet / hidden
+    const radii = radiiOf(el, W, H);
+    const o = st.opts;
+    const key = `${W}x${H}|${radii.join(',')}|${o.bevel}|${o.thickness}|${o.slope}|${o.shape}|${o.shade}|${o.rim}|${o.edgeW}|${o.sat}|${o.blur}|${o.dispersion}|${o.light}|${o.smooth}|${o.self ? 'self' : 'back'}`;
+    st.w = W; st.h = H;
+    let rec;
+    if (key === st.key) rec = filters.get(key);       // same geometry (e.g. back from a settle): just re-point
+    else { rec = acquire(key, W, H, radii, o); if (st.key) release(st.key); st.key = key; }
+    if (!rec) return;
+    el.style.setProperty(VAR_EDGE, o.self ? 'none' : edgeShadow(o));
+    if (ramp > 0 && !reducedMotion()) materialize(el, st, rec, ramp);
+    else el.style.setProperty(VAR, `url(#${rec.id})`);
+  }
+
+  /* Materialize: Apple's glass doesn't fade in, its lensing ramps up. Displacement and rim light go
+     from 0 to target together on a private clone of the shared filter, then the element switches to
+     the shared one. Blur is left alone — keep the pre-attach fallback at the same blur, or the
+     element will "pull focus". */
+  function materialize(el, st, rec, ms) {
+    const tmp = rec.el.cloneNode(true);
+    tmp.id = `${rec.id}-m${++seq}`;
+    const dms = Array.from(tmp.querySelectorAll('feDisplacementMap')).map((n) => ({ n, s: +n.getAttribute('scale') }));
+    // the light is the linear pass after the half-table; the shade is the three tables that multiply
+    const litN = tmp.querySelector('[result="litLayer"] feFuncA');
+    const shadeN = Array.from(tmp.querySelectorAll('[result="shadeLayer"] > *'));
+    dms.forEach(({ n }) => n.setAttribute('scale', '0'));
+    if (litN) litN.setAttribute('slope', '0');
+    shadeN.forEach((n) => n.setAttribute('tableValues', '1 1 1'));   // 1 = multiply by one = no shade
+    ensureHost().appendChild(tmp);
+    el.style.setProperty(VAR, `url(#${tmp.id})`);
+    const key = st.key;
+    let t0 = -1;      // taken from the first frame's own clock: a rAF timestamp can trail performance.now(), and a negative t would flip the displacement outward for a frame
+    const step = (now) => {
+      // rebuilt or detached meanwhile: whoever did that owns the variable now
+      if (bound.get(el) !== st || st.key !== key) { tmp.remove(); return; }
+      if (t0 < 0) t0 = now;
+      const t = Math.min(1, (now - t0) / ms), k = 1 - Math.pow(1 - t, 3);
+      dms.forEach(({ n, s }) => n.setAttribute('scale', (s * k).toFixed(2)));
+      if (litN) litN.setAttribute('slope', k.toFixed(3));
+      shadeN.forEach((n) => n.setAttribute('tableValues', `${(1 - k).toFixed(3)} 1 1`));
+      if (t < 1) requestAnimationFrame(step);
+      else { el.style.setProperty(VAR, `url(#${rec.id})`); tmp.remove(); }
+    };
+    requestAnimationFrame(step);
+  }
+
+  /* Size changes (rule 6: the glass stays on throughout — the region follows the element, so the
+     current map is stretched until the rebuild). settle > 0 coalesces: one rebuild, `settle` ms
+     after the last change. settle = 0 is live: the first change of a burst rebuilds right here,
+     inside the ResizeObserver callback — that runs after layout and before paint, so the frame that
+     shows the new size already shows the new map; while changes keep coming they are throttled to
+     one rebuild per LIVE_MIN_MS, and a trailing one lands after the last of them. */
+  function onResize(el) {
+    const st = bound.get(el);
+    if (!st) return;
+    const [W, H] = sizeOf(el);
+    if (W === st.w && H === st.h) return;            // the observer's initial notification, or no real change
+    if (st.opts.settle > 0) {
+      clearTimeout(st.timer);
+      st.timer = setTimeout(() => { st.timer = 0; apply(el, 0); }, st.opts.settle);
+    } else schedule(el);
+  }
+  function schedule(el) {
+    const st = bound.get(el);
+    if (!st) return;
+    if (st.timer) { st.pending = true; return; }
+    const wait = Math.max(0, LIVE_MIN_MS - (performance.now() - (st.last || 0)));
+    const run = () => {
+      st.timer = 0; st.last = performance.now();
+      apply(el, 0);
+      if (st.pending) { st.pending = false; schedule(el); }
+    };
+    if (wait === 0) return run();                    // synchronous: before this frame paints
+    st.timer = setTimeout(run, wait);
+  }
+
+  function attach(el, opts, watcher) {
+    if (bound.has(el) || !supported()) return;      // unsupported: write nothing, the CSS fallback wins
+    const st = { key: '', opts: sanitize(Object.assign({}, DEFAULTS, opts || {})), ro: null, timer: 0, pending: false,
+                 last: 0, w: 0, h: 0, watcher: watcher || null };
+    bound.set(el, st);
+    apply(el, st.opts.materialize);
+    st.ro = new ResizeObserver(() => onResize(el));
+    st.ro.observe(el);
+  }
+  function detach(el) {
+    const st = bound.get(el);
+    if (!st) return;
+    if (st.ro) st.ro.disconnect();
+    if (st.timer) clearTimeout(st.timer);
+    if (st.key) release(st.key);
+    el.style.removeProperty(VAR);
+    el.style.removeProperty(VAR_EDGE);
+    bound.delete(el);
+  }
+  /* Force a rebuild (e.g. after a border-radius change that did not change the size) */
+  function refresh(el) {
+    const st = bound.get(el);
+    if (!st) return;
+    const old = st.key;
+    st.key = ''; st.w = st.h = 0;
+    apply(el, 0);
+    if (old) release(old);
+    if (!st.key) setFallback(el, st);
+  }
+
+  /* Which watcher owns an element *right now*: the first one whose container still contains it and
+     whose selector it still matches. Insertion order breaks ties, which is what "whoever attached
+     first keeps it" already meant. */
+  function ownerOf(el) {
+    if (!el.isConnected) return null;
+    for (const w of watchers) if (w.container.contains(el) && el.matches(w.selector)) return w;
+    return null;
+  }
+  /* Reconcile one element against that answer. A move between two observed containers produces two
+     records in the same microtask — an addition in the new container, a removal from the old — and
+     they arrive in observer-creation order, which has nothing to do with what happened. Acting on
+     each record on its own loses the element whenever the addition lands first: the new watcher's
+     attach is skipped because it is still bound to the old one, and then the old watcher's detach
+     unbinds it for good, with nothing left watching it. Deciding from where the element *is* makes
+     the order irrelevant — which matters for drag and drop, remounts and reordered lists. */
+  function reconcile(el) {
+    const st = bound.get(el);
+    if (st && !st.watcher) return;                  // attached by hand: watchers never touch it
+    const owner = ownerOf(el);
+    if (!owner) { if (st) detach(el); return; }
+    if (!st) { attach(el, owner.opts, owner); return; }
+    if (st.watcher !== owner) { detach(el); attach(el, owner.opts, owner); }   // handover
+  }
+
+  /* Watch a container: matching elements present now, added later, or gaining the class later are
+     attached; removed ones or ones losing the class are detached. Returns { stop }. Several watchers
+     can coexist, and an element can move between them. */
+  function watch(container, selector, opts) {
+    const w = { container, selector, opts: sanitize(Object.assign({}, DEFAULTS, opts || {})), mo: null };
+    const matches = (node) => {
+      const out = [];
+      if (node.nodeType !== 1) return out;
+      if (node.matches(selector)) out.push(node);
+      out.push(...node.querySelectorAll(selector));
+      return out;
+    };
+    w.mo = new MutationObserver((muts) => {
+      const touched = new Set();
+      for (const m of muts) {
+        if (m.type === 'attributes') { touched.add(m.target); continue; }
+        m.addedNodes.forEach((n) => matches(n).forEach((el) => touched.add(el)));
+        m.removedNodes.forEach((n) => matches(n).forEach((el) => touched.add(el)));
+      }
+      touched.forEach(reconcile);
+    });
+    w.mo.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    watchers.add(w);
+    container.querySelectorAll(selector).forEach((el) => { if (!bound.has(el)) attach(el, w.opts, w); });
+    return { stop: () => stopWatcher(w) };
+  }
+  function stopWatcher(w) {
+    if (!watchers.has(w)) return;
+    w.mo.disconnect();
+    watchers.delete(w);
+    // Hand anything it owned to a watcher that still covers it, rather than stripping the glass off
+    // an element some other watcher is also watching.
+    Array.from(bound.entries()).filter(([, st]) => st.watcher === w).forEach(([el]) => { detach(el); reconcile(el); });
+  }
+  function unwatch() { Array.from(watchers).forEach(stopWatcher); }   // stop every watcher; manual attaches survive
+
+  /* Retune every attached element, a few per frame (≤ 8 ms). A newer call supersedes an older one. */
+  function setOpts(opts) {
+    const s = sanitize(opts || {});
+    watchers.forEach((w) => Object.assign(w.opts, s));
+    const els = Array.from(bound.keys());
+    els.forEach((el) => Object.assign(bound.get(el).opts, s));
+    const gen = ++optsGen;
+    return new Promise((resolve) => {
+      let i = 0;
+      const step = () => {
+        if (gen !== optsGen) return resolve();
+        const t0 = performance.now();
+        while (i < els.length && performance.now() - t0 < 8) apply(els[i++], 0);
+        if (i < els.length) requestAnimationFrame(step); else resolve();
+      };
+      step();
+    });
+  }
+  const info = () => lastInfo;
+
+  /* CSS.supports says yes on Firefox too, but Firefox paints the element unfiltered for
+     backdrop-filter:url() and Safari keeps only the blur. So we also require a Chromium engine
+     (Chrome, Edge, Arc, Brave, Electron…). That sniff is a snapshot of September 2026 and there is
+     no way to read back what a backdrop filter painted, so it needs an escape hatch: WebKit has an
+     implementation in review, and the day it ships `Hyalite.force(true)` or `<html data-hyalite="force">`
+     turns the engine on without editing this file. `force(null)` goes back to sniffing. */
+  let supportedMemo = null, forced = null;
+  const supported = () => {
+    if (forced !== null) return forced;
+    if (supportedMemo !== null) return supportedMemo;
+    try {
+      const flag = document.documentElement.getAttribute('data-hyalite');
+      if (flag === 'force' || flag === 'off') return (supportedMemo = flag === 'force');
+      const css = CSS.supports('backdrop-filter', 'url(#x)') || CSS.supports('-webkit-backdrop-filter', 'url(#x)');
+      const uad = navigator.userAgentData;
+      const chromium = uad && uad.brands ? uad.brands.some((b) => /Chromium/i.test(b.brand))
+                     : /Chrome\/\d+/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor || '');
+      supportedMemo = !!(css && chromium);
+    } catch (e) { supportedMemo = false; }
+    return supportedMemo;
+  };
+  function force(v) { forced = (v === null || v === undefined) ? null : !!v; supportedMemo = null; return supported(); }
+
+  const API = { watch, unwatch, attach, detach, refresh, setOpts, info, supported, force, DEFAULTS, version: '0.5.0' };
+  API.dispose = () => {
+    ++optsGen;
+    unwatch();
+    Array.from(bound.keys()).forEach(detach);
+    filters.clear(); maps.clear(); idleMaps.clear();
+    host?.remove(); host = null; lastInfo = null;
+  };
+  return API;
+}
+
+function jamDeckBackgroundKind(path) {
+  const extension = String(path || "").split(".").pop().toLowerCase();
+  if (["jpg", "jpeg", "png", "webp", "avif"].includes(extension)) return "image";
+  if (["mp4", "webm"].includes(extension)) return "video";
+  return "";
+}
+
+function jamDeckAppearanceSettings(settings) {
+  const path = typeof settings.glassBackground === "string" ? settings.glassBackground.replace(/\\/g, "/") : "";
+  const safePath = path && !path.startsWith("/") && !path.includes(":") && !path.split("/").includes("..") && jamDeckBackgroundKind(path);
+  return {
+    skin: settings.skin === "glass" ? "glass" : "spatial",
+    glassQuality: settings.glassQuality === "light" ? "light" : "balanced",
+    glassBlur: Number.isFinite(Number(settings.glassBlur)) ? Math.max(0, Math.min(16, Number(settings.glassBlur))) : 4,
+    glassFillOpacity: settings.glassFillOpacity == null || !Number.isFinite(Number(settings.glassFillOpacity))
+      ? null : Math.max(0, Math.min(100, Number(settings.glassFillOpacity))),
+    glassTextBrightness: settings.glassTextBrightness == null || !Number.isFinite(Number(settings.glassTextBrightness))
+      ? 50 : Math.max(0, Math.min(100, Number(settings.glassTextBrightness))),
+    hideObsidianSidebar: settings.hideObsidianSidebar === true,
+    hideObsidianTopbar: settings.hideObsidianTopbar === true,
+    glassBackground: safePath ? path : "",
+    glassBackgroundDim: Number.isFinite(Number(settings.glassBackgroundDim)) ? Math.max(0, Math.min(70, Number(settings.glassBackgroundDim))) : 12,
+    glassVideoPlaying: settings.glassVideoPlaying !== false,
+  };
+}
+
+function jamDeckTextBrightnessValues(value) {
+  const brightness = value == null || !Number.isFinite(Number(value)) ? 50 : Math.max(0, Math.min(100, Number(value)));
+  return { "--jd-text-tint": brightness < 50 ? "#000" : "#fff", "--jd-text-mix": `${Math.abs(brightness - 50) * 2}%` };
+}
+
+function jamDeckWallpaperLuminance(pixels, dim = 0) {
+  const shade = 1 - Math.max(0, Math.min(70, dim)) / 100;
+  const linear = value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  if (!pixels?.length) return linear(0.74 * shade);
+  let total = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const alpha = pixels[i + 3] / 255;
+    const channel = offset => linear((pixels[i + offset] / 255 * alpha + 0.74 * (1 - alpha)) * shade);
+    total += 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+  }
+  return total / (pixels.length / 4);
+}
+
+class JamDeckAppearance {
+  constructor(view) {
+    this.view = view;
+    this.plugin = view.plugin;
+    this.root = view.contentEl;
+    this.doc = this.root.ownerDocument;
+    this.win = this.doc.defaultView;
+    this.bound = new Set();
+    this.visible = false;
+    this.disposed = false;
+    this.motion = this.win.matchMedia("(prefers-reduced-motion: reduce)");
+    this.onVisibility = () => { this.syncPlayback(); this.scheduleGlass(); };
+    this.doc.addEventListener("visibilitychange", this.onVisibility);
+    this.motion.addEventListener("change", this.onVisibility);
+    this.intersection = new this.win.IntersectionObserver(entries => {
+      this.visible = entries.some(entry => entry.isIntersecting);
+      this.syncPlayback();
+      this.scheduleGlass();
+    });
+    this.intersection.observe(this.root);
+    this.resize = new this.win.ResizeObserver(() => this.scheduleGlass());
+    this.panelObserver = new this.win.MutationObserver(() => this.scheduleGlass());
+    this.observeSurfaces();
+  }
+
+  observeSurfaces() {
+    this.resize.observe(this.root);
+    for (const el of this.surfaces()) this.resize.observe(el);
+    if (this.view.aiChat) this.panelObserver.observe(this.view.aiChat, { attributes: true, attributeFilter: ["hidden"] });
+  }
+
+  prepareRender() {
+    // Keep the connected wallpaper, decoder and tone while controls are rebuilt.
+    this.win.clearTimeout(this.glassTimer); this.glassTimer = 0;
+    this.clearGlass();
+    this.resize.disconnect(); this.panelObserver.disconnect();
+  }
+
+  surfaces() {
+    // Small navigation surfaces take priority over large content panes.
+    return [
+      ...this.root.querySelectorAll(":scope > .jam-deck-toolbar, .canvas-card-menu.jam-deck-node-toolbar--spatial"),
+      ...this.root.querySelectorAll(":scope > .jam-deck-ai-fab, :scope > .jam-deck-ai-chat, :scope > .jam-deck-grid > .jam-deck-widget:not(.is-canvas-embed)"),
+    ];
+  }
+
+  setBlur(value) {
+    if (this.disposed) return;
+    const blur = Math.max(0, Math.min(16, Number(value)));
+    if (!Number.isFinite(blur) || this.blur === blur) return;
+    this.blur = blur;
+    this.root.style.setProperty("--jd-glass-blur", `${blur}px`);
+    this.root.style.setProperty("--jd-glass-canvas-blur", `${blur / 2}px`);
+    // The optical map does not depend on blur; retune in place without a new map or video.
+    if (this.engine) void this.engine.setOpts({ blur });
+  }
+
+  setFillOpacity(value) {
+    if (this.disposed) return;
+    if (value == null || !Number.isFinite(Number(value))) this.root.style.removeProperty("--jd-glass-fill-alpha");
+    else this.root.style.setProperty("--jd-glass-fill-alpha", String(Math.max(0, Math.min(100, Number(value))) / 100));
+  }
+
+  setTextBrightness(value) {
+    if (this.disposed) return;
+    for (const [name, color] of Object.entries(jamDeckTextBrightnessValues(value))) this.root.style.setProperty(name, color);
+  }
+
+  update() {
+    if (this.disposed) return;
+    const settings = this.plugin.settings;
+    this.root.dataset.jamDeckSkin = settings.skin;
+    this.root.dataset.jamDeckGlassQuality = settings.glassQuality;
+    this.setBlur(settings.glassBlur);
+    this.setFillOpacity(settings.glassFillOpacity);
+    this.setTextBrightness(settings.glassTextBrightness);
+    for (const widget of this.root.querySelectorAll(".jam-deck-widget.is-canvas-embed")) {
+      let material = widget.querySelector(":scope > .jam-deck-canvas-glass-material");
+      if (settings.skin !== "glass") { material?.remove(); continue; }
+      if (!material) {
+        material = this.doc.createElement("div");
+        material.className = "jam-deck-canvas-glass-material";
+        material.setAttribute("aria-hidden", "true"); material.inert = true;
+        widget.prepend(material);
+      }
+    }
+    this.root.style.setProperty("--jd-background-dim", String(settings.glassBackgroundDim / 100));
+    const signature = settings.skin === "glass" ? settings.glassBackground : null;
+    if (signature !== this.source) {
+      this.source = signature;
+      this.releaseMedia();
+      if (signature !== null) {
+        this.backdrop = this.doc.createElement("div");
+        this.backdrop.className = "jam-deck-backdrop";
+        this.backdrop.setAttribute("aria-hidden", "true");
+        this.backdrop.inert = true;
+        this.root.prepend(this.backdrop);
+        if (signature) this.loadMedia(signature);
+      }
+    }
+    this.syncPlayback();
+    this.updateTone();
+    this.scheduleGlass();
+  }
+
+  updateTone() {
+    if (this.disposed) return;
+    if (this.plugin.settings.skin !== "glass") { delete this.root.dataset.jamDeckGlassTone; return; }
+    if (this.source && !this.media?.hidden && !this.wallpaperPixels) { this.root.dataset.jamDeckGlassTone = "dark"; return; }
+    const luminance = jamDeckWallpaperLuminance(this.wallpaperPixels, this.plugin.settings.glassBackgroundDim);
+    // A dead band avoids flickering labels during slow fades and video noise.
+    const previous = this.root.dataset.jamDeckGlassTone || "dark";
+    this.root.dataset.jamDeckGlassTone = luminance < 0.24 ? "dark" : luminance > 0.32 ? "light" : previous;
+  }
+
+  sampleWallpaper(media) {
+    if (this.disposed || this.media !== media || this.toneReadFailed) return;
+    if (media.tagName === "VIDEO" ? media.readyState < 2 : !media.naturalWidth) return;
+    try {
+      if (!this.toneCanvas) {
+        this.toneCanvas = this.doc.createElement("canvas");
+        this.toneCanvas.width = 32; this.toneCanvas.height = 18;
+        // Read only once per second. Keep GPU downscaling before the tiny readback;
+        // a CPU-backed canvas would first transfer the full-resolution video frame.
+        this.toneContext = this.toneCanvas.getContext("2d", { willReadFrequently: false });
+      }
+      this.toneContext.clearRect(0, 0, 32, 18);
+      this.toneContext.drawImage(media, 0, 0, 32, 18);
+      this.wallpaperPixels = this.toneContext.getImageData(0, 0, 32, 18).data;
+      this.updateTone();
+    } catch (error) {
+      this.toneReadFailed = true;
+      this.stopToneSampling();
+      console.warn("Jam Deck: wallpaper brightness could not be read", error);
+    }
+  }
+
+  stopToneSampling() {
+    this.toneGeneration = (this.toneGeneration || 0) + 1;
+    this.win.clearTimeout(this.toneTimer); this.toneTimer = 0;
+  }
+
+  scheduleToneSampling() {
+    const video = this.media;
+    if (this.disposed || this.toneTimer || this.toneReadFailed || !video || video.tagName !== "VIDEO"
+      || video.paused || !this.visible || this.doc.hidden || this.plugin.islandMode?.active) return;
+    // Read the current decoded frame once per second, never on every video frame.
+    const generation = this.toneGeneration;
+    this.toneTimer = this.win.setTimeout(() => {
+      if (generation !== this.toneGeneration) return;
+      this.toneTimer = 0;
+      if (this.disposed || this.media !== video || video.paused || !this.visible || this.doc.hidden) return;
+      this.sampleWallpaper(video);
+      this.scheduleToneSampling();
+    }, 1000);
+  }
+
+  loadMedia(path) {
+    const kind = jamDeckBackgroundKind(path);
+    const media = this.doc.createElement(kind === "video" ? "video" : "img");
+    this.media = media;
+    media.className = "jam-deck-background-media";
+    if (kind === "video") {
+      media.muted = true; media.defaultMuted = true; media.loop = true;
+      media.playsInline = true; media.preload = "metadata";
+      media.disablePictureInPicture = true;
+      media.addEventListener("loadeddata", () => {
+        if (this.disposed || this.media !== media) return;
+        this.sampleWallpaper(media); this.syncPlayback();
+      });
+      media.addEventListener("pause", () => { if (this.media === media) this.stopToneSampling(); });
+    } else {
+      media.alt = ""; media.decoding = "async";
+      media.addEventListener("load", () => this.sampleWallpaper(media), { once: true });
+    }
+    media.addEventListener("error", () => {
+      if (this.disposed || this.media !== media) return;
+      media.hidden = true;
+      this.stopToneSampling(); this.toneReadFailed = true;
+      this.wallpaperPixels = null; this.updateTone();
+      new Notice("Jam Deck：背景文件无法读取或格式不受支持，请在设置中重新选择");
+    }, { once: true });
+    media.src = this.plugin.app.vault.adapter.getResourcePath(path);
+    this.backdrop.append(media);
+  }
+
+  syncPlayback() {
+    const video = this.media;
+    if (!video || video.tagName !== "VIDEO") return;
+    const settings = this.plugin.settings;
+    const shouldPlay = !this.disposed && this.visible && !this.doc.hidden && this.root.isConnected
+      && this.root.getClientRects().length > 0 && !this.plugin.islandMode?.active && settings.skin === "glass" && settings.glassVideoPlaying
+      && settings.animationsEnabled !== false && !this.motion.matches;
+    if (!shouldPlay) { this.stopToneSampling(); video.pause(); return; }
+    if (video.paused) void video.play().then(() => {
+      if (this.media === video && !this.disposed) this.scheduleToneSampling();
+    }).catch(() => {
+      if (this.media === video && !this.disposed) { this.stopToneSampling(); this.root.dataset.jamDeckVideoState = "paused"; }
+    });
+    else this.scheduleToneSampling();
+  }
+
+  releaseMedia() {
+    this.stopToneSampling();
+    this.wallpaperPixels = null; this.toneReadFailed = false;
+    if (this.media) {
+      if (this.media.tagName === "VIDEO") this.media.pause();
+      this.media.removeAttribute("src");
+      if (this.media.tagName === "VIDEO") this.media.load();
+      this.media.remove();
+    }
+    this.media = null;
+    this.backdrop?.remove(); this.backdrop = null;
+    delete this.root.dataset.jamDeckVideoState;
+  }
+
+  scheduleGlass() {
+    if (this.disposed) return;
+    this.win.clearTimeout(this.glassTimer);
+    this.glassTimer = this.win.setTimeout(() => { this.glassTimer = 0; this.reconcileGlass(); }, 180);
+  }
+
+  reconcileGlass() {
+    if (this.disposed) return;
+    const settings = this.plugin.settings;
+    if (settings.skin !== "glass" || settings.glassQuality === "light" || !this.visible || this.doc.hidden || this.plugin.islandMode?.active) {
+      this.clearGlass();
+      return;
+    }
+    // Cache saves map generation, not compositing. Bound both the count AND filtered area.
+    const desired = new Set();
+    let pixels = 0;
+    for (const el of this.surfaces()) {
+      const area = el.offsetWidth * el.offsetHeight;
+      if (!area || area > 180000 || pixels + area > 360000 || desired.size >= 4) continue;
+      desired.add(el); pixels += area;
+    }
+    if (!desired.size) { this.clearGlass(); return; }
+    this.engine ||= jamDeckCreateGlassEngine(this.win);
+    for (const el of this.bound) {
+      if (desired.has(el)) continue;
+      this.engine.detach(el); el.classList.remove("jam-deck-glass-refract"); this.bound.delete(el);
+    }
+    for (const el of desired) {
+      if (this.bound.has(el)) continue;
+      this.engine.attach(el, { bevel: 18, thickness: 40, slope: 1.8, shape: "squircle", blur: this.blur, dispersion: 0, sat: 1,
+        shade: 0.14, rim: 0.22, edge: 0, edgeW: 4, smooth: 0, materialize: 0, settle: 180, light: -35 });
+      el.classList.add("jam-deck-glass-refract"); this.bound.add(el);
+    }
+  }
+
+  clearGlass() {
+    this.engine?.dispose(); this.engine = null;
+    for (const el of this.bound) el.classList.remove("jam-deck-glass-refract");
+    this.bound.clear();
+  }
+
+  destroy() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.win.clearTimeout(this.glassTimer);
+    this.intersection.disconnect(); this.resize.disconnect(); this.panelObserver.disconnect();
+    this.doc.removeEventListener("visibilitychange", this.onVisibility);
+    this.motion.removeEventListener("change", this.onVisibility);
+    this.releaseMedia(); this.clearGlass();
+    this.toneCanvas = null; this.toneContext = null;
+    for (const material of this.root.querySelectorAll(".jam-deck-canvas-glass-material")) material.remove();
+    delete this.root.dataset.jamDeckSkin; delete this.root.dataset.jamDeckGlassQuality;
+    delete this.root.dataset.jamDeckGlassTone;
+    this.root.style.removeProperty("--jd-background-dim");
+    this.root.style.removeProperty("--jd-glass-blur");
+    this.root.style.removeProperty("--jd-glass-canvas-blur");
+    this.root.style.removeProperty("--jd-glass-fill-alpha");
+    this.root.style.removeProperty("--jd-text-tint");
+    this.root.style.removeProperty("--jd-text-mix");
+  }
+}
+
 const DEFAULT_SETTINGS = {
   dataVersion: 4,
+  skin: "spatial",
+  glassQuality: "balanced",
+  glassBlur: 4,
+  glassFillOpacity: null,
+  glassTextBrightness: 50,
+  hideObsidianSidebar: false,
+  hideObsidianTopbar: false,
+  glassBackground: "",
+  glassBackgroundDim: 12,
+  glassVideoPlaying: true,
   textSize: "medium",
   captionTextSize: "follow",
   editMode: false,
@@ -941,9 +1980,55 @@ const DEFAULT_SETTINGS = {
   ],
   clipboardItems: [],
   deckTasks: [],
+  // 每日固定待办模板。每天首次打开工作台时按模板生成当天的普通待办，勾选与归档走既有路径。
+  deckRoutines: [],
   musicLikes: [],
   musicLauncher: { schemaVersion: 1, lastConnectedProvider: null },
 };
+
+function jamDeckIsLocalDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]);
+}
+
+function jamDeckNormalizeRoutine(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    id: typeof source.id === "string" && source.id ? source.id : `routine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text: typeof source.text === "string" && source.text.trim() ? source.text.trim() : "未命名每日待办",
+    description: typeof source.description === "string" ? source.description : "",
+    category: ["work", "life"].includes(source.category) ? source.category : "life",
+    enabled: source.enabled !== false,
+    createdAt: Number(source.createdAt) || Date.now(),
+    lastSpawnDate: jamDeckIsLocalDate(source.lastSpawnDate) ? source.lastSpawnDate : null,
+  };
+}
+
+// 每日模板的生成计划。纯函数，便于回归测试覆盖幂等与跨日清理两条主路径。
+// - create：今天还没生成过实例的启用模板
+// - drop：早于今天且仍未完成的旧实例（过期未打卡不留尾巴，已完成/已归档的保留）
+function jamDeckPlanRoutineSpawns(routines, tasks, today) {
+  const plan = { create: [], drop: [] };
+  if (!jamDeckIsLocalDate(today)) return plan;
+  const list = Array.isArray(routines) ? routines : [];
+  const all = Array.isArray(tasks) ? tasks : [];
+  const spawnedToday = new Set(
+    all.filter((task) => task && task.routineId && task.spawnDate === today).map((task) => task.routineId),
+  );
+  for (const task of all) {
+    if (!task || !task.routineId || task.status !== "active") continue;
+    if (jamDeckIsLocalDate(task.spawnDate) && task.spawnDate < today) plan.drop.push(task.id);
+  }
+  for (const routine of list) {
+    if (!routine || routine.enabled === false) continue;
+    if (routine.lastSpawnDate === today && spawnedToday.has(routine.id)) continue;
+    if (spawnedToday.has(routine.id)) continue;
+    plan.create.push(routine);
+  }
+  return plan;
+}
 
 function jamDeckNormalizeIslandLeaveMs(value) {
   const n = Number(value);
@@ -1503,6 +2588,7 @@ class ArchiveViewerModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    this.modalEl.addClass("jam-deck-archive-modal-shell");
     contentEl.addClass("jam-deck-archive-modal");
     contentEl.createEl("h2", { text: "归档待办" });
 
@@ -1536,6 +2622,239 @@ class ArchiveViewerModal extends Modal {
       await this.plugin.deleteAllArchivedTasks();
       this.onOpen();
     });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class RoutineManagerModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    jamDeckShieldModalTyping(this);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("jam-deck-routine-modal-shell");
+    contentEl.addClass("jam-deck-routine-modal");
+    contentEl.createEl("h2", { text: "每日固定待办" });
+    contentEl.createEl("p", {
+      text: "每天首次打开工作台自动生成；前一天没勾选的会被撤下，不累积。",
+      cls: "jam-deck-routine-hint",
+    });
+
+    const routines = this.plugin.settings.deckRoutines;
+    const list = contentEl.createDiv({ cls: "jam-deck-routine-list" });
+    if (!routines.length) list.createEl("p", { text: "还没有每日待办。", cls: "jam-deck-routine-empty" });
+
+    for (const routine of routines) {
+      const row = list.createDiv({ cls: routine.enabled ? "jam-deck-routine-row" : "jam-deck-routine-row is-off" });
+      const toggle = row.createEl("input", { type: "checkbox", cls: "jam-deck-routine-toggle", attr: { "aria-label": `启用：${routine.text}` } });
+      toggle.checked = routine.enabled;
+      toggle.addEventListener("change", async () => {
+        await this.plugin.updateDeckRoutine(routine.id, { enabled: toggle.checked });
+        this.onOpen();
+      });
+
+      const category = row.createEl("select", { cls: "jam-deck-routine-category", attr: { "aria-label": `分类：${routine.text}` } });
+      for (const [value, label] of [["life", "生活"], ["work", "工作"]]) {
+        const option = category.createEl("option", { text: label, value });
+        if (routine.category === value) option.selected = true;
+      }
+      category.addEventListener("change", () => {
+        void this.plugin.updateDeckRoutine(routine.id, { category: category.value });
+      });
+
+      const text = row.createEl("input", { type: "text", cls: "jam-deck-routine-text", attr: { "aria-label": "每日待办内容" } });
+      text.value = routine.text;
+      const commit = () => {
+        const value = text.value.trim();
+        if (!value || value === routine.text) {
+          text.value = routine.text;
+          return;
+        }
+        void this.plugin.updateDeckRoutine(routine.id, { text: value });
+      };
+      text.addEventListener("blur", commit);
+      text.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") text.blur();
+        if (event.key === "Escape") { text.value = routine.text; text.blur(); }
+      });
+
+      const remove = row.createEl("button", { text: "×", cls: "jam-deck-routine-action is-danger", attr: { type: "button", "aria-label": `删除每日待办：${routine.text}` } });
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`删除每日待办“${routine.text}”？\n\n已完成和已归档的打卡记录会保留。`)) return;
+        await this.plugin.removeDeckRoutine(routine.id);
+        this.onOpen();
+      });
+    }
+
+    const footer = contentEl.createDiv({ cls: "jam-deck-routine-footer" });
+    const draft = footer.createEl("input", { type: "text", cls: "jam-deck-routine-draft", attr: { placeholder: "新的每日待办…" } });
+    const add = footer.createEl("button", { text: "添加", cls: "jam-deck-routine-add", attr: { type: "button" } });
+    const submit = async () => {
+      if (!draft.value.trim()) return;
+      await this.plugin.addDeckRoutine(draft.value, "life");
+      this.onOpen();
+    };
+    add.addEventListener("click", submit);
+    draft.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") void submit();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// 元素当前动画的总时长（延迟 + 时长，取最长一段）。日结单的动画时长只写在
+// styles.css，JS 读计算样式再等，不另存一份常量。
+function jamDeckAnimationMs(el) {
+  const style = window.getComputedStyle(el);
+  const seconds = (value) => value.split(",").map((part) => parseFloat(part) || 0);
+  const delays = seconds(style.animationDelay);
+  return Math.max(0, ...seconds(style.animationDuration).map((duration, i) => (duration + (delays[i] || 0)) * 1000));
+}
+
+// 今天的结算清单。既包含还没归档的已完成项（本次归档的目标），也包含今天早些
+// 时候已经归档的——「下班结算」要看到一整天的产出，而不只是剩下这一批。
+function jamDeckCollectDayReceipt(tasks, today) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const onToday = (stamp) => {
+    if (!stamp) return false;
+    const date = new Date(Number(stamp));
+    if (Number.isNaN(date.getTime())) return false;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}` === today;
+  };
+  const pending = [];
+  const archived = [];
+  for (const task of list) {
+    if (!task || task.tombstone) continue;
+    if (task.status === "completed") pending.push(task);
+    else if (task.status === "archived" && (onToday(task.archivedAt) || task.archiveTargetDate === today)) archived.push(task);
+  }
+  const stamp = (task) => Number(task.completedAt) || Number(task.archivedAt) || 0;
+  pending.sort((a, b) => stamp(a) - stamp(b));
+  archived.sort((a, b) => stamp(a) - stamp(b));
+  return { pending, archived, total: pending.length + archived.length };
+}
+
+class DayReceiptModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  // 弹窗挂在 .jam-deck-root 之外，工作台那条统一禁用动效的规则管不到，
+  // 因此读插件自己的动画开关 —— 与项目约定一致，不查系统设置。
+  get animated() {
+    return this.plugin.settings.animationsEnabled !== false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.containerEl.addClass("jam-deck-receipt-container");
+    if (this.animated) this.containerEl.addClass("is-animated");
+    this.modalEl.addClass("jam-deck-receipt-modal-shell");
+    contentEl.addClass("jam-deck-receipt-modal");
+    this.render();
+  }
+
+  // Obsidian 的 close() 会同步摘掉整个容器，退场动画没有机会播。先挂退场类，
+  // 等它播完再真正关闭；动画关掉时直接关。
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+    if (!this.animated) {
+      super.close();
+      return;
+    }
+    this.containerEl.addClass("is-closing");
+    window.setTimeout(() => super.close(), jamDeckAnimationMs(this.modalEl));
+  }
+
+  render() {
+    const { contentEl } = this;
+    contentEl.empty();
+    const today = this.plugin.formatLocalDate(new Date());
+    const receipt = jamDeckCollectDayReceipt(this.plugin.settings.deckTasks, today);
+
+    // 吐纸只在弹窗打开时播一次；归档失败后的重绘不再重播。
+    contentEl.toggleClass("is-printing", !this.printed && this.animated);
+    this.printed = true;
+    contentEl.createDiv({ cls: "jam-deck-receipt-slot", attr: { "aria-hidden": "true" } });
+    const paper = contentEl.createDiv({ cls: "jam-deck-receipt" });
+    const head = paper.createDiv({ cls: "jam-deck-receipt-head" });
+    head.createDiv({ text: "JAM DECK", cls: "jam-deck-receipt-brand" });
+    head.createDiv({ text: "日 结 单", cls: "jam-deck-receipt-subtitle" });
+    const now = new Date();
+    head.createDiv({
+      text: `${today}  ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+      cls: "jam-deck-receipt-stamp",
+    });
+
+    paper.createDiv({ cls: "jam-deck-receipt-rule" });
+
+    if (!receipt.total) {
+      paper.createDiv({ text: "今天还没有完成的事项。", cls: "jam-deck-receipt-empty" });
+    } else {
+      const lines = paper.createDiv({ cls: "jam-deck-receipt-lines" });
+      for (const task of [...receipt.archived, ...receipt.pending]) {
+        const line = lines.createDiv({ cls: "jam-deck-receipt-line" });
+        line.createSpan({ text: this.plugin.resolveTaskCategory(task) === "work" ? "工作" : "生活", cls: "jam-deck-receipt-tag" });
+        line.createSpan({ text: task.text, cls: "jam-deck-receipt-name" });
+        const stamp = Number(task.completedAt) || Number(task.archivedAt) || 0;
+        const time = stamp ? new Date(stamp) : null;
+        line.createSpan({
+          text: time ? `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}` : "--:--",
+          cls: "jam-deck-receipt-time",
+        });
+      }
+    }
+
+    paper.createDiv({ cls: "jam-deck-receipt-rule" });
+    const total = paper.createDiv({ cls: "jam-deck-receipt-total" });
+    total.createSpan({ text: "合计" });
+    total.createSpan({ text: `${receipt.total} 项`, cls: "jam-deck-receipt-total-value" });
+    if (receipt.pending.length) {
+      const sub = paper.createDiv({ cls: "jam-deck-receipt-note" });
+      sub.setText(`其中 ${receipt.pending.length} 项待归档`);
+    }
+    paper.createDiv({ text: "谢 谢 光 临 · 今 天 的 班 上 到 这 儿", cls: "jam-deck-receipt-footer" });
+    paper.createDiv({ cls: "jam-deck-receipt-barcode", attr: { "aria-hidden": "true" } });
+
+    // 按钮留在纸面内部：弹窗外壳是透明的（只让一张小票漂浮），任何纸面之外的
+    // 元素都会在纸和按钮之间留下一道透过工作台的缝，看起来像渲染破了。
+    // 没有待归档项时不放按钮，靠右上角原生关闭键或 Esc 退出。
+    if (receipt.pending.length) {
+      const actions = paper.createDiv({ cls: "jam-deck-receipt-actions" });
+      const archive = actions.createEl("button", { text: `归 档 ${receipt.pending.length} 项`, cls: "jam-deck-receipt-confirm", attr: { type: "button" } });
+      archive.addEventListener("click", async () => {
+        archive.disabled = true;
+        archive.setText("归 档 中…");
+        const failed = await this.plugin.archiveCompletedTasks();
+        if (failed) {
+          new Notice(`Jam Deck：${failed} 项归档失败，可在待办列表重试`);
+          this.render();
+          return;
+        }
+        // 结算：盖章 → 撕下这一联 → 甩走，然后收起弹窗。撕走了却没归档成功会
+        // 误导，所以只在全部成功后播；动画关掉时直接关。
+        archive.setText(`已 归 档 ${receipt.pending.length} 项`);
+        if (this.animated) {
+          paper.createDiv({ text: "已 结 算", cls: "jam-deck-receipt-seal", attr: { "aria-hidden": "true" } });
+          this.containerEl.addClass("is-settling");
+          await new Promise((resolve) => window.setTimeout(resolve, jamDeckAnimationMs(paper)));
+        }
+        this.close();
+      });
+    }
   }
 
   onClose() {
@@ -2178,6 +3497,7 @@ class CanvasInkOverlay {
     });
     menu.appendChild(button);
     this.toggleButton = button;
+    this.runtime.deckView?.appearance?.scheduleGlass();
   }
 
   makePaletteButton(parent, icon, label, handler, cls = "") {
@@ -8297,6 +9617,57 @@ function jamDeckIsNativeCanvasFocusButton(button) {
   return /\blucide-scan\b/.test(String(svgClass));
 }
 
+class CanvasToolbarIdleController {
+  constructor(root) {
+    this.root = root;
+    this.win = root.ownerDocument.defaultView;
+    this.pointers = new Set();
+    this.disposers = [];
+    this.timer = 0;
+    this.destroyed = false;
+    const listen = (target, name, handler) => {
+      target.addEventListener(name, handler, { capture: true, passive: true });
+      this.disposers.push(() => target.removeEventListener(name, handler, true));
+    };
+    for (const name of ["pointerenter", "pointermove", "wheel", "keydown", "focusin", "input", "dragover"]) {
+      listen(root, name, () => this.activity());
+    }
+    listen(root, "pointerdown", event => { this.pointers.add(event.pointerId); this.activity(); });
+    const release = event => { if (this.pointers.delete(event.pointerId)) this.activity(); };
+    listen(this.win, "pointerup", release);
+    listen(this.win, "pointercancel", release);
+    const releaseAll = () => { if (this.pointers.size) { this.pointers.clear(); this.activity(); } };
+    for (const name of ["blur", "dragend", "drop"]) listen(this.win, name, releaseAll);
+    this.activity();
+  }
+
+  activity() {
+    if (this.destroyed) return;
+    this.lastActivity = this.win.performance.now();
+    if (this.root.classList.contains("jam-deck-canvas-toolbar-idle")) this.root.classList.remove("jam-deck-canvas-toolbar-idle");
+    // A single deadline timer; pointer motion does not create a timer per event.
+    if (!this.timer) this.timer = this.win.setTimeout(() => this.check(), 5000);
+  }
+
+  check() {
+    this.timer = 0;
+    if (this.destroyed || this.pointers.size) return;
+    const remaining = 5000 - (this.win.performance.now() - this.lastActivity);
+    if (remaining > 0) this.timer = this.win.setTimeout(() => this.check(), remaining);
+    else this.root.classList.add("jam-deck-canvas-toolbar-idle");
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.win.clearTimeout(this.timer); this.timer = 0;
+    for (const dispose of this.disposers) dispose();
+    this.disposers = [];
+    this.pointers.clear();
+    this.root.classList.remove("jam-deck-canvas-toolbar-idle");
+  }
+}
+
 class CanvasSelectionToolbarController {
   constructor(runtime, entry) {
     this.runtime = runtime;
@@ -8318,6 +9689,7 @@ class CanvasSelectionToolbarController {
 
   install() {
     if (!this.canvas || !this.root || !this.ownerWindow || this.destroyed) return false;
+    this.idleController = new CanvasToolbarIdleController(this.root);
     const sync = () => this.scheduleToolbarSync();
     // 按下（平移/拖拽）期间暂停同步，松手恢复并补一次——避免 pointermove
     // 高频触发两次全量节点遍历导致大图量画布平移卡顿。
@@ -8565,6 +9937,8 @@ class CanvasSelectionToolbarController {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.idleController?.destroy();
+    this.idleController = null;
     if (this.toolbarFrame && this.ownerWindow) {
       try { this.ownerWindow.cancelAnimationFrame(this.toolbarFrame); } catch (error) {}
       this.toolbarFrame = 0;
@@ -8593,6 +9967,230 @@ class CanvasSelectionToolbarController {
   }
 }
 
+// BEGIN ISLAND CAPTURE BUNDLE (generated by scripts/embed-island-capture.js)
+const MACOS_ISLAND_CAPTURE_PAYLOAD = {"sha256":"3eac19d0af44d75651bc4d05f6d6e96e15d7f4676b0026f95684d5892293e530","sourceSha256":"a7268bfcef6b7b316b89eae11967d94a40742a5e40eae5cc9cde159308f29ae5","gzip":"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3ZZZO4eunznuvl/d8EmmKevd9w1/nL/584fWbd751c8/CrWPMnzVM4D9+f07nnmsbvYX17W/VFG059iN916R9+Ho2z+6aNSPx15pn9O5bW37gZb7eqbN/7Di1+dd9+rMe+746pVpe2aOW/PAX7Ycn3/9i9fe971Hl8x6c+Hh4O8ab5v91fD0vL3vvTVu7U/3f3X+6surt84/13D1iiv+eM2nac7mc2YWjv7B8/e3rCiWXra8W7V3/8yXi5su2Njw0X9W2t6+4YpHcsfdf+xIzbGfXCk4udezg799/xrHljlFu/d/dOR8e9faMVvu+9v0J3d+uGP0/X/9Ym7mZ9vWHsv54PdO+QbbrhvXFjSLj46e+P4zRRevf+jLHb4bLnvznrHeK8776/d/439hYIvxk6oPdnw58ob//nrv3kdWf7wnbe6nzXPrnn3p+/cdt3k+HvfF0dzhpddfc+2+O1477+BDHa997+yar+8Yd+2gnLtmfZ05rXzJjiu3P9Dse+a91n1pb7z88nJDTXN6z6pdq7quefPxH5WvnX3P569+kPO7yTuqfzx1/RL+8wuC791+5K5u56rnF+buGlbluXhZsvCn6778e7++4cjVsyo/+vDmSePPP//+FZYp0/52/4e3FO/f9Ozlg+fUftvxvzNo2Ou3X3n13U/temXAwsda5793iaPD9dmi334Cm69++zHz7uffWbZ7kmfn2RP+cucVB4/elP7cp7/YetUz//EnefeGH/bM+8fIDRfsWPHIyJfveH6d7fE//vWN+VPff2z3wv0X3f3c2x/+YUbwwL6jC9c0XTB0x4UVF1351b032zj/cw/vPfH6BnFBnWnSpa87Fv3n3i+kjU+//OHaE5YXjxxs+u3vs9Psuwu4Oe/N2j7a+vbSypm/n/6LnT/5TfahITum1c69fOnz5ddM2nB80I65b/vWF7iOZdaUlbz+6i8vv+fFKdkf/Mw+89IZtzz584JX027bVHRmaeMb8554+Y8Vt54jlV8znfuL9fFCbskabvnoSeOuy2gZMs32/uBRN59526tzz6hve+PjnMODP3k10zR/x97J/9l438uDP9tfvOj8Y4898e6CydseCjw5ec7HlVdcNeO14nMXZ75nv373hbarNk0YvHHar9YeaTo8+JeDzvnz0Bl3tD3y0tjHZ5ouD7YJa3JPPNt2f96gz9/KVH5lnTZhZ5C/M0AXXXTRRRdddNFFF1100UUXXXTRRRdddNFFF1100UUXXXTRRRdddNFFF1100UUXXXTRRRdddNFFF1100UUXXXTRRRdddNFFF1100UUXXXTRRRdddNFFl38f+V9pNErmwDYCAA=="};
+function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
+  const context = canvas.getContext("2d", { alpha: false });
+  const video = win.document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  const engine = jamDeckCreateGlassEngine(win);
+  // Gate the entire filter output: an SVG filter can emit opaque pixels even
+  // while its source canvas is hidden and has never received a desktop frame.
+  const material = canvas.parentElement;
+  material.style.opacity = "0";
+  let config = null, state = null, stream = null, starting = false, disposed = false;
+  let generation = 0, callback = 0, attached = false, opticalKey = "", decoding = false;
+  const stop = () => {
+    generation++;
+    starting = false;
+    if (callback) video.cancelVideoFrameCallback(callback);
+    callback = 0;
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    stream = null;
+    video.pause(); video.srcObject = null;
+    material.style.opacity = "0";
+    canvas.style.visibility = "hidden";
+  };
+  const paint = image => {
+    if (disposed || !state?.active || !config) return;
+    const { bounds, display } = config;
+    if (config.platform === "win32") {
+      const scaleX = video.videoWidth / display.width, scaleY = video.videoHeight / display.height;
+      context.drawImage(image, (bounds.x - display.x) * scaleX, (bounds.y - display.y) * scaleY,
+        bounds.width * scaleX, bounds.height * scaleY, 0, 0, canvas.width, canvas.height);
+    } else context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    canvas.style.visibility = "visible";
+    material.style.opacity = "1";
+  };
+  const startVideo = async () => {
+    if (starting || stream || disposed || !state?.active || !config || config.platform !== "win32") return;
+    starting = true;
+    const token = generation;
+    let incoming = null;
+    try {
+      incoming = await win.navigator.mediaDevices.getUserMedia({ audio: false, video: {
+        mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: config.sourceId,
+          maxFrameRate: 30, maxWidth: config.display.width, maxHeight: config.display.height }
+      } });
+      if (disposed || token !== generation || !state?.active) { incoming.getTracks().forEach(track => track.stop()); return; }
+      stream = incoming;
+      stream.getVideoTracks()[0].addEventListener("ended", () => {
+        if (!disposed && token === generation && state?.active) reportFailure("桌面采样已停止");
+      }, { once: true });
+      video.srcObject = stream;
+      await video.play();
+      if (disposed || token !== generation || !state?.active) return;
+      const draw = () => {
+        if (disposed || token !== generation || !state?.active) return;
+        try {
+          paint(video);
+          callback = video.requestVideoFrameCallback(draw);
+        } catch (error) { stop(); reportFailure(error.message || String(error)); }
+      };
+      callback = video.requestVideoFrameCallback(draw);
+    } catch (error) {
+      if (incoming && incoming !== stream) incoming.getTracks().forEach(track => track.stop());
+      if (!disposed && token === generation && state?.active) { stop(); reportFailure(error.message || String(error)); }
+    } finally { if (token === generation) starting = false; }
+  };
+  const update = next => {
+    if (disposed) return;
+    state = next;
+    if (!state.active) { stop(); return; }
+    const blur = Math.max(0, Math.min(16, Number(state.blur) || 0));
+    const balanced = state.quality !== "light";
+    const key = `${blur}:${balanced}`;
+    if (key !== opticalKey) {
+      opticalKey = key;
+      if (balanced) {
+        const options = { bevel: 18, thickness: 40, slope: 1.8, shape: "squircle", blur,
+          dispersion: 0, sat: 1, shade: 0.14, rim: 0.22, edge: 0, edgeW: 4, smooth: 0,
+          materialize: 0, settle: 180, light: -35 };
+        if (attached) void engine.setOpts(options);
+        else { engine.attach(canvas, options); attached = true; }
+        canvas.style.filter = "var(--hyalite)";
+      } else {
+        if (attached) { engine.detach(canvas); attached = false; }
+        canvas.style.filter = `blur(${blur}px)`;
+      }
+    }
+    void startVideo();
+  };
+  return {
+    configure(value) {
+      config = value;
+      canvas.width = Math.round(value.bounds.width);
+      canvas.height = Math.round(value.bounds.height);
+      if (state) update(state);
+    },
+    update,
+    async frame(bytes) {
+      if (disposed || !state?.active || decoding) return;
+      const token = generation;
+      decoding = true;
+      let image;
+      try {
+        image = await win.createImageBitmap(new win.Blob([bytes], { type: "image/jpeg" }));
+        if (token === generation) paint(image);
+      } catch (error) {
+        if (!disposed && token === generation) reportFailure(error.message || String(error));
+      } finally { image?.close(); decoding = false; }
+    },
+    dispose() { if (disposed) return; disposed = true; stop(); engine.dispose(); },
+  };
+}
+
+class IslandGlassMaterial {
+  constructor(island, onFailure, remote, channel) {
+    this.island = island;
+    this.onFailure = onFailure;
+    this.remote = remote;
+    this.channel = channel;
+    this.stopped = false;
+    this.ready = false;
+    this.child = null;
+    this.lastCommand = "";
+    this.cancelStart = null;
+  }
+
+  launchMac(display) {
+    const fs = require("fs"), payload = MACOS_ISLAND_CAPTURE_PAYLOAD;
+    const bytes = zlib.gunzipSync(Buffer.from(payload.gzip, "base64"));
+    const hash = value => crypto.createHash("sha256").update(value).digest("hex");
+    if (hash(bytes) !== payload.sha256) throw Error("Invalid island capture helper");
+    const directory = nodePath.join(require("os").tmpdir(), "jam-deck-island-capture");
+    fs.mkdirSync(directory, { recursive: true });
+    const executable = nodePath.join(directory, payload.sha256);
+    if (!fs.existsSync(executable) || hash(fs.readFileSync(executable)) !== payload.sha256) fs.writeFileSync(executable, bytes, { mode: 0o700 });
+    const windowNumber = String(this.island.getMediaSourceId()).split(":")[1];
+    return spawn(executable, [windowNumber, String(display.id)], { stdio: ["pipe", "pipe", "pipe"] });
+  }
+
+  async start() {
+    const display = this.remote.screen.getDisplayMatching(this.island.getBounds());
+    const config = { platform: process.platform, bounds: this.island.getBounds(), display: display.bounds };
+    if (process.platform === "win32") {
+      const sources = await this.remote.require("electron").desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 0, height: 0 } });
+      if (this.stopped) return;
+      const source = sources.find(item => item.display_id === String(display.id));
+      if (!source) throw Error("Cannot find island display for capture");
+      config.sourceId = source.id;
+    } else if (process.platform !== "darwin") throw Error("Desktop island capture requires Windows or macOS");
+    await this.island.webContents.executeJavaScript(`window.jamDeckIslandOptics.configure(${JSON.stringify(config)})`);
+    if (this.stopped) return;
+    if (process.platform === "darwin") await this.startMac(display);
+    if (!this.stopped) this.ready = true;
+  }
+
+  startMac(display) {
+    return new Promise((resolve, reject) => {
+      let settled = false, buffer = Buffer.alloc(0), diagnostic = "", timer;
+      const fail = error => {
+        if (this.stopped) return;
+        if (!settled) { settled = true; clearTimeout(timer); reject(error); }
+        else this.onFailure(error);
+        this.stop();
+      };
+      this.cancelStart = () => { if (!settled) { settled = true; clearTimeout(timer); reject(Error("Island capture cancelled")); } };
+      try {
+        this.child = this.launchMac(display);
+        this.child.once("error", fail);
+        this.child.once("exit", code => fail(Error(`Island capture exited (${code}): ${diagnostic}`)));
+        this.child.stdin.on("error", fail);
+        this.child.stderr.on("data", data => { diagnostic = (diagnostic + data.toString()).slice(-2048); });
+        this.child.stdout.on("data", data => {
+          if (this.stopped) return;
+          buffer = Buffer.concat([buffer, data]);
+          if (!settled) {
+            if (buffer.length < 6) return;
+            if (buffer.subarray(0, 6).toString() !== "ready\n") { fail(Error("Invalid capture handshake")); return; }
+            buffer = buffer.subarray(6); settled = true; clearTimeout(timer); resolve();
+          }
+          while (buffer.length >= 4) {
+            const length = buffer.readUInt32BE(0);
+            if (length < 1 || length > 4 * 1024 * 1024) { fail(Error("Invalid capture frame length")); return; }
+            if (buffer.length < length + 4) break;
+            this.island.webContents.send(`${this.channel}:capture-frame`, buffer.subarray(4, length + 4));
+            buffer = buffer.subarray(length + 4);
+          }
+        });
+        timer = setTimeout(() => fail(Error(`Desktop capture permission or startup failed: ${diagnostic}`)), 15000);
+      } catch (error) { fail(error); }
+    });
+  }
+
+  update(visible, settings = {}) {
+    if (!this.ready || this.stopped) return;
+    if (typeof this.island.isVisible === "function" && !this.island.isVisible()) visible = false;
+    const state = { active: visible, blur: Number.isFinite(Number(settings.glassBlur)) ? Math.max(0, Math.min(16, Number(settings.glassBlur))) : 4,
+      quality: settings.glassQuality === "light" ? "light" : "balanced" };
+    const key = JSON.stringify(state);
+    if (key === this.lastCommand) return;
+    const wasVisible = this.lastCommand && JSON.parse(this.lastCommand).active;
+    this.lastCommand = key;
+    this.island.webContents.send(`${this.channel}:capture-state`, state);
+    if (this.child && visible !== !!wasVisible) {
+      const b = this.island.getBounds();
+      this.child.stdin.write(visible ? `show ${b.x} ${b.y} ${b.width} ${b.height}\n` : "hide\n");
+    }
+  }
+
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true; this.ready = false;
+    if (this.cancelStart) this.cancelStart();
+    try { if (!this.island.isDestroyed()) this.island.webContents.send(`${this.channel}:capture-state`, { active: false }); } catch (error) {}
+    if (this.child) {
+      try { this.child.stdin.end("quit\n"); } catch (error) {}
+      try { this.child.kill(); } catch (error) {}
+      this.child = null;
+    }
+  }
+}
+
+// END ISLAND CAPTURE BUNDLE
+
 class IslandModeController {
   constructor(plugin) {
     this.plugin = plugin;
@@ -8604,6 +10202,7 @@ class IslandModeController {
     this.ownerWindow = null;
     this.mainWindow = null;
     this.islandWindow = null;
+    this.glassMaterial = null;
     this.displayBounds = null;
     this.actionChannel = "";
     this.ipcListener = null;
@@ -8695,8 +10294,9 @@ class IslandModeController {
       const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
       return { x, y, width, height };
     }
-    const width = contentWidth + ISLAND_SHADOW_PAD_X * 2;
-    const height = ISLAND_HEIGHT;
+    const glass = this.plugin.settings.skin === "glass";
+    const width = contentWidth + (glass ? 0 : ISLAND_SHADOW_PAD_X * 2);
+    const height = glass ? ISLAND_CONTENT_HEIGHT : ISLAND_HEIGHT;
     const x = Math.round(display.x + (display.width - width) / 2);
     const y = Math.round(display.y + ISLAND_EXPANDED_TOP_GAP);
     return { x, y, width, height };
@@ -8740,9 +10340,10 @@ class IslandModeController {
     let point;
     try { point = screenApi.getCursorScreenPoint(); } catch (error) { return false; }
     // Only the visible capsule counts. Transparent shadow pads must not keep it expanded.
-    const left = bounds.x + ISLAND_SHADOW_PAD_X;
+    const pad = this.plugin.settings.skin === "glass" ? 0 : ISLAND_SHADOW_PAD_X;
+    const left = bounds.x + pad;
     const top = bounds.y + ISLAND_SHADOW_PAD_TOP;
-    const right = bounds.x + bounds.width - ISLAND_SHADOW_PAD_X;
+    const right = bounds.x + bounds.width - pad;
     const bottom = top + ISLAND_CONTENT_HEIGHT;
     return point.x >= left && point.x < right && point.y >= top && point.y < bottom;
   }
@@ -8821,9 +10422,11 @@ class IslandModeController {
     return {
       collapsed: this.collapsed,
       peekTight: !!(this.collapsed && this.peekTight),
-      dark,
+      glass: this.plugin.settings.skin === "glass",
+      dark: this.plugin.settings.skin === "glass" ? !!this.getElectronRemote().nativeTheme.shouldUseDarkColors : dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
       typography: jamDeckTypographyValues(this.plugin.settings),
+      textBrightness: jamDeckTextBrightnessValues(this.plugin.settings.glassTextBrightness),
       leaveMs: this.getLeaveMs(),
       items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
@@ -8850,7 +10453,7 @@ class IslandModeController {
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src app: file: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src app: file: data: blob:; media-src blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     :root { color-scheme: light; font-family: Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif; }
@@ -8858,6 +10461,9 @@ class IslandModeController {
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent !important; user-select: none; }
     button { font: inherit; }
     #app { position: relative; width: 100%; height: 100%; background: transparent; }
+    .island-material { position: absolute; inset: 0; height: ${ISLAND_CONTENT_HEIGHT}px; border-radius: 0 0 ${ISLAND_RADIUS}px ${ISLAND_RADIUS}px; overflow: hidden; pointer-events: none; opacity: 0; }
+    .island-material canvas { display: block; width: 100%; height: 100%; border-radius: inherit; visibility: hidden; }
+    #app.is-collapsed .island-material, body:not(.is-glass) .island-material { display: none; }
     .surface {
       position: absolute;
       top: 0;
@@ -8962,10 +10568,29 @@ class IslandModeController {
     .toast { position: absolute; left: 50%; bottom: 8px; translate: -50% 4px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(32, 37, 43, .84); color: #fff; font-size: var(--jd-font-meta, 10px); opacity: 0; pointer-events: none; transition: opacity 120ms ease, translate 120ms ease; }
     .toast.is-visible { opacity: 1; translate: -50% 0; }
     body.no-motion .toast { transition: none; }
+    /* Desktop pixels use the shared glass optics beneath this untouched foreground. */
+    body.is-glass { --glass-ink: color-mix(in srgb, #202c35, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-muted: color-mix(in srgb, #52616b, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-line: rgba(255,255,255,.12); --glass-hover: rgba(255,255,255,.08); }
+    body.is-glass.is-dark { --glass-ink: color-mix(in srgb, #f1f5f7, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-muted: color-mix(in srgb, #c5d1d8, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-line: rgba(255,255,255,.08); --glass-hover: rgba(255,255,255,.06); }
+    body.is-glass .surface {
+      left: 0; width: 100%; color: var(--glass-ink);
+      background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04));
+      border-color: var(--glass-line);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.12);
+      transition: none; will-change: auto;
+    }
+    body.is-glass :is(.chip, .timer, .restore) { background: transparent; border-color: transparent; box-shadow: none; }
+    body.is-glass :is(.chip, .restore, .timer-toggle):hover { background: var(--glass-hover); border-color: transparent; }
+    body.is-glass :is(.brand-label, .clock) { color: var(--glass-ink); }
+    body.is-glass :is(.empty, .kind, .chip-time) { color: var(--glass-muted); }
+    body.is-glass :is(.kind, .timer-toggle) { background: var(--glass-hover); }
+    body.is-glass .timer.is-running .clock { text-decoration: underline; text-decoration-color: #b8ff3d; text-underline-offset: 5px; }
+    body.is-glass :is(.chip, .timer-toggle, .restore):focus-visible { outline: 2px solid #b8ff3d; outline-offset: -3px; box-shadow: none; }
+    body.is-glass #app.is-collapsed .surface { left: 0; width: 100%; background: rgba(255,255,255,.2); border-color: transparent; box-shadow: none; }
   </style>
 </head>
 <body>
   <main id="app" aria-label="Jam Deck 灵动岛工具栏">
+    <div class="island-material" aria-hidden="true"><canvas id="desktopLens"></canvas></div>
     <section class="surface" role="toolbar">
       <div class="brand" aria-hidden="true"><span class="brand-dot"></span><span class="brand-label">灵动</span></div>
       <div id="rail" class="rail" aria-label="剪贴板芯片"></div>
@@ -8976,6 +10601,9 @@ class IslandModeController {
   </main>
   <script>
     const { ipcRenderer, nativeImage } = require("electron");
+    const crypto = require("crypto");
+    ${jamDeckCreateGlassEngine.toString()}
+    ${jamDeckCreateIslandOptics.toString()}
     const ACTION_CHANNEL = ${actionChannel};
     const STATE_CHANNEL = ACTION_CHANNEL + ":state";
     const CLIP_MIME = "application/x-jam-deck-clipboard+json";
@@ -8994,6 +10622,10 @@ class IslandModeController {
     const PEEK_HIT_PX = ${ISLAND_COLLAPSED_HEIGHT};
 
     const send = (payload) => ipcRenderer.send(ACTION_CHANNEL, payload);
+    window.jamDeckIslandOptics = jamDeckCreateIslandOptics(window, document.getElementById("desktopLens"), message => send({type: "capture-error", message}));
+    ipcRenderer.on(ACTION_CHANNEL + ":capture-state", (_event, next) => window.jamDeckIslandOptics.update(next));
+    ipcRenderer.on(ACTION_CHANNEL + ":capture-frame", (_event, bytes) => window.jamDeckIslandOptics.frame(bytes));
+    window.addEventListener("beforeunload", () => window.jamDeckIslandOptics.dispose(), { once: true });
     const clearLeave = () => { if (leaveTimer) window.clearTimeout(leaveTimer); leaveTimer = 0; };
     const scheduleLeave = () => {
       clearLeave();
@@ -9126,7 +10758,9 @@ class IslandModeController {
     function render(next) {
       state = next || state;
       for (const [name, value] of Object.entries(state.typography || {})) document.body.style.setProperty(name, value);
+      for (const [name, value] of Object.entries(state.textBrightness)) document.body.style.setProperty(name, value);
       document.body.classList.toggle("is-dark", !!state.dark);
+      document.body.classList.toggle("is-glass", !!state.glass);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
       app.classList.toggle("is-collapsed", !!state.collapsed);
       app.classList.toggle("is-peek-tight", !!state.peekTight);
@@ -9228,6 +10862,12 @@ class IslandModeController {
       return;
     }
     if (!this.active) return;
+    if (payload.type === "capture-error") {
+      console.error("jam-deck desktop capture failed", String(payload.message || ""));
+      this.finishExit(false);
+      new Notice("Jam Deck：桌面采样已停止，工作台已恢复；请检查屏幕录制权限");
+      return;
+    }
     if (payload.type === "exit") {
       this.exit();
       return;
@@ -9299,6 +10939,7 @@ class IslandModeController {
       skipTaskbar: true,
       title: "Jam Deck 灵动岛",
       webPreferences: {
+        partition: this.actionChannel,
         nodeIntegration: true,
         contextIsolation: false,
         sandbox: false,
@@ -9306,6 +10947,13 @@ class IslandModeController {
         spellcheck: false,
       },
     });
+    const captureSession = island.webContents.session;
+    const captureContentsId = island.webContents.id;
+    const capturePermission = (contents, permission) => !!contents && contents.id === captureContentsId
+      && (permission === "media" || permission === "display-capture");
+    captureSession.setPermissionCheckHandler(capturePermission);
+    captureSession.setPermissionRequestHandler((contents, permission, callback) => callback(capturePermission(contents, permission)));
+    if (process.platform === "win32") island.setContentProtection(true);
     try { island.setMenuBarVisibility(false); } catch (error) {}
     try { island.setAlwaysOnTop(true, "floating"); } catch (error) {
       try { island.setAlwaysOnTop(true); } catch (inner) {}
@@ -9326,6 +10974,9 @@ class IslandModeController {
       new Notice("Jam Deck：灵动岛无响应，工作台已恢复");
     });
     island.on("closed", () => {
+      captureSession.setPermissionRequestHandler(null);
+      captureSession.setPermissionCheckHandler(null);
+      if (this.islandWindow !== island) return;
       const internal = this.closingIslandWindow;
       this.islandWindow = null;
       if (!internal && this.active) this.finishExit(true);
@@ -9335,18 +10986,77 @@ class IslandModeController {
 
   async loadIslandWindow(island) {
     const html = this.buildWindowHtml();
-    const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-    await island.loadURL(url);
-    const initialState = JSON.stringify(this.buildSurfaceState());
+    // file:// supplies a secure context for desktop media; the session is private to this island.
+    const fs = require("fs");
+    const path = nodePath.join(require("os").tmpdir(), `jam-deck-island-${crypto.randomUUID()}.html`);
+    fs.writeFileSync(path, html, { flag: "wx" });
+    try { await island.loadFile(path); } finally { fs.unlinkSync(path); }
+    const state = this.buildSurfaceState();
+    this.syncWindowBounds(state);
+    const initialState = JSON.stringify(state);
     await island.webContents.executeJavaScript(`window.jamDeckIslandSetState(${initialState}); new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
   }
 
-  sendState() {
+  sendState(textBrightness = this.plugin.settings.glassTextBrightness) {
     const island = this.islandWindow;
     if (!this.active || !island || island.isDestroyed() || !this.actionChannel) return;
-    try { island.webContents.send(`${this.actionChannel}:state`, this.buildSurfaceState()); } catch (error) {
+    try {
+      const state = this.buildSurfaceState();
+      state.textBrightness = jamDeckTextBrightnessValues(textBrightness);
+      this.syncWindowBounds(state);
+      this.syncGlassMaterial(state);
+      island.webContents.send(`${this.actionChannel}:state`, state);
+    } catch (error) {
       console.error("jam-deck island state sync failed", error);
     }
+  }
+
+  syncWindowBounds(state) {
+    const island = this.islandWindow;
+    if (!island || island.isDestroyed()) return;
+    const key = `${state.glass}:${state.collapsed}:${this.peekTight}`;
+    if (island.jamDeckBoundsKey === key) return;
+    // Countdown updates do not resize the native window.
+    const bounds = this.computeIslandBounds(state.collapsed && this.peekTight);
+    island.setBounds(bounds, false);
+    island.jamDeckBoundsKey = key;
+  }
+
+  createGlassMaterial(island) {
+    return new IslandGlassMaterial(island, error => {
+      if (this.islandWindow !== island) return;
+      console.error("jam-deck island material failed", error);
+      this.finishExit(false);
+      new Notice("Jam Deck：玻璃材质已停止，工作台已恢复");
+    }, this.getElectronRemote(), this.actionChannel);
+  }
+
+  async prepareGlassMaterial(island) {
+    if (this.plugin.settings.skin !== "glass" || this.glassMaterial) return;
+    const material = this.createGlassMaterial(island);
+    this.glassMaterial = material;
+    await material.start();
+    if (this.glassMaterial !== material || this.islandWindow !== island || this.destroyed) return;
+    material.update(this.active && !this.collapsed, this.plugin.settings);
+  }
+
+  syncGlassMaterial(state) {
+    if (!state.glass) { this.stopGlassMaterial(); return; }
+    if (this.glassMaterial) { this.glassMaterial.update(!state.collapsed, this.plugin.settings); return; }
+    const island = this.islandWindow;
+    const generation = this.generation;
+    this.prepareGlassMaterial(island).catch(error => {
+      if (generation !== this.generation || this.islandWindow !== island) return;
+      console.error("jam-deck island material start failed", error);
+      this.finishExit(false);
+      new Notice("Jam Deck：无法启动玻璃材质，工作台已恢复");
+    });
+  }
+
+  stopGlassMaterial() {
+    const material = this.glassMaterial;
+    this.glassMaterial = null;
+    if (material) material.stop();
   }
 
   applyIslandBounds(collapsed) {
@@ -9406,6 +11116,12 @@ class IslandModeController {
     this.suppressExpandUntil = Date.now() + Math.max(450, ISLAND_MORPH_MS + 80);
     // Click-through immediately so the still-wide morphing frame cannot cover browser tabs.
     this.setMousePassthrough(true);
+    if (this.plugin.settings.skin === "glass") {
+      this.peekTight = true;
+      this.applyIslandBounds(true);
+      this.sendState();
+      return;
+    }
     // Morph in the full frame, then shrink the window to the visual 10px × 70% peek.
     this.sendState();
     this.schedulePeekBounds();
@@ -9498,6 +11214,7 @@ class IslandModeController {
   }
 
   destroyIslandWindow() {
+    this.stopGlassMaterial();
     const island = this.islandWindow;
     if (!island || island.isDestroyed()) {
       this.islandWindow = null;
@@ -9548,13 +11265,17 @@ class IslandModeController {
       this.installIpc(island);
       await this.loadIslandWindow(island);
       if (this.destroyed || generation !== this.generation || this.islandWindow !== island || island.isDestroyed()) return false;
+      await this.prepareGlassMaterial(island);
+      if (this.destroyed || generation !== this.generation || this.islandWindow !== island || island.isDestroyed()) return false;
       this.active = true;
       this.setMousePassthrough(false);
       this.sendState();
       island.show();
+      if (this.glassMaterial) this.glassMaterial.update(true, this.plugin.settings);
       island.focus();
       this.startLeaveWatch();
       this.disableMainWindowThrottling();
+      this.plugin.applyAppearance();
       this.mainWindowHidden = true;
       mainWindow.hide();
       return true;
@@ -9562,6 +11283,7 @@ class IslandModeController {
       if (this.destroyed || generation !== this.generation) return false;
       console.error("jam-deck island enter failed", error);
       this.active = false;
+      this.plugin.applyAppearance();
       this.destroyIslandWindow();
       this.removeIpc();
       this.restoreMainWindow();
@@ -9592,6 +11314,7 @@ class IslandModeController {
     this.restoreMainWindowThrottling();
     this.removeIpc();
     if (!fromClosed) this.destroyIslandWindow();
+    else this.stopGlassMaterial();
     this.removeMainWindowFailSafe();
     this.displayBounds = null;
     this.body = null;
@@ -11993,6 +13716,8 @@ class JamDeckView extends ItemView {
   }
 
   async onClose() {
+    this.appearance?.destroy();
+    this.appearance = null;
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
     for (const dispose of this.launcherLayoutDisposers || []) dispose();
@@ -12078,6 +13803,7 @@ class JamDeckView extends ItemView {
       return;
     }
     const root = this.contentEl;
+    this.appearance?.prepareRender();
     for (const dispose of this.captionDisposers || []) dispose();
     this.captionDisposers = [];
     for (const dispose of this.launcherLayoutDisposers || []) dispose();
@@ -12086,7 +13812,9 @@ class JamDeckView extends ItemView {
     this.cleanupAiFabLayout();
     this.cleanupAiLocalWeb();
     this.canvasRuntime.parkAll();
-    root.empty();
+    for (const child of Array.from(root.childNodes)) {
+      if (child !== this.appearance?.backdrop) child.remove();
+    }
     root.addClass("jam-deck-root");
     root.toggleClass("jam-deck-no-motion", !this.plugin.settings.animationsEnabled);
 
@@ -12094,6 +13822,14 @@ class JamDeckView extends ItemView {
     const title = toolbar.createDiv({ cls: "jam-deck-title" });
     title.createSpan({ text: "Jam Deck", cls: "jam-deck-title-main" });
     title.createSpan({ text: "副屏工作台", cls: "jam-deck-title-sub" });
+    const restoreChrome = title.createEl("button", {
+      text: "恢复界面", cls: "jam-deck-chrome-restore",
+      attr: { "aria-label": "显示 Obsidian 侧栏与顶栏", title: "显示 Obsidian 侧栏与顶栏" },
+    });
+    restoreChrome.addEventListener("click", async () => {
+      await this.plugin.setAppearance("hideObsidianSidebar", false);
+      await this.plugin.setAppearance("hideObsidianTopbar", false);
+    });
 
     const actions = toolbar.createDiv({ cls: "jam-deck-actions" });
     this.makeToolbarButton(actions, "+ 添加", "添加组件", () => {
@@ -12119,6 +13855,9 @@ class JamDeckView extends ItemView {
         await this.plugin.autoArrange();
       });
     }
+    const wallpaperInput = this.plugin.createBackgroundPicker(actions, () => this.plugin.setAppearance("skin", "glass"));
+    this.makeToolbarButton(actions, "映画", "更换背景图片或视频", () => wallpaperInput.click());
+    this.makeToolbarButton(actions, "设置", "打开 Jam Deck 设置", () => this.plugin.openSettings());
     this.makeToolbarButton(actions, "灵动", "进入灵动岛悬浮条", () => {
       void this.plugin.enterIslandMode();
     }, false, "jam-deck-action jam-deck-island-entry");
@@ -12187,6 +13926,7 @@ class JamDeckView extends ItemView {
       this.renderWidget(grid, widget);
     }
     this.enableLayoutSashes(grid);
+    this.restoreWidgetScrolls();
     const liveCanvasIds = new Set(this.plugin.settings.widgets
       .filter((widget) => widget.type === "canvas-embed")
       .map((widget) => widget.id));
@@ -12196,6 +13936,9 @@ class JamDeckView extends ItemView {
     for (const id of Array.from(this.canvasRuntime.nativeConflictSuspendedIds || [])) {
       if (!liveCanvasIds.has(id)) this.canvasRuntime.nativeConflictSuspendedIds.delete(id);
     }
+    if (this.appearance) this.appearance.observeSurfaces();
+    else this.appearance = new JamDeckAppearance(this);
+    this.appearance.update();
   }
 
   makeToolbarButton(parent, text, title, handler, active, className) {
@@ -13331,10 +15074,20 @@ class JamDeckView extends ItemView {
       });
     }
     if (widget.type === "tasks") {
-      const archive = headerActions.createEl("button", { text: "归档", cls: "jam-deck-widget-action", attr: { title: "查看归档待办" } });
-      archive.addEventListener("click", (event) => {
+      const routines = headerActions.createEl("button", { text: "每日", cls: "jam-deck-widget-action", attr: { title: "管理每日固定待办" } });
+      routines.addEventListener("click", (event) => {
+        event.stopPropagation();
+        new RoutineManagerModal(this.app, this.plugin).open();
+      });
+      const detail = headerActions.createEl("button", { text: "详情", cls: "jam-deck-widget-action", attr: { title: "查看已归档待办" } });
+      detail.addEventListener("click", (event) => {
         event.stopPropagation();
         new ArchiveViewerModal(this.app, this.plugin).open();
+      });
+      const archive = headerActions.createEl("button", { text: "归档", cls: "jam-deck-widget-action", attr: { title: "结算今天：把已完成的待办归档" } });
+      archive.addEventListener("click", (event) => {
+        event.stopPropagation();
+        new DayReceiptModal(this.app, this.plugin).open();
       });
     }
     if (widget.type === "launcher") {
@@ -13369,6 +15122,7 @@ class JamDeckView extends ItemView {
     const body = el.createDiv({ cls: "jam-deck-widget-body" });
     if (widget.type === "canvas-embed") body.addClass("jam-deck-canvas-embed-body");
     this.renderWidgetBody(body, widget);
+    this.keepBodyScroll(body, widget.id);
 
     if (this.plugin.settings.editMode) {
       el.addClass("is-editing");
@@ -13378,6 +15132,33 @@ class JamDeckView extends ItemView {
         header.createSpan({ text: "拖动", cls: "jam-deck-drag-hint" });
         this.enableDrag(header, el, widget);
       }
+    }
+  }
+
+  // 任何一次 renderAllViews 都会把组件 DOM 整个换掉（实测重绘前后的
+  // .jam-deck-widget-body 不是同一个节点），新节点的 scrollTop 自然是 0。
+  // 于是勾选一条滚动区外的待办时，列表会弹回顶部——笔触动画照样在视野外播完。
+  // 这里按 widget.id 记住滚动位置并在重绘后还原；恢复放进 rAF，确保布局
+  // 完成、元素已有可滚动高度，否则赋值会被丢弃。
+  keepBodyScroll(body, widgetId) {
+    const memory = (this.plugin.widgetScrollMemory ||= new Map());
+    // 不走 registerDomEvent：监听随被丢弃的节点一起回收，无需累积注册记录。
+    body.addEventListener("scroll", () => memory.set(widgetId, body.scrollTop), { passive: true });
+  }
+
+  // 还原各组件的滚动位置。必须在所有组件都构建完、栅格布局成型之后同步执行：
+  // 组件构建到一半时 body 还没有最终高度，赋值会被钳成 0。
+  // **不要改用 requestAnimationFrame**——窗口不在前台时 Electron 会暂停 rAF，
+  // 回调根本不执行（实测 600ms 内一帧未触发），滚动位置照样丢。
+  // 这里读 scrollHeight 会强制一次同步布局，拿到的就是最终值。
+  restoreWidgetScrolls() {
+    const memory = this.plugin.widgetScrollMemory;
+    if (!memory || !memory.size) return;
+    for (const el of this.contentEl.querySelectorAll(".jam-deck-widget")) {
+      const saved = memory.get(el.dataset.widgetId);
+      if (!saved) continue;
+      const body = el.querySelector(":scope > .jam-deck-widget-body");
+      if (body && body.scrollHeight > body.clientHeight) body.scrollTop = saved;
     }
   }
 
@@ -13583,17 +15364,28 @@ class JamDeckView extends ItemView {
     const createDrop = body.createDiv({ cls: "jam-deck-task-create-drop", text: "＋ 创建新待办" });
     this.plugin.enableTaskDrop(body, null, createDrop);
 
-    const active = this.plugin.settings.deckTasks.filter((task) => task.status === "active");
-    const completed = this.plugin.settings.deckTasks.filter((task) => task.status === "completed");
+    // 勾选只改变外观，不改变行的位置。此前已完成项被排到列表末尾，勾一下就位移，
+    // 划线动画于是在视野外播放（组件通常只露 2–3 行），仪式感白做；原地划掉也正是
+    // 纸笔清单的真实体验。已完成项停留时间很短（点「归档」就结算），混在原位无妨。
+    // 唯一保留的分组是「每日打卡整组排在手动待办之后」，避免每天早上把项目待办挤走。
+    const shown = this.plugin.settings.deckTasks.filter((task) => task.status === "active" || task.status === "completed");
+    const rows = [...shown.filter((task) => !task.routineId), ...shown.filter((task) => task.routineId)];
+    const active = shown.filter((task) => task.status === "active");
+    const completed = shown.filter((task) => task.status === "completed");
     const archivedCount = this.plugin.settings.deckTasks.filter((task) => task.status === "archived").length;
     const list = body.createDiv({ cls: "jam-deck-task-list" });
 
-    if (!active.length && !completed.length) {
+    if (!rows.length) {
       list.createDiv({ text: "没有待办，点击日历日期创建。", cls: "jam-deck-task-empty" });
     }
 
-    for (const task of [...active, ...completed]) {
+    for (const task of rows) {
       const row = list.createDiv({ cls: task.status === "completed" ? "jam-deck-task is-completed" : "jam-deck-task" });
+      // 标记只消费一次：动画播完后的重绘不再带它。
+      if (task.id === this.plugin.strikingTaskId) {
+        row.addClass("is-striking");
+        this.plugin.strikingTaskId = null;
+      }
       const isArchiving = this.plugin.archivingTaskIds.has(task.id);
       if (isArchiving) row.addClass("is-archiving");
       const checkbox = row.createEl("input", { type: "checkbox", cls: "jam-deck-task-check" });
@@ -13606,11 +15398,13 @@ class JamDeckView extends ItemView {
       });
       const taskMain = row.createEl("button", {
         cls: "jam-deck-task-main",
-        attr: { type: "button",  "aria-label": `打开待办详情：${task.text}` },
+        attr: { type: "button", "aria-haspopup": "dialog" },
       });
       const category = this.plugin.resolveTaskCategory(task);
       taskMain.createSpan({ text: category === "work" ? "工作" : "生活", cls: `jam-deck-task-category is-${category}` });
-      taskMain.createSpan({ text: task.text, cls: "jam-deck-task-title" });
+      const taskTitle = taskMain.createSpan({ text: task.text, cls: "jam-deck-task-title", attr: { id: `jam-deck-task-${crypto.randomUUID()}` } });
+      // Name the action from visible text without Obsidian's automatic aria-label tooltip.
+      taskMain.setAttribute("aria-labelledby", taskTitle.id);
       if (task.dueDate) {
         const overdue = task.status === "active" && task.dueDate < this.plugin.formatLocalDate(new Date());
         taskMain.createSpan({ text: task.dueDate.slice(5), cls: `jam-deck-task-due${overdue ? " is-overdue" : ""}` });
@@ -14717,6 +16511,7 @@ class JamDeckView extends ItemView {
 
 class JamDeckPlugin extends Plugin {
   async onload() {
+    this.appearanceDisposed = false;
     this.settingsSaveQueue = Promise.resolve();
     this.shortcutMutationQueue = Promise.resolve();
     this.pendingShortcutUrls = new Set();
@@ -14750,6 +16545,8 @@ class JamDeckPlugin extends Plugin {
     this.islandMode = new IslandModeController(this);
     await this.loadSettings();
     this.applyTypography();
+    this.applyAppearance();
+    this.register(() => this.clearAppearance());
     this.register(() => this.clearTypography());
     const captionDirectory = nodePath.join(jamDeckVaultBasePath(this.app), this.manifest.dir);
     const captionHostPath = nodePath.join(captionDirectory, "caption-host.js");
@@ -14764,6 +16561,8 @@ class JamDeckPlugin extends Plugin {
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();
     this.primeClipboard();
+    await this.ensureRoutineTasksForToday();
+    this.startRoutineDayWatch();
 
     this.registerView(VIEW_TYPE, (leaf) => new JamDeckView(leaf, this));
     this.addSettingTab(new JamDeckSettingTab(this.app, this));
@@ -14795,7 +16594,7 @@ class JamDeckPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("create", (file) => {
       if (file && file.extension === "canvas" && this.hasCanvasEmbedPath(file.path)) this.renderAllViews();
     }));
-    const reconcileCanvasConflicts = () => { this.applyTypography(); this.scheduleCanvasNativeConflictReconcile(); };
+    const reconcileCanvasConflicts = () => { this.applyTypography(); this.applyAppearance(); this.scheduleCanvasNativeConflictReconcile(); };
     this.registerEvent(this.app.workspace.on("layout-change", reconcileCanvasConflicts));
     this.registerEvent(this.app.workspace.on("active-leaf-change", reconcileCanvasConflicts));
 
@@ -14816,6 +16615,8 @@ class JamDeckPlugin extends Plugin {
   }
 
   onunload() {
+    this.appearanceDisposed = true;
+    this.backgroundRequestGeneration = (this.backgroundRequestGeneration || 0) + 1;
     this.captions?.dispose();
     this.canvasNativeConflictDisposed = true;
     this.canvasNativeConflictReconcileQueued = false;
@@ -14845,6 +16646,7 @@ class JamDeckPlugin extends Plugin {
   async loadSettings() {
     const saved = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved || {});
+    Object.assign(this.settings, jamDeckAppearanceSettings(this.settings));
     this.settings.textSize = jamDeckTextSize(saved?.textSize, saved ? "small" : "medium");
     this.settings.captionTextSize = jamDeckTextSize(saved?.captionTextSize, "follow");
     this.settings.widgets = Array.isArray(this.settings.widgets) ? this.settings.widgets : DEFAULT_SETTINGS.widgets;
@@ -14854,6 +16656,9 @@ class JamDeckPlugin extends Plugin {
     this.settings.clipboardItems = Array.isArray(this.settings.clipboardItems) ? this.settings.clipboardItems : [];
     this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
       ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
+      : [];
+    this.settings.deckRoutines = Array.isArray(this.settings.deckRoutines)
+      ? this.settings.deckRoutines.map((routine) => jamDeckNormalizeRoutine(routine))
       : [];
     if (this.repairDuplicateDeckTaskIds()) {
       try { await this.saveSettings(); } catch (error) {
@@ -14944,7 +16749,119 @@ class JamDeckPlugin extends Plugin {
       if (root && typeof root.toggleClass === "function") {
         root.toggleClass("jam-deck-no-motion", !this.settings.animationsEnabled);
       }
+      leaf.view?.appearance?.syncPlayback();
     }
+  }
+
+  applyAppearance() {
+    if (this.appearanceDisposed) return;
+    const documents = this.appearanceDocuments || (this.appearanceDocuments = new Set());
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    const active = this.app.workspace.activeLeaf;
+    const activeDeck = leaves.find(leaf => leaf === active || (active?.containerEl && leaf.view?.contentEl?.contains(active.containerEl)));
+    const activeDocument = !this.islandMode?.active && activeDeck?.view?.contentEl?.ownerDocument;
+    for (const tabs of this.appearanceTabs || []) tabs.classList.remove("jam-deck-hide-tabbar");
+    this.appearanceTabs = new Set();
+    if (activeDocument && this.settings.hideObsidianTopbar) {
+      const tabs = activeDeck.containerEl?.closest(".workspace-tabs");
+      if (tabs) { tabs.classList.add("jam-deck-hide-tabbar"); this.appearanceTabs.add(tabs); }
+    }
+    if (typeof document !== "undefined") documents.add(document);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view?.contentEl?.ownerDocument) documents.add(view.contentEl.ownerDocument);
+      if (view?.appearance && view.contentEl && view.contentEl.ownerDocument !== view.appearance.doc) {
+        view.appearance.destroy();
+        view.appearance = new JamDeckAppearance(view);
+      }
+      view?.appearance?.update();
+    }
+    for (const doc of documents) {
+      if (doc.defaultView?.closed) { documents.delete(doc); continue; }
+      if (doc.body) {
+        doc.body.dataset.jamDeckSkin = this.settings.skin;
+        doc.body.classList.toggle("jam-deck-hide-sidebar", doc === activeDocument && this.settings.hideObsidianSidebar);
+        doc.body.classList.toggle("jam-deck-hide-topbar", doc === activeDocument && this.settings.hideObsidianTopbar);
+      }
+    }
+    if (this.islandMode?.active) this.islandMode.sendState();
+  }
+
+  clearAppearance() {
+    for (const doc of this.appearanceDocuments || []) if (doc.body) {
+      delete doc.body.dataset.jamDeckSkin;
+      doc.body.classList.remove("jam-deck-hide-sidebar", "jam-deck-hide-topbar");
+    }
+    for (const tabs of this.appearanceTabs || []) tabs.classList.remove("jam-deck-hide-tabbar");
+    this.appearanceTabs?.clear();
+    this.appearanceDocuments?.clear();
+  }
+
+  setAppearance(key, value) {
+    if (!Object.hasOwn(jamDeckAppearanceSettings({}), key)) return Promise.resolve(false);
+    if (key === "glassBackground") this.backgroundRequestGeneration = (this.backgroundRequestGeneration || 0) + 1;
+    const operation = (this.appearanceUpdateQueue || Promise.resolve()).then(async () => {
+      // Check disposal at the actual write slot, not before waiting for another save.
+      const write = this.settingsSaveQueue.then(async () => {
+        if (this.appearanceDisposed) return false;
+        const previous = this.settings[key];
+        this.settings[key] = jamDeckAppearanceSettings({ ...this.settings, [key]: value })[key];
+        try { await this.saveData(this.settings); }
+        catch (error) {
+          this.settings[key] = previous;
+          if (!this.appearanceDisposed) new Notice("Jam Deck：外观保存失败，请重试");
+          return false;
+        }
+        return true;
+      });
+      this.settingsSaveQueue = write.catch(() => {});
+      const saved = await write;
+      if (saved && !this.appearanceDisposed) this.applyAppearance();
+      return saved;
+    });
+    this.appearanceUpdateQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  createBackgroundPicker(container, onImported) {
+    const input = container.createEl("input", { type: "file", attr: { accept: ".jpg,.jpeg,.png,.webp,.avif,.mp4,.webm", "aria-label": "选择背景图片或视频" } });
+    input.hidden = true;
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file || input.disabled) return;
+      input.disabled = true;
+      try { if (await this.importGlassBackground(file)) await onImported(); }
+      catch (error) { new Notice(`Jam Deck：背景导入失败，${error.message}`); }
+      finally { input.disabled = false; input.value = ""; }
+    });
+    return input;
+  }
+
+  async importGlassBackground(file) {
+    const kind = jamDeckBackgroundKind(file?.name);
+    if (!kind) throw new Error("请选择 JPG、PNG、WebP、AVIF 图片或 MP4、WebM 视频");
+    const generation = this.backgroundRequestGeneration = (this.backgroundRequestGeneration || 0) + 1;
+    const directory = "attachments/jam-deck-backgrounds";
+    await this.ensureVaultFolder(directory);
+    const extension = file.name.split(".").pop().toLowerCase();
+    const relative = `${directory}/${crypto.randomUUID()}.${extension}`;
+    const source = this.getDroppedFilePath(file);
+    if (source) {
+      // OS copy streams large videos without materializing them in the renderer heap.
+      await require("fs").promises.copyFile(source, nodePath.join(jamDeckVaultBasePath(this.app), relative), require("fs").constants.COPYFILE_EXCL);
+    } else {
+      await this.app.vault.createBinary(relative, await file.arrayBuffer());
+    }
+    if (this.appearanceDisposed || generation !== this.backgroundRequestGeneration) {
+      await this.app.vault.adapter.remove(relative);
+      return false;
+    }
+    if (!await this.setAppearance("glassBackground", relative)) {
+      // Only the new, unreferenced import belongs to this failed operation.
+      await this.app.vault.adapter.remove(relative);
+      return false;
+    }
+    return true;
   }
 
   applyTypography(extraDocument) {
@@ -15017,14 +16934,14 @@ class JamDeckPlugin extends Plugin {
       archiveRef: source.archiveRef && typeof source.archiveRef === "object" ? source.archiveRef : null,
       pendingJournalOp: source.pendingJournalOp && typeof source.pendingJournalOp === "object" ? source.pendingJournalOp : null,
       tombstone: source.tombstone === true,
+      // 每日模板生成的实例才有这两个字段；手动待办保持 null。
+      routineId: typeof source.routineId === "string" ? source.routineId : null,
+      spawnDate: jamDeckIsLocalDate(source.spawnDate) ? source.spawnDate : null,
     };
   }
 
   isValidLocalDate(value) {
-    const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) return false;
-    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]);
+    return jamDeckIsLocalDate(value);
   }
 
   resolveTaskCategory(task) {
@@ -16427,6 +18344,90 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     this.renderAllViews();
   }
 
+  // 每日模板 —— 生成与跨日清理。
+  // 实例不写 dueDate：日历热度留给真正有期限的待办，归档仍按「完成当天」落盘。
+  async ensureRoutineTasksForToday() {
+    const today = this.formatLocalDate(new Date());
+    const plan = jamDeckPlanRoutineSpawns(this.settings.deckRoutines, this.settings.deckTasks, today);
+    if (!plan.create.length && !plan.drop.length) {
+      this.routineSpawnDate = today;
+      return false;
+    }
+    if (plan.drop.length) {
+      const stale = new Set(plan.drop);
+      this.settings.deckTasks = this.settings.deckTasks.filter((task) => !stale.has(task.id));
+    }
+    const used = new Set(this.settings.deckTasks.map((task) => task && task.id).filter(Boolean));
+    for (const routine of plan.create) {
+      const task = this.makeDeckTask(this.allocateDeckTaskId(used), routine.text, routine.description, [], {
+        category: routine.category,
+      });
+      task.routineId = routine.id;
+      task.spawnDate = today;
+      this.settings.deckTasks.unshift(task);
+      routine.lastSpawnDate = today;
+    }
+    await this.saveSettings();
+    this.routineSpawnDate = today;
+    this.renderAllViews();
+    return true;
+  }
+
+  // 每分钟一次的跨日守卫：工作台常驻开着，跨过零点后要自动换上当天的打卡卡。
+  startRoutineDayWatch() {
+    this.routineSpawnDate = null;
+    this.registerInterval(window.setInterval(() => {
+      if (this.routineSpawnDate === this.formatLocalDate(new Date())) return;
+      this.ensureRoutineTasksForToday().catch((error) => console.error("jam-deck routine spawn failed", error));
+    }, 60000));
+  }
+
+  async addDeckRoutine(text, category) {
+    const value = String(text || "").trim();
+    if (!value) return null;
+    const routine = jamDeckNormalizeRoutine({ text: value, category });
+    this.settings.deckRoutines.push(routine);
+    await this.saveSettings();
+    await this.ensureRoutineTasksForToday();
+    this.renderAllViews();
+    return routine.id;
+  }
+
+  async updateDeckRoutine(id, patch) {
+    const routine = this.settings.deckRoutines.find((item) => item.id === id);
+    if (!routine) return false;
+    Object.assign(routine, jamDeckNormalizeRoutine({ ...routine, ...patch, id: routine.id }));
+    await this.saveSettings();
+    // 停用后立刻撤下当天尚未完成的实例，避免「关了还在列表里」。
+    if (routine.enabled === false) {
+      const stale = new Set(this.settings.deckTasks
+        .filter((task) => task.routineId === routine.id && task.status === "active")
+        .map((task) => task.id));
+      if (stale.size) {
+        this.settings.deckTasks = this.settings.deckTasks.filter((task) => !stale.has(task.id));
+        await this.saveSettings();
+      }
+    } else {
+      await this.ensureRoutineTasksForToday();
+    }
+    this.renderAllViews();
+    return true;
+  }
+
+  // 删除模板只撤掉当天未完成的实例；已完成或已归档的打卡记录保留。
+  async removeDeckRoutine(id) {
+    const before = this.settings.deckRoutines.length;
+    this.settings.deckRoutines = this.settings.deckRoutines.filter((routine) => routine.id !== id);
+    if (this.settings.deckRoutines.length === before) return false;
+    const stale = new Set(this.settings.deckTasks
+      .filter((task) => task.routineId === id && task.status === "active")
+      .map((task) => task.id));
+    if (stale.size) this.settings.deckTasks = this.settings.deckTasks.filter((task) => !stale.has(task.id));
+    await this.saveSettings();
+    this.renderAllViews();
+    return true;
+  }
+
   openNewTaskForDate(dueDate) {
     if (!this.isValidLocalDate(dueDate)) return;
     new TaskDetailModal(this.app, this, null, () => this.renderAllViews(), { dueDate }).open();
@@ -16457,6 +18458,22 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
       await this.removeVaultFiles(imported.map((image) => image.path));
       throw error;
     }
+  }
+
+  // 批量归档已完成项。逐条串行走既有归档链路（写日记本身已排队），
+  // 失败的留在「已完成」不动，返回失败条数交给调用方提示。
+  async archiveCompletedTasks() {
+    const ids = this.settings.deckTasks.filter((task) => task.status === "completed").map((task) => task.id);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        if (!await this.archiveDeckTask(id)) failed += 1;
+      } catch (error) {
+        console.error("jam-deck batch archive failed", error);
+        failed += 1;
+      }
+    }
+    return failed;
   }
 
   async completeAndArchiveDeckTask(id) {
@@ -16495,6 +18512,9 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     }
     task.status = completed ? "active" : "completed";
     task.completedAt = completed ? null : Date.now();
+    // 只给刚勾上的这一条挂动画标记。列表在每次 renderAllViews 时整体重建，
+    // 若把动画绑在 .is-completed 上，打开任意弹窗都会让所有已完成项重播划线。
+    this.strikingTaskId = completed ? null : task.id;
     await this.saveSettings();
     this.renderAllViews();
   }
@@ -17664,6 +19684,11 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  openSettings() {
+    this.app.setting.open();
+    this.app.setting.openTabById(this.manifest.id);
   }
 
   renderAllViews() {
@@ -19375,6 +21400,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 
 JamDeckPlugin.IslandModeController = IslandModeController;
+JamDeckPlugin.IslandGlassMaterial = IslandGlassMaterial;
 JamDeckPlugin.islandConstants = {
   width: ISLAND_WIDTH,
   height: ISLAND_HEIGHT,
@@ -19499,6 +21525,108 @@ class JamDeckSettingTab extends PluginSettingTab {
     containerEl.addClass("jam-deck-settings");
     containerEl.createEl("h2", { text: "Jam Deck" });
     containerEl.createEl("p", { text: "副屏工作台 · AI 对话助手（DeepSeek / GLM）", cls: "jam-deck-setting-hint" });
+
+    containerEl.createEl("h3", { text: "外观", cls: "jam-deck-setting-h3" });
+    new Setting(containerEl).setName("界面皮肤").setDesc("Spatial 纸面，或带边缘折射与柔和高光的 Liquid Glass。切换立即生效。")
+      .addDropdown(dropdown => {
+        dropdown.addOptions({ spatial: "Spatial · 纸面", glass: "Liquid Glass · 玻璃" }).setValue(this.plugin.settings.skin);
+        dropdown.onChange(async value => { await this.plugin.setAppearance("skin", value); this.display(); });
+      });
+    new Setting(containerEl).setName("隐藏 Obsidian 侧栏").setDesc("纸面与玻璃通用，仅工作台活动时隐藏侧栏与左侧图标栏；不会改变原来的展开状态。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.hideObsidianSidebar);
+        toggle.onChange(async value => { await this.plugin.setAppearance("hideObsidianSidebar", value); toggle.setValue(this.plugin.settings.hideObsidianSidebar); });
+      });
+    new Setting(containerEl).setName("隐藏 Obsidian 顶栏").setDesc("同时隐藏标签栏与最小化、最大化、关闭按钮；先点工作台左上角「恢复界面」才重新显示。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.hideObsidianTopbar);
+        toggle.onChange(async value => { await this.plugin.setAppearance("hideObsidianTopbar", value); toggle.setValue(this.plugin.settings.hideObsidianTopbar); });
+      });
+    if (this.plugin.settings.skin === "glass") {
+      new Setting(containerEl).setName("玻璃效果").setDesc("均衡：主表面带真实边缘折射。轻盈：保留通透、高光与磨砂，减少图形负担。")
+        .addDropdown(dropdown => {
+          dropdown.addOptions({ balanced: "均衡 · 液态折射", light: "轻盈 · 省电" }).setValue(this.plugin.settings.glassQuality);
+          dropdown.onChange(async value => { await this.plugin.setAppearance("glassQuality", value); dropdown.setValue(this.plugin.settings.glassQuality); });
+        });
+      const blurSetting = new Setting(containerEl).setName("玻璃模糊").setDesc("工作台和灵动岛共用：0 最清透，16 最柔和，Canvas 使用一半强度。拖动实时预览。");
+      const blurValue = blurSetting.controlEl.createEl("span", { text: `${this.plugin.settings.glassBlur}`, cls: "jam-deck-blur-value" });
+      const blurInput = blurSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "16", step: "1", "aria-label": "玻璃模糊" } });
+      blurInput.value = String(this.plugin.settings.glassBlur);
+      blurInput.addEventListener("input", () => {
+        blurValue.textContent = blurInput.value;
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.appearance?.setBlur(Number(blurInput.value));
+        const island = this.plugin.islandMode;
+        if (island?.active) island.glassMaterial?.update(!island.collapsed, { ...this.plugin.settings, glassBlur: Number(blurInput.value) });
+      });
+      blurInput.addEventListener("change", async () => {
+        await this.plugin.setAppearance("glassBlur", Number(blurInput.value));
+        this.plugin.applyAppearance();
+        blurInput.value = String(this.plugin.settings.glassBlur); blurValue.textContent = blurInput.value;
+      });
+      const fillSetting = new Setting(containerEl).setName("玻璃底色不透明度")
+        .setDesc("调节工作台组件与工具栏下层填充：0% 全透明，100% 不透明。保留原有颜色、边缘高光和磨砂，拖动实时预览。");
+      const fillValue = fillSetting.controlEl.createEl("span", { cls: "jam-deck-blur-value" });
+      const fillInput = fillSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "100", step: "1", "aria-label": "玻璃底色不透明度" } });
+      const syncFillControls = () => {
+        const value = this.plugin.settings.glassFillOpacity;
+        const view = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+        const defaultValue = view?.contentEl.dataset.jamDeckGlassTone === "dark" ? 48 : 32;
+        fillInput.value = String(value ?? defaultValue);
+        fillValue.textContent = value == null ? `默认（${defaultValue}%）` : `${value}%`;
+      };
+      syncFillControls();
+      fillInput.addEventListener("input", () => {
+        fillValue.textContent = `${fillInput.value}%`;
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.appearance?.setFillOpacity(Number(fillInput.value));
+      });
+      const saveFill = async value => {
+        await this.plugin.setAppearance("glassFillOpacity", value);
+        this.plugin.applyAppearance();
+        syncFillControls();
+      };
+      fillInput.addEventListener("change", () => { void saveFill(Number(fillInput.value)); });
+      fillSetting.addButton(button => button.setButtonText("恢复默认").onClick(() => saveFill(null)));
+      const textSetting = new Setting(containerEl).setName("文字与图标明暗")
+        .setDesc("工作台与玻璃灵动岛共用：50% 保持原配色，向左混黑压暗，向右混白提亮；壁纸自适应仍然生效。拖动实时预览。");
+      const textValue = textSetting.controlEl.createEl("span", { cls: "jam-deck-blur-value" });
+      const textInput = textSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "100", step: "1", "aria-label": "文字与图标明暗" } });
+      const syncTextControls = () => {
+        textInput.value = String(this.plugin.settings.glassTextBrightness);
+        textValue.textContent = `${textInput.value}%`;
+      };
+      syncTextControls();
+      textInput.addEventListener("input", () => {
+        const value = Number(textInput.value);
+        textValue.textContent = `${value}%`;
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.appearance?.setTextBrightness(value);
+        if (this.plugin.islandMode?.active) this.plugin.islandMode.sendState(value);
+      });
+      const saveTextBrightness = async value => {
+        await this.plugin.setAppearance("glassTextBrightness", value);
+        this.plugin.applyAppearance();
+        syncTextControls();
+      };
+      textInput.addEventListener("change", () => { void saveTextBrightness(Number(textInput.value)); });
+      textSetting.addButton(button => button.setButtonText("恢复原配色").onClick(() => saveTextBrightness(50)));
+      const background = new Setting(containerEl).setName("背景图片或视频")
+        .setDesc(this.plugin.settings.glassBackground ? `当前：${this.plugin.settings.glassBackground.split("/").pop()}` : "默认使用柔和的极光渐变。自选文件会导入库内，随库同步。");
+      const input = this.plugin.createBackgroundPicker(background.controlEl, () => this.display());
+      background.addButton(button => button.setButtonText("选择文件…").onClick(() => input.click()));
+      background.addButton(button => button.setButtonText("恢复默认").onClick(async () => { await this.plugin.setAppearance("glassBackground", ""); this.display(); }));
+      containerEl.createEl("p", { cls: "jam-deck-setting-hint", text: "图片支持 JPG / PNG / WebP / AVIF；视频支持 MP4 / WebM，推荐 1080p、30 fps。恢复默认保留已导入的附件。" });
+      new Setting(containerEl).setName("背景压暗").setDesc("背景太亮或太花时，降低亮度，让玻璃上的文字更清楚。")
+        .addSlider(slider => {
+          slider.setLimits(0, 70, 1).setValue(this.plugin.settings.glassBackgroundDim).setDynamicTooltip();
+          slider.onChange(async value => { await this.plugin.setAppearance("glassBackgroundDim", value); });
+        });
+      if (jamDeckBackgroundKind(this.plugin.settings.glassBackground) === "video") {
+        new Setting(containerEl).setName("播放视频背景").setDesc("静音循环；工作台不可见、关闭动画或系统开启减少动态效果时自动暂停。")
+          .addToggle(toggle => {
+            toggle.setValue(this.plugin.settings.glassVideoPlaying);
+            toggle.onChange(async value => { await this.plugin.setAppearance("glassVideoPlaying", value); toggle.setValue(this.plugin.settings.glassVideoPlaying); });
+          });
+      }
+    }
 
     new Setting(containerEl)
       .setName("界面字号")
@@ -19701,8 +21829,19 @@ class JamDeckSettingTab extends PluginSettingTab {
 }
 
 JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
+JamDeckPlugin.Appearance = JamDeckAppearance;
+JamDeckPlugin.appearanceSettings = jamDeckAppearanceSettings;
+JamDeckPlugin.wallpaperLuminance = jamDeckWallpaperLuminance;
+JamDeckPlugin.textBrightnessValues = jamDeckTextBrightnessValues;
+JamDeckPlugin.backgroundKind = jamDeckBackgroundKind;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;
+JamDeckPlugin.RoutineManagerModal = RoutineManagerModal;
+JamDeckPlugin.DayReceiptModal = DayReceiptModal;
+JamDeckPlugin.collectDayReceipt = jamDeckCollectDayReceipt;
+JamDeckPlugin.normalizeRoutine = jamDeckNormalizeRoutine;
+JamDeckPlugin.planRoutineSpawns = jamDeckPlanRoutineSpawns;
+JamDeckPlugin.isLocalDate = jamDeckIsLocalDate;
 JamDeckPlugin.textSize = jamDeckTextSize;
 JamDeckPlugin.typographyValues = jamDeckTypographyValues;
 JamDeckPlugin.SettingTab = JamDeckSettingTab;

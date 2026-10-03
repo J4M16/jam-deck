@@ -1,3 +1,30 @@
+/* Cross-scope Jam Deck tokens.  Own modals mount on document.body, outside
+   .jam-deck-root, so values shared by workbench and modals must live here.
+   Only theme-invariant values belong in this block. */
+body {
+  --jd-heading: #5c5c5c;
+  --jd-motion-enter: 300ms;
+  --jd-motion-exit: 300ms;
+  --jd-motion-ease: cubic-bezier(.22, 1, .36, 1);
+  /* Sampled damped spring: a small overshoot, then a quiet settle in 300ms. */
+  --jd-motion-spring: linear(0, .1029 5%, .3313 10%, .5891 15%, .8153 20%, .9807 25%, 1.0798 30%, 1.122 35%, 1.1235 40%, 1.1012 45%, 1.0693 50%, 1.0379 55%, 1.0128 60%, .9959 65%, .9871 70%, .9845 75%, .986 80%, .9895 85%, .9937 90%, .9973 95%, 1);
+
+  /* Corner scale. Every step is an even number: odd values were folded into
+     the nearest even neighbour (5 -> 4, 7 -> 6, 9 -> 8; 3 moves up to 4
+     because 2px is reserved for the folder and turntable geometry, which is
+     not part of this scale).
+     The first three are role tokens rather than size steps, so the same kind
+     of element keeps one corner wherever it appears. Icon corners stay
+     proportional to their box and deliberately sit outside this scale. */
+  --jd-radius-chip: 4px;      /* badges, micro controls, progress tracks */
+  --jd-radius-control: 6px;   /* text inputs and buttons */
+  --jd-radius-surface: 8px;   /* small surfaces inside a widget: cards, rows */
+  --jd-radius-sm: 10px;       /* icon-sized boxes */
+  --jd-radius-md: 14px;       /* groupings */
+  --jd-radius-lg: 18px;       /* primary surfaces and dialogs */
+  --jd-radius-pill: 999px;
+}
+
 .workspace-leaf-content[data-type="jam-deck-view"] .view-content {
   padding: 0;
 }
@@ -75,7 +102,7 @@
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
   color: var(--text-normal);
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   cursor: pointer;
 }
 
@@ -107,7 +134,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--background-secondary);
   container-type: inline-size;
 }
@@ -168,6 +195,9 @@
     border-color 180ms cubic-bezier(.22, 1, .36, 1);
 }
 
+/* Dead rule: the later .jam-deck-root override wins at equal specificity, so
+   the edit border actually renders grey. Left as-is — recolouring a zombie
+   only fakes a fix; removal belongs to scripts/audit-dead-css.js. */
 .jam-deck-widget.is-editing { border-style: dashed; border-color: var(--interactive-accent); }
 .jam-deck-widget.is-moving {
   opacity: 0.96;
@@ -184,7 +214,7 @@
   visibility: hidden;
   pointer-events: none;
   z-index: 6;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   border: 2px solid transparent;
   background:
     linear-gradient(
@@ -261,7 +291,7 @@
   position: absolute;
   z-index: 6;
   pointer-events: none;
-  border-radius: 3px;
+  border-radius: var(--jd-radius-chip);
 }
 .jam-deck-widget.is-layout-seam-top::before {
   left: 0;
@@ -375,7 +405,11 @@
   min-width: 0;
   margin-left: auto;
 }
-.jam-deck-countdown-duration {
+/* Type-qualified on purpose: Obsidian's own input[type="text"] rule is (0,1,1)
+   and would otherwise win over a bare class, dropping the field back to the
+   theme's --input-radius while :focus/:disabled and the running flip digits
+   stayed at the intended corner. */
+input.jam-deck-countdown-duration {
   width: 34px;
   min-width: 0;
   height: 28px;
@@ -383,7 +417,7 @@
   margin: 0;
   padding: 0 3px;
   border: 1px solid var(--jd-countdown-card-border, var(--background-modifier-border));
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: var(--jd-countdown-input-bg, var(--background-primary));
   box-shadow: var(--jd-countdown-input-shadow, none);
   color: var(--jd-countdown-card-ink, var(--text-normal));
@@ -430,7 +464,7 @@
   height: clamp(26px, 2.4vw, 30px);
   overflow: hidden;
   border: 1px solid var(--jd-countdown-card-border, var(--background-modifier-border));
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: linear-gradient(
     to bottom,
     var(--jd-countdown-card-top, var(--background-primary-alt)) 0 49%,
@@ -493,49 +527,44 @@
   line-height: 1.6;
 }
 
-.jam-deck-clipboard-gallery { display: grid; gap: 8px; }
-.jam-deck-clip-image { position: relative; overflow: hidden; border-radius: 7px; background: var(--background-primary); line-height: 0; cursor: grab; }
-.jam-deck-clip-image img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
-.jam-deck-clip-overlay { position: absolute; top: 7px; left: 7px; padding: 2px 7px; color: #fff; background: rgba(0,0,0,0.46); border-radius: 4px; font-size: var(--jd-font-meta, 10px); line-height: 1.4; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
-.jam-deck-clip-text { position: relative; border-left: 2px solid #3B6D11; padding: 5px 7px; background: var(--background-primary); border-radius: 4px; cursor: grab; }
+.jam-deck-clip-overlay { position: absolute; top: 7px; left: 7px; padding: 2px 7px; color: #fff; background: rgba(0,0,0,0.46); border-radius: var(--jd-radius-chip); font-size: var(--jd-font-meta, 10px); line-height: 1.4; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
 .jam-deck-clip-image.is-dragging,
 .jam-deck-clip-text.is-dragging { opacity: 0.48; cursor: grabbing; }
-.jam-deck-clip-text-time { display: block; margin-bottom: 3px; color: #3B6D11; font-size: var(--jd-font-meta, 10px); font-weight: 600; }
 .jam-deck-clip-text-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--jd-font-body-compact, 11px); line-height: 1.45; max-height: 112px; overflow: auto; }
-.jam-deck-clip-toolbar { position: absolute; top: 5px; right: 5px; display: none; gap: 4px; z-index: 2; }
 .jam-deck-clip-image:hover .jam-deck-clip-toolbar,
 .jam-deck-clip-text:hover .jam-deck-clip-toolbar { display: flex; }
-.jam-deck-clip-btn { padding: 2px 6px; border: 0; border-radius: 4px; background: rgba(0,0,0,0.55); color: #fff; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-clip-btn { padding: 2px 6px; border: 0; border-radius: var(--jd-radius-chip); background: rgba(0,0,0,0.55); color: #fff; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
 .jam-deck-clip-btn:hover { background: rgba(0,0,0,0.75); }
 .jam-deck-clip-btn.is-danger:hover { background: rgba(180,30,30,0.85); }
-.jam-deck-clip-text .jam-deck-clip-btn { background: var(--background-modifier-border); color: var(--text-normal); }
 .jam-deck-clip-text .jam-deck-clip-btn:hover { background: var(--background-modifier-hover); }
 .jam-deck-clip-text .jam-deck-clip-btn.is-danger:hover { background: var(--text-error); color: #fff; }
 .jam-deck-clipboard-drag-hint { margin-top: 8px; color: var(--text-faint); font-size: var(--jd-font-caption, 9px); line-height: 1.45; text-align: center; }
 
 .jam-deck-task-composer { display: flex; align-items: stretch; gap: 6px; margin-bottom: 8px; }
-.jam-deck-task-composer input { min-width: 0; min-height: 32px; flex: 1; margin: 0; padding: 6px 9px; box-sizing: border-box; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-label, 11px); }
-.jam-deck-task-composer button { width: 32px; min-width: 32px; min-height: 32px; margin: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--interactive-accent); border-radius: 6px; background: var(--interactive-accent); color: var(--text-on-accent); box-shadow: none; font-size: 16px; line-height: 1; cursor: pointer; }
+.jam-deck-task-composer input { min-width: 0; min-height: 32px; flex: 1; margin: 0; padding: 6px 9px; box-sizing: border-box; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-label, 11px); }
+.jam-deck-task-composer button { width: 32px; min-width: 32px; min-height: 32px; margin: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--interactive-accent); border-radius: var(--jd-radius-control); background: var(--interactive-accent); color: var(--text-on-accent); box-shadow: none; font-size: 16px; line-height: 1; cursor: pointer; }
 .jam-deck-task-list { display: grid; gap: 5px; }
-.jam-deck-task { min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 8px; box-sizing: border-box; border: 1px solid transparent; border-radius: 7px; background: var(--background-primary); transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.jam-deck-task { min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 8px; box-sizing: border-box; border: 1px solid transparent; border-radius: var(--jd-radius-control); background: var(--background-primary); transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
 .jam-deck-task:hover { background: var(--background-modifier-hover); }
 .jam-deck-task.is-completed { opacity: 0.68; }
 .jam-deck-task.is-archiving { opacity: 0.5; }
-.jam-deck-task-check { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; accent-color: var(--interactive-accent); cursor: pointer; }
+/* Brand green, same as the countdown toggle: the theme accent is purple and
+   the task checkbox was the last place still inheriting it. */
+.jam-deck-task-check { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; accent-color: var(--jd-accent, var(--interactive-accent)); cursor: pointer; }
 
 .jam-deck-task-main:hover { color: var(--text-accent); }
-.jam-deck-task-main:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: 3px; }
+.jam-deck-task-main:focus-visible { outline: 2px solid var(--jd-accent, var(--interactive-accent)); outline-offset: 2px; border-radius: var(--jd-radius-chip); }
 .jam-deck-task.is-completed .jam-deck-task-main { text-decoration: line-through; }
 .jam-deck-task-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .jam-deck-task-archive,
-.jam-deck-task-delete { height: 26px; min-height: 26px; margin: 0; padding: 0; display: grid; place-items: center; flex: 0 0 auto; white-space: nowrap; border: 1px solid var(--background-modifier-border); border-radius: 5px; background: transparent; color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-meta, 10px); line-height: 1; cursor: pointer; }
+.jam-deck-task-delete { height: 26px; min-height: 26px; margin: 0; padding: 0; display: grid; place-items: center; flex: 0 0 auto; white-space: nowrap; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: transparent; color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-meta, 10px); line-height: 1; cursor: pointer; }
 .jam-deck-task-archive { width: 40px; }
 .jam-deck-task-delete { width: 26px; font-size: 13px; opacity: 0; transition: opacity 0.15s, border-color 0.15s, background 0.15s, color 0.15s; }
 .jam-deck-task:hover .jam-deck-task-delete,
 .jam-deck-task:focus-within .jam-deck-task-delete { opacity: 1; }
 .jam-deck-task-archive:hover { color: var(--text-normal); border-color: var(--text-muted); }
 .jam-deck-task-delete:hover { border-color: var(--text-error); background: color-mix(in srgb, var(--background-primary) 86%, var(--text-error)); color: var(--text-error); }
-.jam-deck-task-archive:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
+.jam-deck-task-archive:focus-visible { outline: 2px solid var(--jd-accent, var(--interactive-accent)); outline-offset: 1px; }
 .jam-deck-task-archive:disabled,
 .jam-deck-task-delete:disabled,
 .jam-deck-task-main:disabled,
@@ -544,8 +573,10 @@
 .jam-deck-task-foot { margin-top: 8px; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); text-align: center; }
 .jam-deck-task-dropzone,
 .jam-deck-launcher-dropzone { position: relative; }
-.jam-deck-launcher-dropzone.is-drop-target::after { content: "释放以添加"; position: absolute; inset: 5px; z-index: 12; display: grid; place-items: center; border: 1px dashed var(--interactive-accent); border-radius: 7px; background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 650; pointer-events: none; backdrop-filter: blur(4px); }
-.jam-deck-task-create-drop { max-height: 0; min-height: 0; margin: 0; padding: 0 10px; overflow: hidden; box-sizing: border-box; display: grid; place-items: center; border: 1px dashed transparent; border-radius: 7px; opacity: 0; color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 600; line-height: 1.3; pointer-events: none; transform: translateY(-4px); transition: max-height 0.18s ease, min-height 0.18s ease, margin 0.18s ease, padding 0.18s ease, opacity 0.15s ease, transform 0.18s ease, background 0.15s ease; }
+.jam-deck-launcher-dropzone.is-drop-target::after { content: "释放以添加"; position: absolute; inset: 5px; z-index: 12; display: grid; place-items: center; border: 1px dashed var(--jd-accent, var(--interactive-accent)); border-radius: var(--jd-radius-control); background: color-mix(in srgb, var(--background-primary) 88%, var(--jd-accent, var(--interactive-accent))); color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 650; pointer-events: none; backdrop-filter: blur(4px); }
+.jam-deck-task-create-drop { max-height: 0; min-height: 0; margin: 0; padding: 0 10px; overflow: hidden; box-sizing: border-box; display: grid; place-items: center; border: 1px dashed transparent; border-radius: var(--jd-radius-control); opacity: 0; color: var(--text-accent); font-size: var(--jd-font-label, 11px); font-weight: 600; line-height: 1.3; pointer-events: none; transform: translateY(-4px); transition: max-height 0.18s ease, min-height 0.18s ease, margin 0.18s ease, padding 0.18s ease, opacity 0.15s ease, transform 0.18s ease, background 0.15s ease; }
+/* The next three are dead too — measured live, the task drop states render
+   ink/transparent from the .jam-deck-root layer. Same reasoning as above. */
 .jam-deck-task-dropzone.is-drag-active .jam-deck-task-create-drop { max-height: 38px; min-height: 34px; margin: 0 0 8px; padding: 7px 10px; border-color: var(--interactive-accent); opacity: 1; pointer-events: auto; transform: translateY(0); }
 .jam-deck-task-create-drop.is-drop-target { background: color-mix(in srgb, var(--background-primary) 82%, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, transparent 68%, var(--interactive-accent)); }
 .jam-deck-task.is-drop-target { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, transparent 72%, var(--interactive-accent)); }
@@ -554,7 +585,7 @@
 .jam-deck-calendar-weekdays,
 .jam-deck-calendar-days { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; gap: 2px; }
 .jam-deck-calendar-weekdays { color: var(--text-muted); font-size: var(--jd-font-caption, 9px); margin-bottom: 3px; }
-.jam-deck-calendar-days span { display: grid; place-items: center; height: 22px; border-radius: 4px; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-calendar-days span { display: grid; place-items: center; height: 22px; border-radius: var(--jd-radius-chip); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
 .jam-deck-calendar-days span:not(.is-blank):hover { background: var(--background-modifier-hover); }
 .jam-deck-calendar-days .is-today { background: var(--interactive-accent); color: var(--text-on-accent); font-weight: 600; }
 .jam-deck-calendar-foot { margin-top: 8px; text-align: center; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); }
@@ -567,7 +598,7 @@
 
 .jam-deck-canvas-leaf > .workspace-leaf-content { display: flex; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .jam-deck-canvas-leaf .view-content { flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0; overflow: hidden; }
-.jam-deck-canvas-beta { flex: 0 0 auto; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--text-accent) 35%, transparent); border-radius: 999px; color: var(--text-accent); font-size: var(--jd-font-badge, 8px); font-weight: 700; line-height: 1.4; letter-spacing: .02em; }
+.jam-deck-canvas-beta { flex: 0 0 auto; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--text-accent) 35%, transparent); border-radius: var(--jd-radius-pill); color: var(--text-accent); font-size: var(--jd-font-badge, 8px); font-weight: 700; line-height: 1.4; letter-spacing: .02em; }
 .jam-deck-canvas-embed-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-muted); font-size: var(--jd-font-label, 11px); pointer-events: none; }
 .jam-deck-canvas-embed-host.is-ready .jam-deck-canvas-embed-loading { display: none; }
 .jam-deck-canvas-embed-host.is-fallback { display: grid; place-items: center; padding: 18px; box-sizing: border-box; }
@@ -576,8 +607,8 @@
 .jam-deck-canvas-embed-state-title { font-size: var(--jd-font-body, 12px); font-weight: 650; }
 .jam-deck-canvas-embed-state-path { max-width: 100%; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); overflow-wrap: anywhere; }
 .jam-deck-canvas-embed-state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 3px; }
-.jam-deck-canvas-embed-state-actions button { min-height: 28px; margin: 0; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: 5px; background: var(--background-secondary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
-.jam-deck-canvas-embed-state-actions button:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
+.jam-deck-canvas-embed-state-actions button { min-height: 28px; margin: 0; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: var(--background-secondary); color: var(--text-normal); box-shadow: none; font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+.jam-deck-canvas-embed-state-actions button:hover { border-color: var(--jd-accent, var(--interactive-accent)); color: var(--text-accent); }
 .jam-deck-canvas-embed-host.is-compact .jam-deck-canvas-embed-state { gap: 4px; }
 .jam-deck-canvas-embed-host.is-compact .jam-deck-canvas-embed-state-icon { font-size: 22px; }
 
@@ -589,10 +620,26 @@
   align-items: center;
   overflow: visible;
   border: 1px solid color-mix(in srgb, var(--jd-line) 70%, transparent);
-  border-radius: 18px;
+  border-radius: var(--jd-radius-lg);
   background: color-mix(in srgb, var(--jd-board) 82%, var(--jd-surface-raised));
   box-shadow: 0 10px 26px rgb(0 0 0 / 0.18), 0 2px 5px rgb(0 0 0 / 0.12);
   backdrop-filter: blur(12px);
+}
+/* Keep the native toolbar mounted and its geometry stable while idle. Keyboard
+   focus stays visible; activity anywhere inside this Canvas reveals it again. */
+.jam-deck-canvas-leaf .canvas-card-menu {
+  /* Native translateX(-50%) moves this origin to the visible bottom center.
+     Independent scale preserves positioning without sliding the toolbar. */
+  scale: 1;
+  transform-origin: 0% 100%;
+  transition: opacity var(--jd-motion-enter) var(--jd-motion-ease), scale var(--jd-motion-enter) var(--jd-motion-spring), visibility 0s;
+}
+.jam-deck-canvas-leaf.jam-deck-canvas-toolbar-idle .canvas-card-menu:not(:has(:focus-visible)) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  scale: 0.94;
+  transition: opacity var(--jd-motion-exit) var(--jd-motion-ease), scale var(--jd-motion-exit) var(--jd-motion-ease), visibility 0s linear var(--jd-motion-exit);
 }
 .jam-deck-canvas-leaf .jam-deck-node-toolbar--spatial .canvas-card-menu-divider { height: 28px; align-self: center; background: color-mix(in srgb, var(--jd-line) 72%, transparent); }
 .jam-deck-canvas-leaf .jam-deck-node-toolbar--spatial .canvas-card-menu-button {
@@ -605,7 +652,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--jd-radius-md);
   background: transparent;
   color: var(--jd-muted);
   box-shadow: none;
@@ -692,12 +739,12 @@
   content: "";
   width: 22px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jam-deck-ink-color);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.24);
 }
 .jam-deck-canvas-leaf .jam-deck-ink-color[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--jd-surface-raised), 0 0 0 4px var(--jam-deck-ink-color); }
-.jam-deck-canvas-leaf .jam-deck-ink-width span { display: block; width: 24px; height: var(--jam-deck-ink-width); max-height: 9px; border-radius: 999px; background: currentColor; }
+.jam-deck-canvas-leaf .jam-deck-ink-width span { display: block; width: 24px; height: var(--jam-deck-ink-width); max-height: 9px; border-radius: var(--jd-radius-pill); background: currentColor; }
 .jam-deck-canvas-leaf .jam-deck-drawing-palette .jam-deck-ink-done { width: auto; min-width: 56px; padding: 0 10px; color: var(--jd-ink); background: var(--jd-hover); font-size: 12px; font-weight: 650; }
 .jam-deck-canvas-leaf .jam-deck-drawing-palette.is-eraser [data-group="color"] { opacity: 0.36; pointer-events: none; }
 
@@ -838,7 +885,7 @@
   overflow: hidden;
   box-sizing: border-box;
   border: 2px solid rgb(255 255 255 / 0.92);
-  border-radius: var(--jd-canvas-image-radius, 10px);
+  border-radius: var(--jd-canvas-image-radius);
   background: color-mix(in srgb, var(--background-primary) 88%, var(--jd-folder-color) 12%);
   box-shadow: 0 3px 10px rgb(0 0 0 / 0.12);
   pointer-events: none;
@@ -1055,7 +1102,7 @@
     var(--jd-paper, var(--background-primary));
   color: var(--jd-ink, var(--text-normal));
   border: 1px solid var(--jd-paper-edge, transparent);
-  border-radius: var(--jd-radius-md, 14px);
+  border-radius: var(--jd-radius-md);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.42),
     var(--jd-shadow-lift, 0 28px 80px -24px rgb(0 0 0 / 0.68));
@@ -1113,7 +1160,7 @@
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   color: #fff !important;
   background: rgb(255 255 255 / 0.15) !important;
   background-image: none !important;
@@ -1355,8 +1402,8 @@
   min-width: 0;
   min-height: 0;
   background: var(--background-primary);
-  --jd-canvas-image-radius: var(--jd-radius-sm, 10px);
-  --jd-canvas-group-radius: var(--jd-radius-md, 14px);
+  --jd-canvas-image-radius: var(--jd-radius-sm);
+  --jd-canvas-group-radius: var(--jd-radius-md);
 }
 
 .jam-deck-canvas-leaf .jam-deck-canvas-folder-layer {
@@ -1382,7 +1429,7 @@
   z-index: 1;
   inset: 0;
   overflow: visible;
-  border-radius: var(--jd-radius-md, 14px);
+  border-radius: var(--jd-radius-md);
   pointer-events: none;
   cursor: default;
 }
@@ -1419,7 +1466,7 @@
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--jd-folder-panel-edge);
-  border-radius: var(--jd-radius-md, 14px);
+  border-radius: var(--jd-radius-md);
   background: var(--jd-folder-panel);
   box-shadow: var(--jd-folder-shadow);
   pointer-events: none;
@@ -1557,7 +1604,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-folder-control-ink);
   box-shadow: none;
@@ -1609,7 +1656,7 @@
   min-height: 28px;
   padding: 5px 7px;
   border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: rgb(30 33 37 / 0.96);
   box-shadow: 0 4px 10px rgb(0 0 0 / 0.24), 0 12px 24px rgb(0 0 0 / 0.24);
   white-space: nowrap;
@@ -1780,19 +1827,19 @@
 
 .jam-deck-browser-empty { height: 100%; display: grid; place-items: center; gap: 8px; color: var(--text-muted); font-size: var(--jd-font-label, 11px); text-align: center; }
 .jam-deck-primary-button { padding: 5px 9px; font-size: var(--jd-font-label, 11px); }
-.jam-deck-browser-frame { width: 100%; height: calc(100% - 22px); border: 0; border-radius: 5px; background: #fff; }
+.jam-deck-browser-frame { width: 100%; height: calc(100% - 22px); border: 0; border-radius: var(--jd-radius-chip); background: #fff; }
 .jam-deck-browser-fallback { display: block; margin-top: 4px; color: var(--text-accent); font-size: var(--jd-font-meta, 10px); text-align: center; }
 
 .jam-deck-launcher-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
-.jam-deck-launcher-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; cursor: grab; position: relative; transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease; }
+.jam-deck-launcher-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: var(--jd-radius-surface); cursor: grab; position: relative; transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease; }
 .jam-deck-launcher-item:active { cursor: grabbing; }
 .jam-deck-launcher-item:hover { background: var(--background-modifier-hover); transform: scale(1.08); }
 .jam-deck-launcher-item.is-reordering { opacity: 0.52; }
 .jam-deck-launcher-item.is-insert-before::before,
-.jam-deck-launcher-item.is-insert-after::after { content: ""; position: absolute; z-index: 3; top: 11%; bottom: 11%; width: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 64%, transparent); pointer-events: none; }
+.jam-deck-launcher-item.is-insert-after::after { content: ""; position: absolute; z-index: 3; top: 11%; bottom: 11%; width: 2px; border-radius: var(--jd-radius-pill); background: color-mix(in srgb, var(--text-muted) 64%, transparent); pointer-events: none; }
 .jam-deck-launcher-item.is-insert-before::before { left: -5px; }
 .jam-deck-launcher-item.is-insert-after::after { right: -5px; }
-.jam-deck-launcher-grid.is-insert-at-end::after { content: ""; width: 2px; min-height: 44px; align-self: center; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 54%, transparent); }
+.jam-deck-launcher-grid.is-insert-at-end::after { content: ""; width: 2px; min-height: 44px; align-self: center; border-radius: var(--jd-radius-pill); background: color-mix(in srgb, var(--text-muted) 54%, transparent); }
 .jam-deck-launcher-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; overflow: hidden; }
 .jam-deck-launcher-icon img { width: 100%; height: 100%; object-fit: contain; }
 .jam-deck-launcher-icon span { font-size: 24px; }
@@ -1809,7 +1856,7 @@
 .jam-deck-launcher-icon .jam-deck-launcher-fallback svg { width: 20px; height: 20px; }
 .jam-deck-launcher-name { font-size: var(--jd-font-meta, 10px); text-align: center; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-normal); }
 .jam-deck-launcher-live { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
-.jam-deck-launcher-edit { position: absolute; top: 2px; right: 2px; min-width: 19px; height: 19px; margin: 0; padding: 0 4px; display: grid; place-items: center; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-caption, 9px); line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.jam-deck-launcher-edit { position: absolute; top: 2px; right: 2px; min-width: 19px; height: 19px; margin: 0; padding: 0 4px; display: grid; place-items: center; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-chip); background: var(--background-primary); color: var(--text-muted); box-shadow: none; font-size: var(--jd-font-caption, 9px); line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
 .jam-deck-launcher-edit.is-edit { right: 24px; }
 .jam-deck-launcher-item:hover .jam-deck-launcher-edit,
 .jam-deck-launcher-item:focus-within .jam-deck-launcher-edit { opacity: 1; }
@@ -1827,19 +1874,19 @@
 .jam-deck-shortcut-preview .jam-deck-launcher-icon .jam-deck-launcher-fallback svg { width: 30px; height: 30px; }
 .jam-deck-shortcut-fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 18px; min-width: 0; }
 .jam-deck-shortcut-field { display: grid; min-width: 0; gap: 10px; font-size: var(--jd-font-body, 12px); color: var(--jd-muted); }
-.jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: 9px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-input, 13px); }
+.jam-deck-shortcut-form input { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-control); background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-input, 13px); }
 .jam-deck-shortcut-modal .jam-deck-shortcut-form input:focus { border-color: var(--jd-line); box-shadow: none; }
 .jam-deck-shortcut-form input:focus-visible, .jam-deck-shortcut-form button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: -1px; }
 .jam-deck-shortcut-appearance { min-width: 0; display: grid; gap: 20px; }
 .jam-deck-shortcut-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--jd-font-body, 12px); font-weight: 600; }
 .jam-deck-shortcut-modes { display: flex; gap: 4px; }
-.jam-deck-shortcut-modes button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 999px; box-shadow: none; background: transparent; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
+.jam-deck-shortcut-modes button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--jd-radius-pill); box-shadow: none; background: transparent; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
 .jam-deck-shortcut-modes button[aria-pressed="true"] { color: var(--jd-ink); background: var(--jd-hover); border-color: var(--jd-line); }
 .jam-deck-shortcut-character-controls { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .jam-deck-shortcut-character-controls input[type="text"] { text-align: center; }
 .jam-deck-shortcut-form input[type="color"] { cursor: pointer; padding: 5px; }
 .jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-.jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.jam-deck-shortcut-form input[type="color"]::-webkit-color-swatch { border: 0; border-radius: var(--jd-radius-chip); }
 .jam-deck-shortcut-folder-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--jd-font-body, 12px); color: var(--jd-muted); }
 .jam-deck-shortcut-palette { display: flex; gap: 4px; }
 .jam-deck-shortcut-palette button { width: 30px; height: 30px; padding: 5px; border: 1px solid transparent; border-radius: 50%; background: var(--jd-swatch); background-clip: content-box; box-shadow: none; }
@@ -1850,7 +1897,7 @@
 .jam-deck-shortcut-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 20px; border-top: 1px solid var(--jd-line); }
 .jam-deck-shortcut-footer > .jam-deck-shortcut-hint { flex: 1; min-width: 140px; }
 .jam-deck-shortcut-modal .jam-deck-modal-actions { flex-shrink: 0; margin: 0 0 0 auto; gap: 10px; }
-.jam-deck-shortcut-modal .jam-deck-modal-actions button { height: 38px; min-width: 76px; border: 1px solid var(--jd-line); border-radius: 999px; background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-body, 12px); }
+.jam-deck-shortcut-modal .jam-deck-modal-actions button { height: 38px; min-width: 76px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-pill); background: transparent; color: var(--jd-ink); box-shadow: none; font-size: var(--jd-font-body, 12px); }
 .jam-deck-shortcut-modal .jam-deck-modal-actions .jam-deck-shortcut-save { background: var(--jd-ink); color: var(--background-primary); border-color: transparent; font-weight: 650; }
 .jam-deck-shortcut-modal button { cursor: pointer; }
 .jam-deck-shortcut-modal button:hover { filter: brightness(.96); }
@@ -1867,33 +1914,51 @@
 .jam-deck-picker p { margin: 0 0 16px; color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
 .jam-deck-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .jam-deck-picker-item { min-height: 68px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; }
-.jam-deck-picker-item:hover { border-color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.jam-deck-picker-item:hover { border-color: var(--jd-accent, var(--interactive-accent)); background: var(--background-modifier-hover); }
 .jam-deck-picker-icon { font-size: 18px; color: var(--text-accent); }
 .jam-deck-picker-label { font-size: var(--jd-font-body, 12px); }
 
+/* Shared dialog material. Own modals mount outside .jam-deck-root, so the
+   palette has to be re-declared on each shell. Palette and surface live here;
+   size and padding stay with each dialog below. */
 .modal.jam-deck-canvas-picker-modal,
-.modal.jam-deck-shortcut-editor-modal {
+.modal.jam-deck-shortcut-editor-modal,
+.modal.jam-deck-task-modal-shell,
+.modal.jam-deck-archive-modal-shell,
+.modal.jam-deck-routine-modal-shell {
   --jd-paper: color-mix(in srgb, var(--background-primary) 96%, #f7f6f1);
   --jd-ink: var(--text-normal); --jd-muted: var(--text-muted);
+  --jd-faint: color-mix(in srgb, var(--text-muted) 58%, transparent);
   --jd-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --jd-hover: color-mix(in srgb, var(--text-normal) 6%, transparent); --jd-accent: #b8ff3d;
-  width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
-  padding: 32px 24px 18px; border: 1px solid var(--jd-line); border-radius: 18px;
+  /* Paired with --jd-accent for anything drawn on top of the green (tick marks). */
+  --jd-accent-ink: #183000;
+  border: 1px solid var(--jd-line); border-radius: var(--jd-radius-lg);
   background: var(--jd-paper); color: var(--jd-ink); box-shadow: 0 14px 48px rgb(15 20 18 / .16);
 }
 .theme-dark .modal.jam-deck-canvas-picker-modal,
-.theme-dark .modal.jam-deck-shortcut-editor-modal { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
-.modal.jam-deck-shortcut-editor-modal { width: min(500px, calc(100vw - 32px)); padding: 24px; }
+.theme-dark .modal.jam-deck-shortcut-editor-modal,
+.theme-dark .modal.jam-deck-task-modal-shell,
+.theme-dark .modal.jam-deck-archive-modal-shell,
+.theme-dark .modal.jam-deck-routine-modal-shell { --jd-paper: color-mix(in srgb, var(--background-primary) 91%, #292d28); }
+.modal.jam-deck-canvas-picker-modal {
+  width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
+  padding: 32px 24px 18px;
+}
+.modal.jam-deck-shortcut-editor-modal {
+  width: min(500px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px));
+  padding: 24px;
+}
 .jam-deck-shortcut-editor-modal > .modal-header { display: none; }
 .jam-deck-canvas-picker-modal .jam-deck-canvas-picker { padding: 0; margin: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; gap: 16px; }
 .jam-deck-canvas-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; }
 .jam-deck-canvas-picker h2 { margin: 0 0 6px; font-size: var(--jd-font-dialog-title, 21px); line-height: 1.3; font-weight: 650; letter-spacing: -.4px; }
 .jam-deck-canvas-picker-heading p { margin: 0; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); line-height: 1.5; }
-.jam-deck-canvas-picker button.jam-deck-canvas-picker-create { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; height: 38px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer; }
+.jam-deck-canvas-picker button.jam-deck-canvas-picker-create { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; height: 38px; padding: 0 14px; border: 0; border-radius: var(--jd-radius-pill); background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer; }
 .jam-deck-canvas-picker button.jam-deck-canvas-picker-create:hover { opacity: .86; }
 .jam-deck-canvas-picker-create span { display: inline-flex; }
 .jam-deck-canvas-picker-create svg, .jam-deck-canvas-picker-search svg { width: 16px; height: 16px; }
-.jam-deck-canvas-picker-search { display: flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--jd-line); border-radius: 10px; padding: 0 12px; color: var(--jd-muted); }
+.jam-deck-canvas-picker-search { display: flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-sm); padding: 0 12px; color: var(--jd-muted); }
 .jam-deck-canvas-picker-search > span { display: flex; }
 .jam-deck-canvas-picker input[type="search"] { min-width: 0; width: 100%; height: 40px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: var(--jd-font-input, 13px); }
 .jam-deck-canvas-picker-search:focus-within { border-color: var(--jd-muted); box-shadow: 0 0 0 2px color-mix(in srgb, var(--jd-accent) 28%, transparent); }
@@ -1923,16 +1988,208 @@
 .jam-deck-browser-modal { padding: 18px; }
 .jam-deck-browser-modal h2 { margin: 0 0 6px; }
 .jam-deck-browser-modal p { margin: 0 0 12px; color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
-.jam-deck-browser-modal input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); }
+.jam-deck-browser-modal input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); }
 .jam-deck-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-.jam-deck-modal-actions button { padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+.jam-deck-modal-actions button { padding: 5px 10px; border-radius: var(--jd-radius-chip); cursor: pointer; }
 
+/* Both task dialogs let the content element own the padding, because their
+   sticky footers rely on negative margins measured against it. */
 .modal.jam-deck-task-modal-shell {
   width: min(620px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
+  padding: 0;
+  overflow: hidden;
+}
+.modal.jam-deck-archive-modal-shell {
+  width: min(560px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(720px, calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+/* Day receipt. Deliberately not the shared paper material: a thermal slip is a
+   narrow strip with torn edges, so it gets its own surface. Only the scrollbar
+   rules are shared. */
+.modal.jam-deck-receipt-modal-shell {
+  --jd-slip-slot: 12px;
+  --jd-slip-tuck: 5px;
+  width: min(348px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 0;
+  border: 0;
+  background: transparent;
   overflow: visible;
 }
+/* Obsidian's `.modal-container.mod-dim .modal` (0,3,0) paints --shadow-l on
+   the shell; it shows as a rectangle whenever the slip does not cover it —
+   mid-feed and after the flick. The container class lifts this above it. */
+.modal-container.jam-deck-receipt-container > .modal.jam-deck-receipt-modal-shell { box-shadow: none; }
+.jam-deck-receipt-modal-shell > .modal-header { display: none; }
+/* The paper starts below the printer slot, so the close button moves down with it. */
+.jam-deck-receipt-modal-shell > .modal-header-button { top: calc(var(--size-2-3) + var(--jd-slip-slot) - var(--jd-slip-tuck)); }
+/* No gap, no extra wrapper: the shell is transparent so anything outside the
+   paper would show the workbench through the seam. The torn edges are a mask,
+   and a mask clips the element's own box-shadow away with them, so the soft
+   paper shadow is cast by this wrapper onto the already-cut outline. */
+.jam-deck-receipt-modal {
+  padding: 0;
+  filter: drop-shadow(0 1px 1px rgb(15 20 18 / .08)) drop-shadow(0 12px 24px rgb(15 20 18 / .16));
+}
+/* Printer slot the slip feeds out of and is torn off from. Wider than the
+   paper and tucked over its top teeth, so there is no seam between them. */
+.jam-deck-receipt-slot {
+  position: relative;
+  z-index: 1;
+  height: var(--jd-slip-slot);
+  margin: 0 -10px calc(var(--jd-slip-tuck) * -1);
+  border-radius: var(--jd-radius-pill);
+  background: linear-gradient(#4a4a45, #1d1d1b);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .16), inset 0 -2px 0 rgb(0 0 0 / .4);
+}
+.jam-deck-receipt {
+  --jd-slip: #fbfaf6;
+  --jd-slip-ink: #2b2b28;
+  --jd-slip-faint: color-mix(in srgb, var(--jd-slip-ink) 46%, transparent);
+  position: relative;
+  width: 100%;
+  padding: 22px 20px 18px;
+  background: var(--jd-slip);
+  color: var(--jd-slip-ink);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.7;
+  /* Torn top and bottom edges, cut out of the paper itself rather than drawn as
+     an extra layer. */
+  --jd-slip-teeth: 7px;
+  -webkit-mask:
+    radial-gradient(var(--jd-slip-teeth) at 50% 0, transparent 99%, #000) 0 0 / 14px 100% repeat-x,
+    radial-gradient(var(--jd-slip-teeth) at 50% 100%, transparent 99%, #000) 0 100% / 14px 100% repeat-x,
+    linear-gradient(#000, #000) 0 var(--jd-slip-teeth) / 100% calc(100% - var(--jd-slip-teeth) * 2) no-repeat;
+}
+.theme-dark .jam-deck-receipt { --jd-slip: #edece7; }
+/* Receipt motion — a scoped transform/clip-path exception in VISUAL_DESIGN.md.
+   The dialog mounts outside .jam-deck-root, so the workbench-wide no-motion
+   rule cannot reach it; JS withholds is-animated / is-printing / is-settling
+   when the plugin's animation toggle is off. Durations live only here: JS
+   reads them back from computed style before closing. */
+.jam-deck-receipt-container.is-animated .modal-bg { animation: jam-deck-receipt-fade-in 220ms ease-out both; }
+.jam-deck-receipt-container.is-animated .modal-header-button { animation: jam-deck-receipt-fade-in 200ms ease-out 240ms both; }
+@keyframes jam-deck-receipt-fade-in { from { opacity: 0; } }
+@keyframes jam-deck-receipt-fade-out { to { opacity: 0; } }
+/* Opening: the slot springs in with a small overshoot, then the slip slides
+   out of it as a whole — footer first — in four bursts with short stops
+   between, the way a thermal head prints block by block. The clip inset
+   tracks the translate so the visible top edge stays pinned under the slot. */
+.jam-deck-receipt-modal.is-printing .jam-deck-receipt-slot { animation: jam-deck-receipt-slot-in 260ms cubic-bezier(.2, .8, .3, 1) both; }
+@keyframes jam-deck-receipt-slot-in {
+  0% { opacity: 0; transform: scale(.6, .5); }
+  50% { opacity: 1; transform: scale(1.04, 1.12); }
+  100% { transform: scale(1); }
+}
+.jam-deck-receipt-modal.is-printing .jam-deck-receipt { animation: jam-deck-receipt-feed 2400ms cubic-bezier(.3, 0, .7, 1) 200ms both; }
+@keyframes jam-deck-receipt-feed {
+  0% { transform: translateY(-100%); clip-path: inset(100% 0 0 0); }
+  17%, 24% { transform: translateY(-78%); clip-path: inset(78% 0 0 0); }
+  48%, 55% { transform: translateY(-48%); clip-path: inset(48% 0 0 0); }
+  79%, 86% { transform: translateY(-18%); clip-path: inset(18% 0 0 0); }
+  100% { transform: translateY(0); clip-path: inset(0 0 0 0); }
+}
+/* Settling, one timeline: the seal lands and the slip dips under it, a beat
+   of stillness, two tugs (the perforation holds once, then gives), the torn
+   slip swings like a pendulum from where it was grabbed, then gets flicked
+   away. The dialog closes when this ends. */
+.jam-deck-receipt-container.is-settling .modal-header-button { animation: jam-deck-receipt-fade-out 120ms ease-in both; }
+.jam-deck-receipt-container.is-settling .jam-deck-receipt { transform-origin: 50% 8%; animation: jam-deck-receipt-settle 1500ms both; }
+@keyframes jam-deck-receipt-settle {
+  0%, 10% { transform: translate(0, 0) rotate(0deg); opacity: 1; animation-timing-function: cubic-bezier(.2, 0, .4, 1); }
+  14% { transform: translate(0, 4px); animation-timing-function: cubic-bezier(.3, 0, .3, 1); }
+  21%, 40% { transform: translate(0, 0); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  46% { transform: translate(0, 7px); animation-timing-function: cubic-bezier(.3, 0, .5, 1); }
+  50% { transform: translate(0, 2px); animation-timing-function: cubic-bezier(.5, 0, .7, 1); }
+  55% { transform: translate(0, 12px) rotate(-1deg); animation-timing-function: cubic-bezier(.2, .7, .3, 1); }
+  68% { transform: translate(-30px, 34px) rotate(-11deg); animation-timing-function: cubic-bezier(.45, 0, .55, 1); }
+  86% { transform: translate(-14px, 38px) rotate(4deg); opacity: 1; animation-timing-function: cubic-bezier(.6, 0, .9, .5); }
+  100% { transform: translate(180px, -110px) rotate(22deg); opacity: 0; }
+}
+.jam-deck-receipt-seal {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  padding: 3px 12px;
+  border: 2px solid currentColor;
+  border-radius: var(--jd-radius-chip);
+  background: color-mix(in srgb, var(--jd-slip) 82%, transparent);
+  color: var(--jd-slip-ink);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .3em;
+  white-space: nowrap;
+  opacity: .78;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-9deg);
+  animation: jam-deck-receipt-seal 320ms both;
+}
+@keyframes jam-deck-receipt-seal {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(-16deg) scale(1.9); animation-timing-function: cubic-bezier(.55, 0, .85, .35); }
+  47% { opacity: .78; transform: translate(-50%, -50%) rotate(-9deg) scale(.92); animation-timing-function: cubic-bezier(.2, .8, .3, 1); }
+  72% { transform: translate(-50%, -50%) rotate(-9deg) scale(1.03); }
+  100% { opacity: .78; transform: translate(-50%, -50%) rotate(-9deg) scale(1); }
+}
+/* Closing — Esc, backdrop click, or the end of settling: shrink and fade,
+   quicker than the entrance. */
+.jam-deck-receipt-container.is-closing { pointer-events: none; }
+.jam-deck-receipt-container.is-closing .modal-bg { animation: jam-deck-receipt-fade-out 180ms ease-in both; }
+.jam-deck-receipt-container.is-closing .modal { animation: jam-deck-receipt-out 180ms cubic-bezier(.4, 0, 1, 1) both; }
+@keyframes jam-deck-receipt-out { to { opacity: 0; transform: translateY(6px) scale(.96); } }
+.jam-deck-receipt-head { text-align: center; }
+.jam-deck-receipt-brand { font-size: 15px; font-weight: 700; letter-spacing: .22em; }
+.jam-deck-receipt-subtitle { letter-spacing: .3em; color: var(--jd-slip-faint); }
+.jam-deck-receipt-stamp { margin-top: 4px; color: var(--jd-slip-faint); font-variant-numeric: tabular-nums; }
+.jam-deck-receipt-rule { margin: 12px 0; border-top: 1px dashed color-mix(in srgb, var(--jd-slip-ink) 34%, transparent); }
+.jam-deck-receipt-empty { padding: 8px 0; color: var(--jd-slip-faint); text-align: center; }
+.jam-deck-receipt-lines { display: grid; gap: 5px; }
+.jam-deck-receipt-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
+.jam-deck-receipt-tag { color: var(--jd-slip-faint); font-size: 10px; }
+.jam-deck-receipt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jam-deck-receipt-time { color: var(--jd-slip-faint); font-variant-numeric: tabular-nums; }
+.jam-deck-receipt-total { display: flex; align-items: baseline; justify-content: space-between; font-weight: 700; letter-spacing: .1em; }
+.jam-deck-receipt-total-value { font-variant-numeric: tabular-nums; }
+.jam-deck-receipt-note { margin-top: 2px; color: var(--jd-slip-faint); text-align: right; }
+.jam-deck-receipt-footer { margin-top: 14px; color: var(--jd-slip-faint); text-align: center; font-size: 10px; }
+/* Stand-in barcode: stripes of varying width, no scannable data. */
+.jam-deck-receipt-barcode {
+  height: 26px;
+  margin-top: 10px;
+  background-image: repeating-linear-gradient(to right,
+    var(--jd-slip-ink) 0 2px, transparent 2px 4px,
+    var(--jd-slip-ink) 4px 5px, transparent 5px 8px,
+    var(--jd-slip-ink) 8px 11px, transparent 11px 12px,
+    var(--jd-slip-ink) 12px 13px, transparent 13px 16px);
+  opacity: .72;
+}
+/* Sits on the slip itself, above the torn bottom edge. */
+.jam-deck-receipt-actions { display: flex; justify-content: center; margin-top: 14px; }
+button.jam-deck-receipt-confirm {
+  height: 34px; padding: 0 20px; border: 0; border-radius: var(--jd-radius-chip);
+  background: var(--jd-slip-ink); color: var(--jd-slip); box-shadow: none;
+  font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: .08em; cursor: pointer;
+}
+button.jam-deck-receipt-confirm:hover:not(:disabled) { opacity: .86; }
+button.jam-deck-receipt-confirm:disabled { opacity: .5; cursor: wait; }
+button.jam-deck-receipt-confirm:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent, #b8ff3d); }
+
+.modal.jam-deck-routine-modal-shell {
+  width: min(520px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(720px, calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+.jam-deck-task-modal-shell > .modal-header,
+.jam-deck-archive-modal-shell > .modal-header,
+.jam-deck-routine-modal-shell > .modal-header { display: none; }
 
 .jam-deck-folder-rename-input {
   width: 100%;
@@ -1954,11 +2211,15 @@
   overflow-x: hidden;
   overflow-y: auto;
 }
-.jam-deck-task-modal h2 { margin: 0 32px 4px 0; font-size: var(--jd-font-title, 20px); line-height: 1.3; }
-.jam-deck-task-modal-subtitle { margin: 0 32px 18px 0; color: var(--text-muted); font-size: var(--jd-font-label, 11px); line-height: 1.55; }
-.jam-deck-task-form { min-width: 0; display: grid; gap: 12px; }
-.jam-deck-task-field { min-width: 0; display: grid; gap: 6px; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 9px; background: var(--background-secondary); }
-.jam-deck-task-form label { color: var(--text-normal); font-size: var(--jd-font-label, 11px); font-weight: 650; }
+.jam-deck-task-modal h2 { margin: 0 32px 6px 0; font-size: var(--jd-font-dialog-title, 21px); font-weight: 650; letter-spacing: -.4px; line-height: 1.3; }
+.jam-deck-task-modal-subtitle { margin: 0 32px 24px 0; color: var(--jd-muted); font-size: var(--jd-font-label, 11px); line-height: 1.55; }
+/* One paper surface: fields are separated by whitespace and a quiet label,
+   never by their own card. The glass skin already worked this way. */
+.jam-deck-task-form { min-width: 0; display: grid; gap: 20px; }
+.jam-deck-task-field { min-width: 0; display: grid; gap: 6px; }
+/* One step weaker than the heading. Some themes resolve --text-muted to the
+   same #5c5c5c the headings are pinned to, which would flatten the hierarchy. */
+.jam-deck-task-form label { color: color-mix(in srgb, var(--jd-muted) 72%, transparent); font-size: var(--jd-font-label, 11px); font-weight: 600; letter-spacing: .02em; }
 .jam-deck-task-form input[type="text"],
 .jam-deck-task-form textarea {
   display: block;
@@ -1966,10 +2227,10 @@
   max-width: 100%;
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-control);
   background: var(--background-primary);
-  color: var(--text-normal);
+  color: var(--jd-ink);
   font: inherit;
   font-size: var(--jd-font-body, 12px);
   line-height: 1.5;
@@ -1993,36 +2254,133 @@
   user-select: text;
 }
 .jam-deck-task-form input[type="text"]:focus,
-.jam-deck-task-form textarea:focus { border-color: var(--interactive-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent); }
+.jam-deck-task-form textarea:focus { border-color: var(--jd-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--jd-accent) 38%, transparent); }
 .jam-deck-task-hint { min-width: 0; color: var(--text-faint); font-size: var(--jd-font-meta, 10px); line-height: 1.45; overflow-wrap: anywhere; }
 .jam-deck-task-images { min-width: 0; display: grid; gap: 6px; max-height: 190px; overflow-x: hidden; overflow-y: auto; }
-.jam-deck-task-image-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; border-radius: 6px; background: var(--background-secondary); }
+.jam-deck-task-image-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; border-radius: var(--jd-radius-control); background: transparent; transition: background-color 120ms ease-out; }
+.jam-deck-task-image-row:hover { background: var(--jd-hover); }
 
-.jam-deck-task-image-row img { width: 42px; height: 42px; border-radius: 4px; object-fit: cover; }
+.jam-deck-task-image-row img { width: 42px; height: 42px; border-radius: var(--jd-radius-chip); object-fit: cover; }
 .jam-deck-task-image-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-image-row button { padding: 3px 7px; font-size: var(--jd-font-meta, 10px); }
-.jam-deck-task-image-empty { padding: 16px 10px; border: 1px dashed var(--background-modifier-border); border-radius: 6px; color: var(--text-muted); text-align: center; font-size: var(--jd-font-label, 11px); }
+.jam-deck-task-image-empty { padding: 16px 10px; border: 1px dashed var(--jd-line); border-radius: var(--jd-radius-control); color: var(--jd-muted); text-align: center; font-size: var(--jd-font-label, 11px); }
 .jam-deck-task-file-picker { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .jam-deck-task-file-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.jam-deck-task-file-button { flex: 0 0 auto; min-height: 30px; padding: 5px 10px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); color: var(--text-normal); font-size: var(--jd-font-label, 11px); cursor: pointer; }
-.jam-deck-task-file-button:hover { border-color: var(--interactive-accent); color: var(--text-accent); }
+.jam-deck-task-file-button { flex: 0 0 auto; min-height: 30px; padding: 5px 10px; border: 1px solid var(--background-modifier-border); border-radius: var(--jd-radius-control); background: var(--background-primary); color: var(--text-normal); font-size: var(--jd-font-label, 11px); cursor: pointer; }
+.jam-deck-task-file-button:hover { border-color: color-mix(in srgb, var(--jd-ink) 32%, var(--jd-line)); background: var(--jd-hover); }
+.jam-deck-task-file-button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
 .jam-deck-task-file-hint { min-width: 0; color: var(--text-faint); font-size: var(--jd-font-meta, 10px); overflow-wrap: anywhere; }
-.jam-deck-task-modal .jam-deck-modal-actions { position: sticky; bottom: -24px; z-index: 2; margin: 4px -24px -24px; padding: 14px 24px; border-top: 1px solid var(--background-modifier-border); background: color-mix(in srgb, var(--background-primary) 92%, transparent); backdrop-filter: blur(10px); }
-.jam-deck-task-modal .jam-deck-modal-actions button { min-width: 72px; min-height: 34px; }
+.jam-deck-task-modal .jam-deck-modal-actions { position: sticky; bottom: -24px; z-index: 2; margin: 8px -24px -24px; padding: 16px 24px; border-top: 1px solid var(--jd-line); background: var(--jd-paper); }
+/* Outlined buttons on the paper, one high-contrast black-and-white primary.
+   Obsidian's mod-cta accent is overridden on purpose: the spec calls for a
+   black-and-white primary, not the theme accent. */
+.jam-deck-task-modal .jam-deck-modal-actions button {
+  min-width: 72px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-control);
+  background: transparent;
+  color: var(--jd-ink);
+  box-shadow: none;
+  font-size: var(--jd-font-button, 12px);
+  cursor: pointer;
+}
+.jam-deck-task-modal .jam-deck-modal-actions button:hover { background: var(--jd-hover); }
+.jam-deck-task-modal .jam-deck-modal-actions button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--jd-accent);
+}
+.jam-deck-task-modal .jam-deck-modal-actions button.mod-cta {
+  background: var(--jd-ink);
+  border-color: var(--jd-ink);
+  color: var(--jd-paper);
+}
+.jam-deck-task-modal .jam-deck-modal-actions button.mod-cta:hover { filter: brightness(1.15); background: var(--jd-ink); }
+.jam-deck-task-modal .jam-deck-modal-actions button.is-danger { color: var(--text-error); }
+.jam-deck-task-modal .jam-deck-modal-actions button.is-danger:hover {
+  border-color: color-mix(in srgb, var(--text-error) 52%, var(--jd-line));
+  background: color-mix(in srgb, var(--text-error) 10%, transparent);
+}
 
-.jam-deck-archive-modal { padding: 18px; max-height: 70vh; overflow-y: auto; }
-.jam-deck-archive-modal h2 { margin: 0 0 12px; }
-.jam-deck-archive-empty { color: var(--text-muted); font-size: var(--jd-font-body, 12px); }
-.jam-deck-archive-list { display: grid; gap: 6px; }
-.jam-deck-archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--background-secondary); }
-.jam-deck-archive-text { min-width: 0; padding: 2px 0; border: 0; background: transparent; font: inherit; font-size: var(--jd-font-body, 12px); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: line-through; color: var(--text-muted); cursor: pointer; }
-.jam-deck-archive-text:hover { color: var(--text-accent); }
-.jam-deck-archive-text:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: 3px; }
-.jam-deck-archive-meta { font-size: var(--jd-font-meta, 10px); color: var(--text-faint); white-space: nowrap; }
-.jam-deck-archive-action { padding: 3px 7px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: transparent; color: var(--text-muted); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
-.jam-deck-archive-action:hover { color: var(--text-normal); border-color: var(--text-muted); }
-.jam-deck-archive-action.is-danger:hover { color: #fff; background: var(--text-error); border-color: var(--text-error); }
-.jam-deck-archive-footer { margin-top: 14px; text-align: right; }
+.jam-deck-archive-modal { padding: 24px; max-height: min(720px, calc(100vh - 48px)); overflow-y: auto; }
+.jam-deck-archive-modal h2 { margin: 0 0 20px; font-size: var(--jd-font-dialog-title, 21px); font-weight: 650; letter-spacing: -.4px; }
+.jam-deck-archive-empty { color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
+.jam-deck-archive-list { display: grid; }
+/* Quiet rows: one hairline separator instead of a card per row, hover only a
+   low-contrast wash. Row actions stay hidden until hover or focus. */
+.jam-deck-archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 9px 8px; border-radius: var(--jd-radius-control); border-bottom: 1px solid color-mix(in srgb, var(--jd-line) 60%, transparent); background: transparent; transition: background-color 120ms ease-out; }
+.jam-deck-archive-row:last-child { border-bottom: 0; }
+.jam-deck-archive-row:hover { background: var(--jd-hover); }
+/* Type-qualified: a bare class loses to the theme's own button rule, which
+   centres the label. */
+/* display:block and box-shadow:none are both required: the theme paints its
+   button outline with an inset shadow, and its flex layout would centre the
+   label no matter what text-align says. */
+button.jam-deck-archive-text { display: block; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font: inherit; font-size: var(--jd-font-body, 12px); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--jd-muted) 55%, transparent); color: var(--jd-muted); cursor: pointer; }
+button.jam-deck-archive-text:hover { color: var(--jd-ink); }
+button.jam-deck-archive-text:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); border-radius: var(--jd-radius-chip); }
+.jam-deck-archive-meta { font-size: var(--jd-font-meta, 10px); color: var(--jd-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+button.jam-deck-archive-action { padding: 3px 8px; border: 0; border-radius: var(--jd-radius-chip); background: transparent; box-shadow: none; color: var(--jd-muted); font-size: var(--jd-font-meta, 10px); cursor: pointer; opacity: 0; transition: opacity 120ms ease-out, background-color 120ms ease-out; }
+.jam-deck-archive-row:hover button.jam-deck-archive-action,
+.jam-deck-archive-row:focus-within button.jam-deck-archive-action { opacity: 1; }
+button.jam-deck-archive-action:hover { background: var(--jd-hover); color: var(--jd-ink); }
+button.jam-deck-archive-action:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
+button.jam-deck-archive-action.is-danger:hover { background: color-mix(in srgb, var(--text-error) 14%, transparent); color: var(--text-error); }
+.jam-deck-archive-footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--jd-line); text-align: right; }
+/* The footer action belongs to no row, so it stays visible and outlined. */
+.jam-deck-archive-footer button.jam-deck-archive-action { opacity: 1; padding: 6px 12px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-control); }
+
+/* Daily routine templates. Same quiet-row language as the archive dialog: one
+   surface, hairline separators, hover-only row actions, no per-field cards. */
+.jam-deck-routine-modal { padding: 24px; max-height: min(720px, calc(100vh - 48px)); overflow-y: auto; }
+.jam-deck-routine-modal h2 { margin: 0 0 6px; font-size: var(--jd-font-dialog-title, 21px); font-weight: 650; letter-spacing: -.4px; }
+.jam-deck-routine-hint { margin: 0 0 18px; color: var(--jd-faint); font-size: var(--jd-font-meta, 10px); line-height: 1.6; }
+.jam-deck-routine-empty { margin: 0; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); }
+.jam-deck-routine-list { display: grid; }
+.jam-deck-routine-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--jd-radius-control); border-bottom: 1px solid color-mix(in srgb, var(--jd-line) 60%, transparent); background: transparent; transition: background-color 120ms ease-out; }
+.jam-deck-routine-row:last-child { border-bottom: 0; }
+.jam-deck-routine-row:hover { background: var(--jd-hover); }
+.jam-deck-routine-row.is-off { opacity: .45; }
+input.jam-deck-routine-toggle { margin: 0; accent-color: var(--jd-accent, var(--interactive-accent)); }
+select.jam-deck-routine-category { height: 24px; padding: 0 4px; border: 0; border-radius: var(--jd-radius-chip); background: transparent; box-shadow: none; color: var(--jd-faint); font-size: var(--jd-font-meta, 10px); cursor: pointer; }
+select.jam-deck-routine-category:hover { color: var(--jd-muted); }
+select.jam-deck-routine-category:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
+input[type="text"].jam-deck-routine-text { min-width: 0; height: 26px; padding: 0 2px; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; box-shadow: none; color: var(--jd-ink); font: inherit; font-size: var(--jd-font-body, 12px); }
+input[type="text"].jam-deck-routine-text:hover { border-bottom-color: var(--jd-line); }
+input[type="text"].jam-deck-routine-text:focus { outline: none; box-shadow: none; border-bottom-color: var(--jd-muted); }
+button.jam-deck-routine-action { padding: 2px 7px; border: 0; border-radius: var(--jd-radius-chip); background: transparent; box-shadow: none; color: var(--jd-muted); font-size: var(--jd-font-body, 12px); line-height: 1; cursor: pointer; opacity: 0; transition: opacity 120ms ease-out, background-color 120ms ease-out; }
+.jam-deck-routine-row:hover button.jam-deck-routine-action,
+.jam-deck-routine-row:focus-within button.jam-deck-routine-action { opacity: 1; }
+button.jam-deck-routine-action.is-danger:hover { background: color-mix(in srgb, var(--text-error) 14%, transparent); color: var(--text-error); }
+button.jam-deck-routine-action:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
+.jam-deck-routine-footer { display: flex; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--jd-line); }
+input[type="text"].jam-deck-routine-draft { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--jd-line); border-radius: var(--jd-radius-control); background: transparent; box-shadow: none; color: var(--jd-ink); font-size: var(--jd-font-input, 13px); }
+input[type="text"].jam-deck-routine-draft:focus { outline: none; border-color: var(--jd-muted); box-shadow: 0 0 0 2px color-mix(in srgb, var(--jd-accent) 28%, transparent); }
+/* The dialog's single high-contrast action; everything else stays outlined. */
+button.jam-deck-routine-add { flex-shrink: 0; height: 34px; padding: 0 16px; border: 0; border-radius: var(--jd-radius-pill); background: var(--jd-ink); color: var(--background-primary); box-shadow: none; font-size: var(--jd-font-body, 12px); font-weight: 650; cursor: pointer; }
+button.jam-deck-routine-add:hover { opacity: .86; }
+button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--jd-accent); }
+
+/* Checkbox ticks, workbench and dialogs alike. Obsidian draws checkboxes
+   itself: `appearance: none`, then `:checked` paints the box with the theme
+   accent and `::after` paints the tick as a white box behind an SVG mask.
+   `accent-color` only affects natively drawn controls, so it is silently
+   ignored here — the box and the tick have to be coloured directly.
+   Classes are listed one by one rather than using input[type="checkbox"] so
+   task-list checkboxes inside embedded Canvas notes stay untouched.
+   Specificity is (0,3,0), which beats Obsidian's (0,2,1). */
+.jam-deck-root :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):checked,
+.jam-deck-routine-modal .jam-deck-routine-toggle:checked {
+  background-color: var(--jd-accent);
+  border-color: var(--jd-accent);
+}
+/* A white tick is nearly invisible on the fluorescent green, so the mask gets
+   the dark ink counterpart instead. */
+.jam-deck-root :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):checked::after,
+.jam-deck-routine-modal .jam-deck-routine-toggle:checked::after {
+  background-color: var(--jd-accent-ink);
+}
 
 @media (max-width: 650px) {
   .jam-deck-toolbar { padding: 0 8px; }
@@ -2031,8 +2389,7 @@
   .jam-deck-task-modal { max-height: calc(100vh - 16px); padding: 18px 14px; }
   .jam-deck-task-modal h2 { margin-right: 28px; font-size: var(--jd-font-title-small, 18px); }
   .jam-deck-task-modal-subtitle { margin-right: 28px; margin-bottom: 14px; }
-  .jam-deck-task-form { gap: 9px; }
-  .jam-deck-task-field { padding: 10px; }
+  .jam-deck-task-form { gap: 16px; }
   .jam-deck-task-modal .jam-deck-modal-actions { bottom: -18px; margin: 2px -14px -18px; padding: 10px 14px; }
   .jam-deck-archive-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .jam-deck-archive-meta { display: none; }
@@ -2084,9 +2441,6 @@
   --jd-accent-ink: #183000;
   --jd-cyan: #c9f4ee;
   --jd-danger: color-mix(in srgb, var(--text-error) 78%, #ff6b6b);
-  --jd-radius-sm: 10px;
-  --jd-radius-md: 14px;
-  --jd-radius-lg: 18px;
   --jd-shadow-card: 0 1px 1px rgb(15 20 18 / 0.05), 0 7px 20px rgb(15 20 18 / 0.08);
   --jd-shadow-lift: 0 2px 3px rgb(15 20 18 / 0.07), 0 14px 30px rgb(15 20 18 / 0.13);
   --jd-shadow-toolbar: 0 1px 2px rgb(15 20 18 / 0.09), 0 8px 18px rgb(15 20 18 / 0.11);
@@ -2149,7 +2503,7 @@
   margin: 0;
   padding: 5px 10px;
   border-color: transparent;
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: transparent;
   box-shadow: none;
   transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
@@ -2170,7 +2524,7 @@
   height: 52px;
   padding: 0 18px;
   border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-surface-raised);
   color: var(--jd-ink);
   font-size: var(--jd-font-lead, 14px);
@@ -2199,7 +2553,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--jd-line);
-  border-radius: 14px;
+  border-radius: var(--jd-radius-md);
   background: var(--jd-surface-raised);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
   overflow: hidden;
@@ -2238,7 +2592,7 @@
   min-height: 28px;
   padding: 2px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: var(--jd-font-label, 11px);
@@ -2252,7 +2606,7 @@
   min-height: 32px;
   padding: 2px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--jd-radius-surface);
   background: transparent;
   color: var(--jd-ink);
   font-size: var(--jd-font-label, 11px);
@@ -2277,7 +2631,7 @@
   width: 36px;
   height: 36px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: 15px;
@@ -2295,7 +2649,7 @@
   height: 32px;
   padding: 2px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: color-mix(in srgb, var(--jd-ink) 6%, transparent);
 }
 .jam-deck-root .jam-deck-ai-tab {
@@ -2303,7 +2657,7 @@
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: var(--jd-font-body, 12px);
@@ -2360,7 +2714,7 @@
   min-height: 28px;
   padding: 2px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-ink);
   font-size: var(--jd-font-label, 11px);
@@ -2407,7 +2761,7 @@
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   cursor: pointer;
@@ -2455,7 +2809,7 @@
   min-height: 26px;
   padding: 3px 12px;
   border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-surface);
   color: var(--jd-ink);
   font-size: var(--jd-font-body, 12px);
@@ -2472,7 +2826,7 @@
   margin: 0 20px 20px;
   padding: 6px 6px 6px 14px;
   border: 1px solid var(--jd-line);
-  border-radius: 11px;
+  border-radius: var(--jd-radius-sm);
   background: color-mix(in srgb, var(--jd-ink) 3%, var(--jd-surface));
   transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
 }
@@ -2484,7 +2838,7 @@
   margin: 8px 12px 0;
   padding: 6px 10px;
   border: 1px dashed color-mix(in srgb, var(--jd-accent) 45%, var(--jd-line));
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: color-mix(in srgb, var(--jd-accent) 8%, transparent);
 }
 /* display:flex 会覆盖 HTML [hidden]，未载入图片时显式隐藏预览条 */
@@ -2494,7 +2848,7 @@
   width: 44px;
   height: 44px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   border: 1px solid var(--jd-line);
   background: var(--jd-surface);
 }
@@ -2512,7 +2866,7 @@
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--jd-radius-control);
   background: transparent;
   color: var(--jd-muted);
   font-size: 14px;
@@ -2553,7 +2907,7 @@
   min-height: 40px;
   padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: transparent;
   color: var(--jd-ink);
   font-size: var(--jd-font-body, 12px);
@@ -2582,7 +2936,7 @@
 .jam-deck-root .jam-deck-grid { gap: var(--deck-gap); padding: 14px; }
 .jam-deck-root .jam-deck-widget {
   border-color: var(--jd-line);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-surface);
   box-shadow: var(--jd-shadow-card);
 }
@@ -2601,7 +2955,7 @@
   min-height: 16px;
   padding: 1px 5px;
   border-color: color-mix(in srgb, var(--jd-muted) 35%, transparent);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: transparent;
   color: var(--jd-muted);
   box-shadow: none;
@@ -2621,7 +2975,7 @@
 .jam-deck-root .jam-deck-clock-time { margin-top: 2px; color: var(--jd-ink); font-size: clamp(30px, 4vw, 58px); font-weight: 650; letter-spacing: -0.055em; }
 .jam-deck-root .jam-deck-clock-date { margin-top: 7px; color: var(--jd-muted); font-size: var(--jd-font-meta, 10px); }
 
-.jam-deck-root .jam-deck-calendar-days span { border-radius: 999px; }
+.jam-deck-root .jam-deck-calendar-days span { border-radius: var(--jd-radius-pill); }
 .jam-deck-root .jam-deck-calendar-days span:not(.is-blank):hover { background: var(--jd-cyan); color: var(--jd-accent-ink); }
 .jam-deck-root .jam-deck-calendar-days .is-today { background: var(--jd-accent); color: var(--jd-accent-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jd-accent-ink) 12%, transparent); }
 
@@ -2731,7 +3085,7 @@
 .jam-deck-root .jam-deck-clip-media {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--jd-paper-edge) 62%, transparent);
-  border-radius: 8px;
+  border-radius: var(--jd-radius-surface);
   background: color-mix(in srgb, var(--jd-board) 82%, var(--jd-paper));
   line-height: 0;
 }
@@ -2752,7 +3106,7 @@
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--jd-line);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-surface-raised);
   box-shadow: var(--jd-shadow-toolbar);
   opacity: 0;
@@ -2775,7 +3129,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: transparent;
   color: var(--jd-ink);
   box-shadow: none;
@@ -2798,8 +3152,7 @@
 
 
 /* Task detail and lightweight Spatial calendar — 0.7.2 */
-.jam-deck-task-meta-fields { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.jam-deck-task-field:focus-within { border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border)); }
+.jam-deck-task-meta-fields { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .jam-deck-task-field select,
 .jam-deck-task-field input[type="date"] { width: 100%; min-width: 0; margin: 0; }
 .jam-deck-task-due-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
@@ -2808,12 +3161,18 @@
   grid-template-columns: 42px minmax(0, 1fr) auto;
 }
 .jam-deck-task-field[tabindex="0"] { outline: none; }
-.jam-deck-task-field[tabindex="0"]:focus-visible { box-shadow: 0 0 0 2px var(--interactive-accent); }
+.jam-deck-task-field[tabindex="0"]:focus-visible { box-shadow: 0 0 0 2px var(--jd-accent); }
 .jam-deck-modal-actions-left,
 .jam-deck-modal-actions-right { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .jam-deck-modal-actions-left { margin-right: auto; }
 .jam-deck-modal-actions button.is-danger { color: var(--text-error); }
-.jam-deck-task-modal-archive { background: color-mix(in srgb, var(--interactive-accent) 88%, var(--background-primary)); color: var(--text-on-accent); }
+/* Archiving is a secondary action: outlined like cancel, never a second
+   filled button competing with save. */
+.jam-deck-task-modal .jam-deck-modal-actions button.jam-deck-task-modal-archive {
+  background: transparent;
+  border-color: var(--jd-line);
+  color: var(--jd-ink);
+}
 
 .jam-deck-root .jam-deck-task {
   min-height: 34px;
@@ -2855,31 +3214,68 @@
   -webkit-box-orient: vertical;
   cursor: pointer;
   align-items: baseline;
+  /* 原生 button 被主题设成 justify-content: center。标题过去用 flex: 1 1 auto
+     撑满整行，把这件事盖住了；改成按内容宽度后居中立刻暴露（实测标题左边
+     135px、按钮左边 98px）。text-align 对 flex 容器无效，必须显式写。 */
+  justify-content: flex-start;
   gap: 7px;
 }
-.jam-deck-task-title { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-body, 12px); line-height: 1.5; }
+/* flex 基准取内容宽度（0 1 auto，不增长只收缩）：标题若撑满剩余空间，
+   划线的笔触就会一路画到文案之外。长标题仍会收缩并省略。 */
+.jam-deck-task-title { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--jd-font-body, 12px); line-height: 1.5; }
 .jam-deck-task-category { flex: 0 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-muted, var(--text-muted)); font-size: var(--jd-font-meta, 10px); font-weight: 650; letter-spacing: .02em; }
 .jam-deck-task-category::after { content: "·"; margin-left: 5px; color: var(--jd-faint, var(--text-faint)); }
 .jam-deck-task-category.is-work { color: color-mix(in srgb, var(--jd-muted) 78%, #a993d8); }
 .jam-deck-task-category.is-life { color: color-mix(in srgb, var(--jd-muted) 76%, #71d6c3); }
-.jam-deck-task-due { flex: 0 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-faint, var(--text-faint)); font-size: var(--jd-font-meta, 10px); }
+/* 标题不再撑满，靠 margin-left: auto 把日期顶回右侧。 */
+.jam-deck-task-due { flex: 0 0 auto; margin-left: auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--jd-faint, var(--text-faint)); font-size: var(--jd-font-meta, 10px); }
 .jam-deck-task-due.is-overdue { color: var(--jd-danger, var(--text-error)); }
+/* Row actions carry no frame of their own — same quiet language as the archive
+   dialog and the calendar toolbar: transparent at rest, a low-contrast wash on
+   hover. The flat-era rules already said `background: transparent`, but measured
+   live the button rendered white with a 1px border and the theme's inset
+   box-shadow outline; background/border alone cannot remove that frame, so this
+   reuses the !important trio that .jam-deck-task-main and .jam-deck-calendar-date
+   already needed. Hit area stays 26px. */
+.jam-deck-root :is(.jam-deck-task-archive, .jam-deck-task-delete) {
+  border: 0 !important;
+  border-radius: var(--jd-radius-chip);
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--jd-muted, var(--text-muted));
+}
+/* Hover deliberately carries no !important: the glass skin tunes these two with
+   its own palette at higher specificity (--jd-danger at 8%), and an !important
+   here would silently override that. (0,3,0) is already enough to beat the
+   theme's own button:hover. */
+.jam-deck-root .jam-deck-task-archive:hover {
+  background: var(--jd-hover);
+  color: var(--jd-ink);
+}
+.jam-deck-root .jam-deck-task-delete:hover {
+  background: color-mix(in srgb, var(--text-error) 12%, transparent);
+  color: var(--text-error);
+}
+.jam-deck-root :is(.jam-deck-task-archive, .jam-deck-task-delete):focus-visible {
+  outline: 2px solid var(--jd-accent);
+  outline-offset: 1px;
+}
 
 .jam-deck-calendar-toolbar { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px 28px; align-items: center; gap: 3px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid color-mix(in srgb, var(--jd-line) 56%, transparent); }
-.jam-deck-calendar-toolbar button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--jd-muted, var(--text-muted)); box-shadow: none; }
+.jam-deck-calendar-toolbar button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--jd-radius-pill); background: transparent; color: var(--jd-muted, var(--text-muted)); box-shadow: none; }
 .jam-deck-calendar-toolbar button:hover { background: var(--jd-hover); color: var(--jd-ink); }
 .jam-deck-calendar-toolbar button:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 1px; }
 .jam-deck-calendar-toolbar .jam-deck-calendar-month { margin: 0; }
 .jam-deck-calendar-days { grid-auto-rows: minmax(34px, 1fr); gap: 2px 4px; }
 .jam-deck-root .jam-deck-calendar-day { position: relative; min-width: 0; min-height: 34px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .jam-deck-root .jam-deck-calendar-day:hover { border: 0; background: transparent; }
-.jam-deck-root .jam-deck-calendar-date { width: 29px; min-width: 29px; height: 29px; min-height: 29px; margin: 0; padding: 0 0 4px; border: 0 !important; border-radius: 999px; background: transparent !important; box-shadow: none !important; color: var(--jd-ink, var(--text-normal)); font-size: var(--jd-font-label, 11px); font-weight: 450; }
+.jam-deck-root .jam-deck-calendar-date { width: 29px; min-width: 29px; height: 29px; min-height: 29px; margin: 0; padding: 0 0 4px; border: 0 !important; border-radius: var(--jd-radius-pill); background: transparent !important; box-shadow: none !important; color: var(--jd-ink, var(--text-normal)); font-size: var(--jd-font-label, 11px); font-weight: 450; }
 .jam-deck-root .jam-deck-calendar-date:hover { background: var(--jd-hover) !important; }
 .jam-deck-root .jam-deck-calendar-date:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 1px; background: color-mix(in srgb, var(--jd-accent) 12%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-day.is-outside { opacity: .38; }
-.jam-deck-root .jam-deck-calendar-day.is-today .jam-deck-calendar-date { width: 32px; border-radius: 7px; background: color-mix(in srgb, var(--jd-accent) 12%, transparent) !important; color: var(--jd-ink); font-weight: 700; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jd-accent) 78%, transparent) !important; }
+.jam-deck-root .jam-deck-calendar-day.is-today .jam-deck-calendar-date { width: 32px; border-radius: var(--jd-radius-control); background: color-mix(in srgb, var(--jd-accent) 12%, transparent) !important; color: var(--jd-ink); font-weight: 700; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jd-accent) 78%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-days .jam-deck-calendar-day.is-today { background: transparent; color: inherit; box-shadow: none; }
-.jam-deck-root .jam-deck-calendar-date.has-completed { width: 32px; padding-bottom: 0; border-radius: 7px; }
+.jam-deck-root .jam-deck-calendar-date.has-completed { width: 32px; padding-bottom: 0; border-radius: var(--jd-radius-control); }
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-1 { background: color-mix(in srgb, var(--jd-accent) 20%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-2 { background: color-mix(in srgb, var(--jd-accent) 40%, transparent) !important; }
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-3 { background: color-mix(in srgb, var(--jd-accent) 60%, transparent) !important; color: var(--jd-accent-ink); }
@@ -2887,7 +3283,7 @@
 .jam-deck-root .jam-deck-calendar-date.has-completed.heat-5 { background: var(--jd-accent) !important; color: var(--jd-accent-ink); font-weight: 700; }
 .jam-deck-root .jam-deck-calendar-date.has-completed:hover { filter: brightness(1.06); }
 .jam-deck-calendar-markers { position: absolute; left: 3px; right: 3px; bottom: 1px; display: flex; justify-content: center; gap: 3px; pointer-events: none; }
-.jam-deck-root .jam-deck-calendar-task-marker { width: 4px; min-width: 4px; height: 4px; min-height: 4px; margin: 0; padding: 0; border: 0 !important; border-radius: 999px; background: var(--jd-accent); box-shadow: none !important; pointer-events: auto; }
+.jam-deck-root .jam-deck-calendar-task-marker { width: 4px; min-width: 4px; height: 4px; min-height: 4px; margin: 0; padding: 0; border: 0 !important; border-radius: var(--jd-radius-pill); background: var(--jd-accent); box-shadow: none !important; pointer-events: auto; }
 
 .jam-deck-calendar-task-marker.is-overdue { background: var(--text-error); }
 .jam-deck-calendar-more { position: absolute; right: 2px; bottom: 1px; color: var(--text-muted); font-size: var(--jd-font-micro, 7px); }
@@ -2895,7 +3291,114 @@
   color: var(--jd-muted);
   text-decoration: none;
 }
-.jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title { text-decoration: line-through; }
+/* Completion is drawn as a marker stroke through the title instead of a plain
+   line-through: uneven alpha along the gradient reads as pen pressure, and the
+   two ends are the lightest, like a stroke laid down in one motion.
+   This animates background-size only, which stays inside the allowed
+   opacity/border/background/shadow set. */
+.jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title {
+  text-decoration: none;
+  position: relative;
+}
+/* 笔触画在伪元素上，而不是标题本身。毛边要靠 mask 从边缘啃出来，而 mask
+   会连同文字一起啃掉——必须让它只作用在这层色带上。
+   三层错位色带代替单一矩形：单层渐变两端不透明、上下边齐平，读起来就是
+   个几何色块；主笔身之外再加上下两道更细、断续位置各不相同的溢色，两端
+   收到**完全透明**——起笔与收笔的渐隐是笔触感最关键的一笔。
+   动画仍只改 background-size，不越出允许的属性集合；mask 是静态的。 */
+.jam-deck-root .jam-deck-task.is-completed .jam-deck-task-title::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26%;
+  height: 70%;
+  pointer-events: none;
+  /* 笔身比文字还粗一点才像马克笔；代价是会盖住字，所以整体不透明度压到
+     六成以下——划过的痕迹在字上面，但字依然读得清。 */
+  background-image:
+    linear-gradient(to right,
+      transparent 0,
+      color-mix(in srgb, var(--jd-accent) 26%, transparent) 3%,
+      color-mix(in srgb, var(--jd-accent) 58%, transparent) 11%,
+      color-mix(in srgb, var(--jd-accent) 40%, transparent) 34%,
+      color-mix(in srgb, var(--jd-accent) 56%, transparent) 58%,
+      color-mix(in srgb, var(--jd-accent) 43%, transparent) 79%,
+      color-mix(in srgb, var(--jd-accent) 21%, transparent) 94%,
+      transparent 100%),
+    linear-gradient(to right,
+      transparent 0 8%,
+      color-mix(in srgb, var(--jd-accent) 32%, transparent) 22%,
+      transparent 41%,
+      color-mix(in srgb, var(--jd-accent) 27%, transparent) 67%,
+      transparent 87%),
+    linear-gradient(to right,
+      transparent 0 15%,
+      color-mix(in srgb, var(--jd-accent) 29%, transparent) 31%,
+      transparent 53%,
+      color-mix(in srgb, var(--jd-accent) 23%, transparent) 75%,
+      transparent 93%);
+  background-repeat: no-repeat;
+  background-position: 0 46%, 0 2%, 0 92%;
+  background-size: 100% 62%, 100% 24%, 100% 20%;
+  /* 毛边 = 纵向纤维（马克笔笔头的丝缕，91deg 让它略微不垂直）× 上下缘柔化，
+     两层相交而不是相加，于是色带边缘被啃得参差不齐、内部也有笔道。 */
+  -webkit-mask-image:
+    repeating-linear-gradient(91deg,
+      #000 0 2.5px,
+      rgba(0, 0, 0, .5) 2.5px 3.6px,
+      #000 3.6px 6.2px,
+      rgba(0, 0, 0, .72) 6.2px 7.4px),
+    linear-gradient(to bottom,
+      rgba(0, 0, 0, .18) 0 5%,
+      #000 17% 78%,
+      rgba(0, 0, 0, .14) 95% 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+/* Only the row just ticked carries .is-striking, so the stroke plays exactly
+   once — re-renders (opening any dialog rebuilds the list) must not replay it. */
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-title::after {
+  animation: jam-deck-marker-strike 340ms cubic-bezier(.22, 1, .36, 1) both;
+}
+/* 勾选框与笔触同一拍：方框先被品牌绿灌满、同时荡出一圈短促的波纹，勾随后
+   浮现。全部走 background-color / box-shadow / opacity，无需 transform 例外。
+   复用 .is-striking 这个一次性标记，所以只在刚勾上的那一下播放。 */
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-check {
+  animation: jam-deck-check-fill 300ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.jam-deck-root .jam-deck-task.is-striking .jam-deck-task-check:checked::after {
+  animation: jam-deck-check-mark 200ms cubic-bezier(.22, 1, .36, 1) 90ms both;
+}
+@keyframes jam-deck-check-fill {
+  from {
+    background-color: transparent;
+    border-color: var(--jd-line);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--jd-accent) 55%, transparent);
+  }
+  45% {
+    background-color: var(--jd-accent);
+    border-color: var(--jd-accent);
+  }
+  to {
+    background-color: var(--jd-accent);
+    border-color: var(--jd-accent);
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+@keyframes jam-deck-check-mark {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* No reduced-motion query here on purpose: Jam Deck animations follow the
+   plugin's own toggle, and .jam-deck-root.jam-deck-no-motion * already zeroes
+   every animation duration inside the workbench. */
+/* 溢色层刻意落后于主笔身，像笔尖带出来的墨，而不是三条一起平移的色块。 */
+@keyframes jam-deck-marker-strike {
+  from { background-size: 0% 62%, 0% 24%, 0% 20%; }
+  55% { background-size: 64% 62%, 51% 24%, 44% 20%; }
+  to { background-size: 100% 62%, 100% 24%, 100% 20%; }
+}
 
 @container (max-width: 270px) {
   .jam-deck-calendar-days { grid-auto-rows: minmax(30px, 1fr); gap-inline: 1px; }
@@ -2935,7 +3438,7 @@
   flex-direction: column;
   justify-content: center;
   gap: 12px;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   color: var(--jd-ink, var(--text-normal));
   outline: none;
 }
@@ -3032,7 +3535,7 @@
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--jd-line) 82%, transparent);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-music-control);
   color: var(--jd-muted);
   box-shadow: none;
@@ -3048,7 +3551,7 @@
   min-width: 112px;
   padding: 4px;
   border: 1px solid var(--jd-line);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-surface-raised);
   box-shadow: 0 10px 24px rgb(20 27 23 / .16);
 }
@@ -3061,7 +3564,7 @@
   padding: 0 7px;
   justify-content: flex-start;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: transparent;
   color: var(--jd-muted);
   box-shadow: none;
@@ -3098,7 +3601,7 @@
 }
 .jam-deck-root input.jam-deck-music-progress::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: linear-gradient(90deg, color-mix(in srgb, var(--jd-accent) 84%, var(--jd-ink)) 0 var(--jd-music-progress), var(--jd-music-track) var(--jd-music-progress) 100%);
 }
 .jam-deck-root input.jam-deck-music-progress::-webkit-slider-thumb {
@@ -3157,7 +3660,7 @@
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--jd-line) 82%, transparent);
-  border-radius: 4px;
+  border-radius: var(--jd-radius-chip);
   background: var(--jd-music-control);
   color: var(--jd-muted);
   box-shadow: none;
@@ -3186,45 +3689,49 @@
 }
 
 
-/* Jam Deck ultra-light scrollbars: WebKit-only so exact pixel sizing is preserved. */
-.jam-deck-root::-webkit-scrollbar,
-.jam-deck-root *::-webkit-scrollbar,
-.jam-deck-canvas-picker-modal::-webkit-scrollbar,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar,
-.jam-deck-shortcut-editor-modal::-webkit-scrollbar,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar {
+/* Jam Deck ultra-light scrollbars: WebKit-only so exact pixel sizing is preserved.
+   Own modals mount on document.body rather than inside .jam-deck-root, so every
+   host has to be named here; add new surfaces to all four host lists below. */
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar,
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar {
   width: 6px !important;
   height: 6px !important;
   background: transparent !important;
 }
 
-.jam-deck-root::-webkit-scrollbar-track,
-.jam-deck-root *::-webkit-scrollbar-track,
-.jam-deck-root::-webkit-scrollbar-corner,
-.jam-deck-root *::-webkit-scrollbar-corner,
-.jam-deck-canvas-picker-modal::-webkit-scrollbar-track,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-track,
-.jam-deck-canvas-picker-modal::-webkit-scrollbar-corner,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-corner,
-.jam-deck-shortcut-editor-modal::-webkit-scrollbar-track,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-track,
-.jam-deck-shortcut-editor-modal::-webkit-scrollbar-corner,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-corner {
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-track,
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-corner,
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-track,
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 
-.jam-deck-root::-webkit-scrollbar-button,
-.jam-deck-root *::-webkit-scrollbar-button,
-.jam-deck-root::-webkit-scrollbar-button:single-button,
-.jam-deck-root *::-webkit-scrollbar-button:single-button,
-.jam-deck-canvas-picker-modal::-webkit-scrollbar-button,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-button,
-.jam-deck-canvas-picker-modal::-webkit-scrollbar-button:single-button,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-button:single-button,
-.jam-deck-shortcut-editor-modal::-webkit-scrollbar-button,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-button,
-.jam-deck-shortcut-editor-modal::-webkit-scrollbar-button:single-button,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-button:single-button {
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-button,
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-button {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
@@ -3233,26 +3740,123 @@
   background: transparent !important;
 }
 
-.jam-deck-root::-webkit-scrollbar-thumb,
-.jam-deck-root *::-webkit-scrollbar-thumb,
-.jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb,
-.jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb,
-.jam-deck-shortcut-editor-modal::-webkit-scrollbar-thumb,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-thumb {
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings)::-webkit-scrollbar-thumb,
+:is(.jam-deck-root, .jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-canvas-picker-modal,
+  .jam-deck-browser-modal, .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal,
+  .jam-deck-receipt-modal, .jam-deck-shortcut-modal, .jam-deck-shortcut-editor-modal,
+  .jam-deck-folder-rename-modal, .jam-deck-settings) *::-webkit-scrollbar-thumb {
   min-width: 6px !important;
   min-height: 18px !important;
   border: 2px solid transparent !important;
-  border-radius: 999px !important;
+  border-radius: var(--jd-radius-pill) !important;
+  background: transparent !important;
+  background-clip: content-box !important;
+}
+
+/* A resting workbench shows no rails at all: the thumb only appears once the
+   owning panel is hovered or holds focus. The 6px gutter declared above never
+   changes, so revealing a thumb cannot reflow content. focus-within keeps the
+   keyboard path visible; no coarse-pointer fallback, matching how the rest of
+   the plugin treats hover-only affordances.
+
+   Hosts are spelled out instead of collected with :is() on purpose. Chromium
+   matches ::-webkit-scrollbar-* through a separate path that silently fails
+   once a pseudo-class lives inside :is() -- ":is(a, b):is(:hover) *::-webkit-
+   scrollbar-thumb" never matches, so the thumb would hide and never come back.
+   Verified with a real mouseMove via sendInputEvent plus capturePage. Keep the
+   state-dependent selectors expanded; the stateless blocks above may use :is(). */
+.jam-deck-widget:hover::-webkit-scrollbar-thumb,
+.jam-deck-widget:hover *::-webkit-scrollbar-thumb,
+.jam-deck-widget:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-widget:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:hover::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:hover *::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-ai-chat:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-picker:hover::-webkit-scrollbar-thumb,
+.jam-deck-picker:hover *::-webkit-scrollbar-thumb,
+.jam-deck-picker:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-picker:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:hover::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:hover *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-canvas-picker-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-browser-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-task-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-archive-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-routine-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-routine-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-routine-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-routine-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-receipt-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-shortcut-editor-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:hover::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:hover *::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-folder-rename-modal:focus-within *::-webkit-scrollbar-thumb,
+.jam-deck-settings:hover::-webkit-scrollbar-thumb,
+.jam-deck-settings:hover *::-webkit-scrollbar-thumb,
+.jam-deck-settings:focus-within::-webkit-scrollbar-thumb,
+.jam-deck-settings:focus-within *::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-muted) 20%, transparent) !important;
   background-clip: content-box !important;
 }
 
+/* Pointer resting on the thumb itself: full 6px at 40%. Listed after the
+   panel-reveal rule so it wins the equal-specificity tie, and expanded for the
+   same Chromium limitation described above. */
 .jam-deck-root::-webkit-scrollbar-thumb:hover,
 .jam-deck-root *::-webkit-scrollbar-thumb:hover,
+.jam-deck-picker::-webkit-scrollbar-thumb:hover,
+.jam-deck-picker *::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker::-webkit-scrollbar-thumb:hover,
+.jam-deck-canvas-picker *::-webkit-scrollbar-thumb:hover,
 .jam-deck-canvas-picker-modal::-webkit-scrollbar-thumb:hover,
 .jam-deck-canvas-picker-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-browser-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-browser-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-task-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-task-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-archive-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-archive-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-routine-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-routine-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-receipt-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-receipt-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-shortcut-modal *::-webkit-scrollbar-thumb:hover,
 .jam-deck-shortcut-editor-modal::-webkit-scrollbar-thumb:hover,
-.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-thumb:hover {
+.jam-deck-shortcut-editor-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-folder-rename-modal::-webkit-scrollbar-thumb:hover,
+.jam-deck-folder-rename-modal *::-webkit-scrollbar-thumb:hover,
+.jam-deck-settings::-webkit-scrollbar-thumb:hover,
+.jam-deck-settings *::-webkit-scrollbar-thumb:hover {
   border-width: 0 !important;
   background: color-mix(in srgb, var(--text-muted) 40%, transparent) !important;
   background-clip: border-box !important;
@@ -3480,7 +4084,7 @@
   margin: 0;
   padding: 0;
   border: 1px solid color-mix(in srgb, #000 14%, transparent);
-  border-radius: 999px;
+  border-radius: var(--jd-radius-pill);
   background: color-mix(in srgb, #fff 78%, var(--jd-folder-color, var(--jd-folder-neutral)) 22%);
   color: color-mix(in srgb, #000 42%, var(--jd-folder-color, var(--jd-folder-neutral)) 58%);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.38), 0 1px 2px rgb(0 0 0 / 0.08);
@@ -3684,7 +4288,7 @@
   gap: 3px;
   padding: 2px;
   border: 1px solid rgb(0 0 0 / 0.09);
-  border-radius: 9px;
+  border-radius: var(--jd-radius-surface);
   background: rgb(255 255 255 / 0.72);
   box-shadow: 0 3px 10px rgb(0 0 0 / 0.10);
   -webkit-backdrop-filter: blur(10px);
@@ -3711,7 +4315,7 @@
   height: 20px;
   min-height: 20px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--jd-radius-control);
   pointer-events: auto !important;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-folder:is(:hover, :focus-within) .jam-deck-canvas-folder-controls {
@@ -3891,7 +4495,7 @@ body.is-jam-deck-canvas-stage .jam-deck-widget.is-jam-deck-canvas-stage > .jam-d
 .jam-deck-caption-utilities { margin-left: auto; padding-left: 8px; border-left: 1px solid var(--jd-line); }
 .jam-deck-root .jam-deck-caption-action {
   min-height: 32px; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
-  border: 1px solid color-mix(in srgb, var(--jd-muted) 35%, transparent); border-radius: 999px; box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--jd-muted) 35%, transparent); border-radius: var(--jd-radius-pill); box-shadow: none;
   background: transparent; color: var(--jd-muted); font: inherit; font-size: var(--jd-font-label, 11px); line-height: 1; padding: 4px 10px;
 }
 .jam-deck-root .jam-deck-caption-action:hover { border-color: color-mix(in srgb, var(--jd-muted) 58%, transparent); background: var(--jd-hover); color: var(--jd-ink); }
@@ -3953,9 +4557,329 @@ body[data-jam-deck-text-size]:not([data-jam-deck-text-size="small"]) .jam-deck-s
   .jam-deck-music-title, .jam-deck-task-title, .jam-deck-launcher-name,
   .jam-deck-canvas-embed-state-title),
 :is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
-  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-shortcut-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal, .jam-deck-shortcut-modal,
   .jam-deck-folder-rename-modal, .jam-deck-settings) :is(h1, h2, h3, h4, h5, h6),
 .jam-deck-shortcut-section-heading > span,
 .jam-deck-settings .setting-item-heading .setting-item-name {
-  color: #5c5c5c;
+  color: var(--jd-heading);
+}
+
+/* Optional workspace chrome, shared by both skins. Native split state stays intact. */
+.jam-deck-root .jam-deck-chrome-restore { display: none; }
+body.jam-deck-hide-sidebar { --ribbon-width: 0px; }
+body.jam-deck-hide-sidebar .workspace > .workspace-ribbon,
+body.jam-deck-hide-sidebar .workspace > .workspace-split:is(.mod-left-split, .mod-right-split),
+.workspace-tabs.jam-deck-hide-tabbar > .workspace-tab-header-container,
+.workspace-tabs.jam-deck-hide-tabbar [data-type="jam-deck-view"] > .view-header { display: none; }
+body.jam-deck-hide-topbar .titlebar { display: none; }
+body.jam-deck-hide-topbar .jam-deck-root > .jam-deck-toolbar {
+  -webkit-app-region: drag;
+}
+body.jam-deck-hide-topbar .jam-deck-root > .jam-deck-toolbar button { -webkit-app-region: no-drag; }
+body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-chrome-restore {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 0 8px;
+  padding: 3px 7px;
+  min-height: 24px;
+  color: var(--jd-muted);
+  font-size: var(--jd-font-caption, 11px);
+  background: var(--jd-hover);
+  border: 0;
+  border-radius: var(--jd-radius-control);
+  box-shadow: none;
+}
+.jam-deck-root .jam-deck-chrome-restore:focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
+.jam-deck-settings .jam-deck-blur-value { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+/* Liquid Glass: one wallpaper, bounded optical surfaces, no animation loop. */
+.jam-deck-root[data-jam-deck-skin="glass"] {
+  isolation: isolate;
+  background: #adbfc4;
+  --jd-ink: color-mix(in srgb, #202c35, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-muted: color-mix(in srgb, #52616b, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-faint: color-mix(in srgb, #6a7880, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-line: rgb(255 255 255 / 0.12);
+  --jd-surface: rgb(245 250 253 / 0.35);
+  --jd-surface-raised: rgb(255 255 255 / 0.48);
+  --jd-paper: rgb(249 252 253 / 0.65);
+  --jd-hover: rgb(255 255 255 / 0.08);
+  --jd-glass-tint: rgb(246 251 255 / var(--jd-glass-fill-alpha, 0.32));
+  --jd-glass-control: rgb(255 255 255 / 0.10);
+  --jd-glass-highlight: rgb(255 255 255 / 0.18);
+  --jd-glass-heading: color-mix(in srgb, #46535d, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-glass-shadow: inset 0 1px 1px rgb(255 255 255 / 0.16), 0 8px 24px rgb(31 53 66 / 0.10), 0 1px 3px rgb(31 53 66 / 0.12);
+  --jd-countdown-card-top: var(--jd-glass-control);
+  --jd-countdown-card-bottom: rgb(255 255 255 / 0.05);
+  --jd-countdown-card-ink: var(--jd-ink);
+  --jd-countdown-card-border: var(--jd-line);
+  --jd-countdown-card-seam: var(--jd-line);
+  --jd-countdown-card-shadow: none;
+  --jd-countdown-input-bg: var(--jd-glass-control);
+  --jd-countdown-input-shadow: none;
+  color: var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"][data-jam-deck-glass-tone="dark"] {
+  --jd-ink: color-mix(in srgb, #f1f5f7, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-muted: color-mix(in srgb, #c5d1d8, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-faint: color-mix(in srgb, #aabcc6, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-line: rgb(255 255 255 / 0.08);
+  --jd-surface: rgb(23 37 47 / 0.5);
+  --jd-surface-raised: rgb(36 52 65 / 0.64);
+  --jd-paper: rgb(26 41 52 / 0.82);
+  --jd-hover: rgb(255 255 255 / 0.06);
+  --jd-glass-tint: rgb(18 31 41 / var(--jd-glass-fill-alpha, 0.48));
+  --jd-glass-control: rgb(236 246 255 / 0.06);
+  --jd-glass-highlight: rgb(255 255 255 / 0.12);
+  --jd-glass-heading: color-mix(in srgb, #d7e1e7, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
+  --jd-glass-shadow: inset 0 1px 1px rgb(255 255 255 / 0.10), 0 8px 26px rgb(4 15 25 / 0.22), 0 1px 3px rgb(4 15 25 / 0.20);
+}
+.jam-deck-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 12% 10%, #d6e9e5 0%, transparent 48%),
+    radial-gradient(ellipse at 84% 12%, #a8c0db 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 88%, #cebcb8 0%, transparent 52%),
+    linear-gradient(145deg, #b3c6cd, #7c9db3 50%, #d0cec4);
+}
+.jam-deck-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / var(--jd-background-dim, 0.12));
+}
+.jam-deck-background-media { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.jam-deck-background-media[hidden] { display: none; }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-widget, .jam-deck-toolbar, .jam-deck-ai-chat, .jam-deck-ai-fab) {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.13), transparent 38%, rgb(255 255 255 / 0.04)), var(--jd-glass-tint);
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-lg);
+  box-shadow: var(--jd-glass-shadow);
+  backdrop-filter: blur(var(--jd-glass-blur, 4px)) saturate(125%);
+  -webkit-backdrop-filter: blur(var(--jd-glass-blur, 4px)) saturate(125%);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-ai-fab { border-radius: 50%; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-glass-refract {
+  backdrop-filter: var(--hyalite, blur(var(--jd-glass-blur, 4px)));
+  -webkit-backdrop-filter: var(--hyalite, blur(var(--jd-glass-blur, 4px)));
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-canvas-embed {
+  isolation: isolate;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-canvas-embed:not(.is-editing, .is-collision):focus-within { border-color: var(--jd-line); }
+/* A sibling material layer lets native toolbar glass sample the wallpaper instead
+   of hitting an ancestor backdrop root (which paints SVG refraction opaque). */
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-canvas-glass-material {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  backdrop-filter: blur(var(--jd-glass-canvas-blur, 2px));
+  -webkit-backdrop-filter: blur(var(--jd-glass-canvas-blur, 2px));
+  background: var(--jd-glass-tint);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget-header { border-bottom-color: rgb(255 255 255 / 0.13); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-editing { border-style: dashed; border-color: var(--jd-accent); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-collision { border-color: var(--jd-danger); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-moving { box-shadow: var(--jd-shadow-lift); }
+
+/* The panel owns the material. Ordinary actions have no second glass shell. */
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-widget-action, .jam-deck-primary-button,
+  .jam-deck-task-composer button, .jam-deck-ai-provider-btn, .jam-deck-ai-quick-btn, .jam-deck-ai-send,
+  .jam-deck-ai-chat-close, .jam-deck-ai-archive, .jam-deck-ai-clear, .jam-deck-calendar-toolbar button,
+  .jam-deck-music-control, .jam-deck-music-source-button, .jam-deck-clip-btn,
+  .jam-deck-task-archive, .jam-deck-task-delete, .jam-deck-launcher-edit, .jam-deck-canvas-item,
+  .jam-deck-canvas-embed-state-actions button, .jam-deck-caption-action, .jam-deck-caption-icon-button) {
+  color: var(--jd-ink);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
+  .jam-deck-task-composer button, .jam-deck-ai-provider-btn, .jam-deck-ai-quick-btn, .jam-deck-ai-send,
+  .jam-deck-calendar-toolbar button, .jam-deck-music-control, .jam-deck-music-source-button,
+  .jam-deck-task-archive, .jam-deck-task-delete, .jam-deck-launcher-edit,
+  .jam-deck-caption-action, .jam-deck-caption-icon-button):hover:not(:disabled) {
+  background: var(--jd-hover);
+  border-color: transparent;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action.is-active, .jam-deck-ai-tab.is-active) {
+  color: var(--jd-ink);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: inset 0 -1px 0 var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-action, .jam-deck-widget-action, .jam-deck-primary-button,
+  .jam-deck-task-composer button, .jam-deck-ai-send, .jam-deck-ai-provider-btn, .jam-deck-ai-quick-btn,
+  .jam-deck-ai-chat-close, .jam-deck-ai-archive, .jam-deck-ai-clear, .jam-deck-ai-tab,
+  .jam-deck-music-control, .jam-deck-music-source-button, .jam-deck-clip-btn,
+  .jam-deck-task-archive, .jam-deck-task-delete, .jam-deck-launcher-edit,
+  .jam-deck-caption-action, .jam-deck-caption-icon-button):focus-visible { outline: 2px solid var(--jd-accent); outline-offset: 2px; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-ai-tabs { background: transparent; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action {
+  border-radius: var(--jd-radius-control);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action:hover { background: transparent; }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-toolbar .jam-deck-action.is-active { background: transparent; color: var(--jd-ink); font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-composer input, .jam-deck-ai-row) {
+  background: var(--jd-glass-control);
+  border-color: var(--jd-line);
+  color: var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-countdown, .jam-deck-calendar-toolbar) { border-color: var(--jd-line); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-countdown-toggle { color: var(--jd-muted); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-countdown.is-running .jam-deck-countdown-toggle { color: var(--jd-ink); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-countdown-duration {
+  background: var(--jd-countdown-input-bg);
+  border: 1px solid var(--jd-line);
+  border-radius: var(--jd-radius-control);
+  color: var(--jd-ink);
+  box-shadow: none;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-countdown-duration:focus {
+  border-color: var(--jd-accent);
+  box-shadow: none;
+  outline: 2px solid color-mix(in srgb, var(--jd-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-countdown-flip-digit::after { box-shadow: none; }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-check, .jam-deck-countdown-toggle input):not(:checked) {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--jd-ink) 34%, transparent);
+  box-shadow: none;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task:hover { background: var(--jd-hover); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task.is-drop-target {
+  background: color-mix(in srgb, var(--jd-accent) 8%, transparent);
+  box-shadow: inset 2px 0 var(--jd-accent);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-task.is-completed .jam-deck-task-title { color: var(--jd-muted); }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-task-delete, .jam-deck-widget-action.is-danger):hover:not(:disabled) {
+  color: var(--jd-danger);
+  background: color-mix(in srgb, var(--jd-danger) 8%, transparent);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-launcher-item:hover {
+  background: var(--jd-hover);
+  border-color: transparent;
+  box-shadow: none;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-caption-tabs .jam-deck-caption-action[aria-selected="true"],
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-caption-tabs .jam-deck-caption-action[aria-selected="true"]:hover:not(:disabled) {
+  background: transparent;
+  border-bottom-color: var(--jd-ink);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-primary-button, .jam-deck-task-composer button, .jam-deck-ai-send, .jam-deck-music-control.is-primary, .jam-deck-caption-icon-button.is-primary) {
+  background: var(--jd-glass-control);
+  border-color: var(--jd-line);
+}
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-caption-note-choice {
+  background: var(--jd-glass-control);
+  border-color: var(--jd-line);
+  color: var(--jd-ink);
+  box-shadow: none;
+}
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-title-main, .jam-deck-widget-title, .jam-deck-widget-icon,
+  .jam-deck-ai-chat-title, .jam-deck-ai-empty-title, .jam-deck-calendar-month, .jam-deck-music-title,
+  .jam-deck-task-title, .jam-deck-launcher-name, .jam-deck-canvas-embed-state-title) { color: var(--jd-glass-heading); }
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-empty, .jam-deck-task-empty, .jam-deck-task-foot,
+  .jam-deck-title-sub, .jam-deck-drag-hint, .jam-deck-clock-date, .jam-deck-calendar-weekdays,
+  .jam-deck-calendar-foot, .jam-deck-calendar-more, .jam-deck-clipboard-drag-hint,
+  .jam-deck-canvas-embed-loading, .jam-deck-canvas-embed-state-path, .jam-deck-browser-empty) { color: var(--jd-muted); }
+
+/* Only the embedded Canvas background becomes clear; native nodes keep their surfaces. */
+.jam-deck-root[data-jam-deck-skin="glass"] :is(.jam-deck-canvas-embed-body, .jam-deck-canvas-embed-host) { background: transparent; }
+/* Native content keeps the foreground paired with its own theme surface.
+   Glass navigation below opts into wallpaper colors separately. */
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) { background: transparent; color: var(--text-normal); }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) > .workspace-leaf-content,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .view-content,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-wrapper,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background,
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .view-header { background-color: transparent; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) :is(.canvas-card-menu.jam-deck-node-toolbar--spatial, .jam-deck-drawing-palette) {
+  background: var(--jd-glass-tint);
+  border-color: var(--jd-line);
+  box-shadow: var(--jd-glass-shadow);
+  backdrop-filter: var(--hyalite, blur(var(--jd-glass-blur, 4px)));
+}
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-controls {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-group {
+  background: var(--jd-glass-tint);
+  border-color: var(--jd-line);
+  box-shadow: inset 0 1px 0 var(--jd-glass-highlight);
+}
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) :is(.view-header, .canvas-controls, .canvas-card-menu) {
+  --text-normal: var(--jd-ink);
+  --text-muted: var(--jd-muted);
+  --text-faint: var(--jd-faint);
+  --icon-color: var(--jd-muted);
+  --icon-color-hover: var(--jd-ink);
+}
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-item { color: var(--jd-muted); background: transparent; border-color: var(--jd-line); }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-card-menu .canvas-card-menu-button svg { fill: none; }
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background { opacity: 0.28; }
+body[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
+  background: rgb(246 250 253 / 0.86);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  /* Deliberately outside the corner scale: this shell wraps an 18px content
+     surface, and the extra 4px keeps the inner and outer corners concentric. */
+  border-radius: 22px;
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.16), 0 20px 64px rgb(20 40 60 / 0.18);
+}
+body.theme-dark[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
+  background: rgb(28 40 51 / 0.90);
+  border-color: rgb(255 255 255 / 0.08);
+}
+body[data-jam-deck-skin="glass"] :is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
+  .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal) button {
+  border-radius: var(--jd-radius-sm);
+  box-shadow: none;
+}
+/* Self-owned dialogs share a material; their fields do not become nested paper cards. */
+body[data-jam-deck-skin="glass"] :is(.jam-deck-task-modal, .jam-deck-shortcut-modal, .jam-deck-browser-modal, .jam-deck-folder-rename-modal) {
+  --jd-dialog-field: rgb(255 255 255 / 0.12);
+  --jd-dialog-line: rgb(60 77 91 / 0.14);
+}
+body.theme-dark[data-jam-deck-skin="glass"] :is(.jam-deck-task-modal, .jam-deck-shortcut-modal, .jam-deck-browser-modal, .jam-deck-folder-rename-modal) {
+  --jd-dialog-field: rgb(255 255 255 / 0.06);
+  --jd-dialog-line: rgb(255 255 255 / 0.12);
+}
+body[data-jam-deck-skin="glass"] :is(.jam-deck-task-modal, .jam-deck-shortcut-modal, .jam-deck-browser-modal, .jam-deck-folder-rename-modal)
+  :is(input[type="text"], input[type="url"], input[type="date"], textarea, select) {
+  background: var(--jd-dialog-field);
+  border: 1px solid var(--jd-dialog-line);
+  border-radius: var(--jd-radius-control);
+  color: var(--text-normal);
+  box-shadow: none;
+}
+body[data-jam-deck-skin="glass"] .jam-deck-task-modal :is(.jam-deck-task-field, .jam-deck-task-image-row, .jam-deck-modal-actions) {
+  background: transparent;
+  border-color: var(--jd-dialog-line);
+  box-shadow: none;
+}
+body[data-jam-deck-skin="glass"] .jam-deck-task-modal .jam-deck-task-field { border: 0; padding: 0; }
+body[data-jam-deck-skin="glass"] :is(.jam-deck-task-modal, .jam-deck-shortcut-modal, .jam-deck-browser-modal, .jam-deck-folder-rename-modal)
+  :is(input[type="text"], input[type="url"], input[type="date"], textarea, select):focus-visible {
+  outline: 2px solid var(--jd-accent, var(--interactive-accent));
+  outline-offset: 2px;
 }
