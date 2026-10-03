@@ -2,6 +2,12 @@
 
 Jam Deck 是 Obsidian 副屏工作台插件：时钟、日历、待办、剪贴板、快捷方式、音乐播放器与可实时编辑的内嵌 Canvas 工作区，内置 AI 对话助手（DeepSeek / GLM）。
 
+## 宣传片
+
+把工作留在桌面上，也把过程留下来。92.7 秒 · 1080p · 60 fps，片中使用虚构演示数据。
+
+https://github.com/user-attachments/assets/03978496-cc2c-45f7-85e6-45db54476526
+
 ## 安装
 
 **方式 A —— Release 手动安装**
