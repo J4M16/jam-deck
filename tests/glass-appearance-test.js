@@ -119,6 +119,29 @@ function environment() {
   }
   assert.equal(Plugin.appearanceSettings({glassBackground:"attachments\\背景.mp4"}).glassBackground,"attachments/背景.mp4");
   assert.equal(Plugin.appearanceSettings({glassBackgroundDim:90}).glassBackgroundDim,70);
+  assert.equal(Plugin.appearanceSettings({}).glassFillOpacity,null,"default retains theme-specific fill opacity");
+  assert.equal(Plugin.appearanceSettings({glassFillOpacity:null}).glassFillOpacity,null);
+  assert.equal(Plugin.appearanceSettings({glassFillOpacity:0}).glassFillOpacity,0);
+  assert.equal(Plugin.appearanceSettings({glassFillOpacity:150}).glassFillOpacity,100);
+  assert.equal(Plugin.appearanceSettings({glassFillOpacity:-8}).glassFillOpacity,0);
+  assert.equal(Plugin.appearanceSettings({glassFillOpacity:"bad"}).glassFillOpacity,null);
+  const fillPlugin=Object.create(Plugin.prototype);
+  fillPlugin.settingsSaveQueue=Promise.resolve(); fillPlugin.applyAppearance=()=>{};
+  fillPlugin.loadData=async()=>({dataVersion:4,widgets:[],deckRoutines:[],untouched:"keep"});
+  fillPlugin.saveData=async settings=>{fillPlugin.disk=clone(settings);};
+  await fillPlugin.loadSettings();
+  assert(await fillPlugin.setAppearance("glassFillOpacity",0));
+  const fillSaved=clone(fillPlugin.disk); fillPlugin.loadData=async()=>fillSaved; await fillPlugin.loadSettings();
+  assert.equal(fillPlugin.settings.glassFillOpacity,0,"fully transparent survives restart");
+  assert.equal(fillPlugin.settings.untouched,"keep"); assert(Array.isArray(fillPlugin.settings.deckRoutines));
+  const fillPersist=fillPlugin.saveData;
+  fillPlugin.saveData=async()=>{throw Error("disk full")};
+  assert.equal(await fillPlugin.setAppearance("glassFillOpacity",75),false);
+  assert.equal(fillPlugin.settings.glassFillOpacity,0,"failed opacity save rolls back");
+  fillPlugin.saveData=fillPersist;
+  await Promise.all([fillPlugin.setAppearance("glassFillOpacity",25),fillPlugin.setAppearance("glassFillOpacity",80)]);
+  assert.equal(fillPlugin.disk.glassFillOpacity,80);
+  await fillPlugin.setAppearance("glassFillOpacity",null); assert.equal(fillPlugin.disk.glassFillOpacity,null);
   assert.equal(Plugin.appearanceSettings({}).glassBlur,4);
   assert.equal(Plugin.appearanceSettings({glassBlur:99}).glassBlur,16);
   assert.equal(Plugin.appearanceSettings({glassBlur:-1}).glassBlur,0);
@@ -163,6 +186,16 @@ function environment() {
   assert.equal(e.appearance.media,video,"dimming does not recreate the video");
   assert.equal(e.root.surfaces[0],contentIdentity);
   const opticalEngine=e.engines[0];
+  for (const opacity of [0,25,100]) {
+    e.appearance.setFillOpacity(opacity);
+    assert.equal(e.root.vars.get("--jd-glass-fill-alpha"),String(opacity/100));
+  }
+  assert.equal(e.appearance.media,video,"opacity preview preserves the playing video");
+  assert.equal(e.root.surfaces[0],contentIdentity); assert.equal(opticalEngine.retunes.length,0,"opacity does not rebuild filters");
+  e.plugin.settings.glassFillOpacity=40;e.appearance.update();
+  assert.equal(e.root.vars.get("--jd-glass-fill-alpha"),"0.4");
+  e.plugin.settings.glassFillOpacity=null;e.appearance.update();
+  assert(!e.root.vars.has("--jd-glass-fill-alpha"),"reset restores original light and dark CSS defaults");
   for (const blur of [0,16,8]) e.appearance.setBlur(blur);
   assert.equal(e.engines.length,1,"blur preview reuses the existing engine and optical surfaces");
   assert.deepEqual(opticalEngine.retunes.map(o=>o.blur),[0,16,8]);

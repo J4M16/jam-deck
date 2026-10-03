@@ -3,6 +3,9 @@
    Only theme-invariant values belong in this block. */
 body {
   --jd-heading: #5c5c5c;
+  --jd-motion-enter: 180ms;
+  --jd-motion-exit: 120ms;
+  --jd-motion-ease: cubic-bezier(.22, 1, .36, 1);
 
   /* Corner scale. Every step is an even number: odd values were folded into
      the nearest even neighbour (5 -> 4, 7 -> 6, 9 -> 8; 3 moves up to 4
@@ -622,10 +625,14 @@ input.jam-deck-countdown-duration {
 }
 /* Keep the native toolbar mounted and its geometry stable while idle. Keyboard
    focus stays visible; activity anywhere inside this Canvas reveals it again. */
+.jam-deck-canvas-leaf .canvas-card-menu {
+  transition: opacity var(--jd-motion-enter) var(--jd-motion-ease), visibility 0s;
+}
 .jam-deck-canvas-leaf.jam-deck-canvas-toolbar-idle .canvas-card-menu:not(:has(:focus-visible)) {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  transition: opacity var(--jd-motion-exit) var(--jd-motion-ease), visibility 0s linear var(--jd-motion-exit);
 }
 .jam-deck-canvas-leaf .jam-deck-node-toolbar--spatial .canvas-card-menu-divider { height: 28px; align-self: center; background: color-mix(in srgb, var(--jd-line) 72%, transparent); }
 .jam-deck-canvas-leaf .jam-deck-node-toolbar--spatial .canvas-card-menu-button {
@@ -4590,7 +4597,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   --jd-surface-raised: rgb(255 255 255 / 0.48);
   --jd-paper: rgb(249 252 253 / 0.65);
   --jd-hover: rgb(255 255 255 / 0.08);
-  --jd-glass-tint: rgb(246 251 255 / 0.32);
+  --jd-glass-tint: rgb(246 251 255 / var(--jd-glass-fill-alpha, 0.32));
   --jd-glass-control: rgb(255 255 255 / 0.10);
   --jd-glass-highlight: rgb(255 255 255 / 0.18);
   --jd-glass-heading: #46535d;
@@ -4614,7 +4621,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   --jd-surface-raised: rgb(36 52 65 / 0.64);
   --jd-paper: rgb(26 41 52 / 0.82);
   --jd-hover: rgb(255 255 255 / 0.06);
-  --jd-glass-tint: rgb(18 31 41 / 0.48);
+  --jd-glass-tint: rgb(18 31 41 / var(--jd-glass-fill-alpha, 0.48));
   --jd-glass-control: rgb(236 246 255 / 0.06);
   --jd-glass-highlight: rgb(255 255 255 / 0.12);
   --jd-glass-heading: #d7e1e7;

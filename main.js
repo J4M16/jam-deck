@@ -1624,6 +1624,8 @@ function jamDeckAppearanceSettings(settings) {
     skin: settings.skin === "glass" ? "glass" : "spatial",
     glassQuality: settings.glassQuality === "light" ? "light" : "balanced",
     glassBlur: Number.isFinite(Number(settings.glassBlur)) ? Math.max(0, Math.min(16, Number(settings.glassBlur))) : 4,
+    glassFillOpacity: settings.glassFillOpacity == null || !Number.isFinite(Number(settings.glassFillOpacity))
+      ? null : Math.max(0, Math.min(100, Number(settings.glassFillOpacity))),
     hideObsidianSidebar: settings.hideObsidianSidebar === true,
     hideObsidianTopbar: settings.hideObsidianTopbar === true,
     glassBackground: safePath ? path : "",
@@ -1702,12 +1704,19 @@ class JamDeckAppearance {
     if (this.engine) void this.engine.setOpts({ blur });
   }
 
+  setFillOpacity(value) {
+    if (this.disposed) return;
+    if (value == null || !Number.isFinite(Number(value))) this.root.style.removeProperty("--jd-glass-fill-alpha");
+    else this.root.style.setProperty("--jd-glass-fill-alpha", String(Math.max(0, Math.min(100, Number(value))) / 100));
+  }
+
   update() {
     if (this.disposed) return;
     const settings = this.plugin.settings;
     this.root.dataset.jamDeckSkin = settings.skin;
     this.root.dataset.jamDeckGlassQuality = settings.glassQuality;
     this.setBlur(settings.glassBlur);
+    this.setFillOpacity(settings.glassFillOpacity);
     for (const widget of this.root.querySelectorAll(".jam-deck-widget.is-canvas-embed")) {
       let material = widget.querySelector(":scope > .jam-deck-canvas-glass-material");
       if (settings.skin !== "glass") { material?.remove(); continue; }
@@ -1904,6 +1913,7 @@ class JamDeckAppearance {
     this.root.style.removeProperty("--jd-background-dim");
     this.root.style.removeProperty("--jd-glass-blur");
     this.root.style.removeProperty("--jd-glass-canvas-blur");
+    this.root.style.removeProperty("--jd-glass-fill-alpha");
   }
 }
 
@@ -1912,6 +1922,7 @@ const DEFAULT_SETTINGS = {
   skin: "spatial",
   glassQuality: "balanced",
   glassBlur: 4,
+  glassFillOpacity: null,
   hideObsidianSidebar: false,
   hideObsidianTopbar: false,
   glassBackground: "",
@@ -21533,6 +21544,29 @@ class JamDeckSettingTab extends PluginSettingTab {
         this.plugin.applyAppearance();
         blurInput.value = String(this.plugin.settings.glassBlur); blurValue.textContent = blurInput.value;
       });
+      const fillSetting = new Setting(containerEl).setName("玻璃底色不透明度")
+        .setDesc("调节工作台组件与工具栏下层填充：0% 全透明，100% 不透明。保留原有颜色、边缘高光和磨砂，拖动实时预览。");
+      const fillValue = fillSetting.controlEl.createEl("span", { cls: "jam-deck-blur-value" });
+      const fillInput = fillSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "100", step: "1", "aria-label": "玻璃底色不透明度" } });
+      const syncFillControls = () => {
+        const value = this.plugin.settings.glassFillOpacity;
+        const view = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+        const defaultValue = view?.contentEl.dataset.jamDeckGlassTone === "dark" ? 48 : 32;
+        fillInput.value = String(value ?? defaultValue);
+        fillValue.textContent = value == null ? `默认（${defaultValue}%）` : `${value}%`;
+      };
+      syncFillControls();
+      fillInput.addEventListener("input", () => {
+        fillValue.textContent = `${fillInput.value}%`;
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.appearance?.setFillOpacity(Number(fillInput.value));
+      });
+      const saveFill = async value => {
+        await this.plugin.setAppearance("glassFillOpacity", value);
+        this.plugin.applyAppearance();
+        syncFillControls();
+      };
+      fillInput.addEventListener("change", () => { void saveFill(Number(fillInput.value)); });
+      fillSetting.addButton(button => button.setButtonText("恢复默认").onClick(() => saveFill(null)));
       const background = new Setting(containerEl).setName("背景图片或视频")
         .setDesc(this.plugin.settings.glassBackground ? `当前：${this.plugin.settings.glassBackground.split("/").pop()}` : "默认使用柔和的极光渐变。自选文件会导入库内，随库同步。");
       const input = this.plugin.createBackgroundPicker(background.controlEl, () => this.display());
