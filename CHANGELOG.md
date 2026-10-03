@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1 — 2026-10-03（开发版）
+
+- 顶栏新增无底文字「设置」，点击直接打开 Jam Deck 设置页；内嵌 Canvas 底部工具栏在 5 秒无操作后隐藏，移动、点击、滚动、键盘或输入时立即恢复，拖拽按住及键盘焦点期间保持可用。每个 Canvas 单独计时，只改变显隐、不重建原生工具栏；销毁释放计时器与监听，不新增持久化字段。npm run verify 全绿；纸面/玻璃浏览器检查确认隐藏后不占命中、尺寸不变、鼠标焦点不会锁定显示、键盘仍可操作。Windows Obsidian 1.13.7 实机确认 5 秒隐藏、前台鼠标唤回、设置页 activeTab=jam-deck 且实际弹窗可见，Canvas 数据保持；1.3.1 已部署并仅重载一次。Mac M5 共用 DOM 实现，未实机验证。未发布正式 Release。工具：Codex；处理模型签名：具体模型标识不可见（主代理、实现与验证）。
+
 ## 1.3.0 — 2026-09-27（开发版）
 
 - 修掉日结单送纸和甩走时露出的矩形阴影框。Jam 反馈「便签打印出来和飞走的时候会露出底下的阴影边框」。实测透明外壳 `.modal` 上一直画着 Obsidian 的 `--shadow-l`：原生规则 `.modal-container.mod-dim .modal`（0,3,0）压过了外壳自己的 `box-shadow: none`（0,2,0）。纸面铺满时正好盖住它，送纸中途或甩走后就露了出来。改为用容器类 `.modal-container.jam-deck-receipt-container > .modal.jam-deck-receipt-modal-shell` 提到 (0,4,0)，不用 `!important`；纸面自身的投影不受影响。上一轮的测试页没带 Obsidian 原生弹窗规则，所以没查出来，此坑已记入视觉规范。验证：`npm run verify` 全绿，新增回归断言；Obsidian 实测在 `mod-dim` 存在时外壳 `box-shadow: none`、边框 0、底色透明，纸面 `drop-shadow` 仍在，关闭后剩余弹窗容器 0，`data.json` 38 个 key 完好。工具：Cursor；处理模型签名：Claude Opus 5.5（主代理、诊断与修复）。

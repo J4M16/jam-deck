@@ -620,6 +620,13 @@ input.jam-deck-countdown-duration {
   box-shadow: 0 10px 26px rgb(0 0 0 / 0.18), 0 2px 5px rgb(0 0 0 / 0.12);
   backdrop-filter: blur(12px);
 }
+/* Keep the native toolbar mounted and its geometry stable while idle. Keyboard
+   focus stays visible; activity anywhere inside this Canvas reveals it again. */
+.jam-deck-canvas-leaf.jam-deck-canvas-toolbar-idle .canvas-card-menu:not(:has(:focus-visible)) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
 .jam-deck-canvas-leaf .jam-deck-node-toolbar--spatial .canvas-card-menu-divider { height: 28px; align-self: center; background: color-mix(in srgb, var(--jd-line) 72%, transparent); }
 .jam-deck-canvas-leaf .jam-deck-node-toolbar--spatial .canvas-card-menu-button {
   width: 46px;

@@ -9590,6 +9590,57 @@ function jamDeckIsNativeCanvasFocusButton(button) {
   return /\blucide-scan\b/.test(String(svgClass));
 }
 
+class CanvasToolbarIdleController {
+  constructor(root) {
+    this.root = root;
+    this.win = root.ownerDocument.defaultView;
+    this.pointers = new Set();
+    this.disposers = [];
+    this.timer = 0;
+    this.destroyed = false;
+    const listen = (target, name, handler) => {
+      target.addEventListener(name, handler, { capture: true, passive: true });
+      this.disposers.push(() => target.removeEventListener(name, handler, true));
+    };
+    for (const name of ["pointerenter", "pointermove", "wheel", "keydown", "focusin", "input", "dragover"]) {
+      listen(root, name, () => this.activity());
+    }
+    listen(root, "pointerdown", event => { this.pointers.add(event.pointerId); this.activity(); });
+    const release = event => { if (this.pointers.delete(event.pointerId)) this.activity(); };
+    listen(this.win, "pointerup", release);
+    listen(this.win, "pointercancel", release);
+    const releaseAll = () => { if (this.pointers.size) { this.pointers.clear(); this.activity(); } };
+    for (const name of ["blur", "dragend", "drop"]) listen(this.win, name, releaseAll);
+    this.activity();
+  }
+
+  activity() {
+    if (this.destroyed) return;
+    this.lastActivity = this.win.performance.now();
+    if (this.root.classList.contains("jam-deck-canvas-toolbar-idle")) this.root.classList.remove("jam-deck-canvas-toolbar-idle");
+    // A single deadline timer; pointer motion does not create a timer per event.
+    if (!this.timer) this.timer = this.win.setTimeout(() => this.check(), 5000);
+  }
+
+  check() {
+    this.timer = 0;
+    if (this.destroyed || this.pointers.size) return;
+    const remaining = 5000 - (this.win.performance.now() - this.lastActivity);
+    if (remaining > 0) this.timer = this.win.setTimeout(() => this.check(), remaining);
+    else this.root.classList.add("jam-deck-canvas-toolbar-idle");
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.win.clearTimeout(this.timer); this.timer = 0;
+    for (const dispose of this.disposers) dispose();
+    this.disposers = [];
+    this.pointers.clear();
+    this.root.classList.remove("jam-deck-canvas-toolbar-idle");
+  }
+}
+
 class CanvasSelectionToolbarController {
   constructor(runtime, entry) {
     this.runtime = runtime;
@@ -9611,6 +9662,7 @@ class CanvasSelectionToolbarController {
 
   install() {
     if (!this.canvas || !this.root || !this.ownerWindow || this.destroyed) return false;
+    this.idleController = new CanvasToolbarIdleController(this.root);
     const sync = () => this.scheduleToolbarSync();
     // 按下（平移/拖拽）期间暂停同步，松手恢复并补一次——避免 pointermove
     // 高频触发两次全量节点遍历导致大图量画布平移卡顿。
@@ -9858,6 +9910,8 @@ class CanvasSelectionToolbarController {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.idleController?.destroy();
+    this.idleController = null;
     if (this.toolbarFrame && this.ownerWindow) {
       try { this.ownerWindow.cancelAnimationFrame(this.toolbarFrame); } catch (error) {}
       this.toolbarFrame = 0;
@@ -13773,6 +13827,7 @@ class JamDeckView extends ItemView {
     }
     const wallpaperInput = this.plugin.createBackgroundPicker(actions, () => this.plugin.setAppearance("skin", "glass"));
     this.makeToolbarButton(actions, "映画", "更换背景图片或视频", () => wallpaperInput.click());
+    this.makeToolbarButton(actions, "设置", "打开 Jam Deck 设置", () => this.plugin.openSettings());
     this.makeToolbarButton(actions, "灵动", "进入灵动岛悬浮条", () => {
       void this.plugin.enterIslandMode();
     }, false, "jam-deck-action jam-deck-island-entry");
@@ -19599,6 +19654,11 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  openSettings() {
+    this.app.setting.open();
+    this.app.setting.openTabById(this.manifest.id);
   }
 
   renderAllViews() {
