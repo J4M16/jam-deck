@@ -1626,12 +1626,19 @@ function jamDeckAppearanceSettings(settings) {
     glassBlur: Number.isFinite(Number(settings.glassBlur)) ? Math.max(0, Math.min(16, Number(settings.glassBlur))) : 4,
     glassFillOpacity: settings.glassFillOpacity == null || !Number.isFinite(Number(settings.glassFillOpacity))
       ? null : Math.max(0, Math.min(100, Number(settings.glassFillOpacity))),
+    glassTextBrightness: settings.glassTextBrightness == null || !Number.isFinite(Number(settings.glassTextBrightness))
+      ? 50 : Math.max(0, Math.min(100, Number(settings.glassTextBrightness))),
     hideObsidianSidebar: settings.hideObsidianSidebar === true,
     hideObsidianTopbar: settings.hideObsidianTopbar === true,
     glassBackground: safePath ? path : "",
     glassBackgroundDim: Number.isFinite(Number(settings.glassBackgroundDim)) ? Math.max(0, Math.min(70, Number(settings.glassBackgroundDim))) : 12,
     glassVideoPlaying: settings.glassVideoPlaying !== false,
   };
+}
+
+function jamDeckTextBrightnessValues(value) {
+  const brightness = value == null || !Number.isFinite(Number(value)) ? 50 : Math.max(0, Math.min(100, Number(value)));
+  return { "--jd-text-tint": brightness < 50 ? "#000" : "#fff", "--jd-text-mix": `${Math.abs(brightness - 50) * 2}%` };
 }
 
 function jamDeckWallpaperLuminance(pixels, dim = 0) {
@@ -1710,6 +1717,11 @@ class JamDeckAppearance {
     else this.root.style.setProperty("--jd-glass-fill-alpha", String(Math.max(0, Math.min(100, Number(value))) / 100));
   }
 
+  setTextBrightness(value) {
+    if (this.disposed) return;
+    for (const [name, color] of Object.entries(jamDeckTextBrightnessValues(value))) this.root.style.setProperty(name, color);
+  }
+
   update() {
     if (this.disposed) return;
     const settings = this.plugin.settings;
@@ -1717,6 +1729,7 @@ class JamDeckAppearance {
     this.root.dataset.jamDeckGlassQuality = settings.glassQuality;
     this.setBlur(settings.glassBlur);
     this.setFillOpacity(settings.glassFillOpacity);
+    this.setTextBrightness(settings.glassTextBrightness);
     for (const widget of this.root.querySelectorAll(".jam-deck-widget.is-canvas-embed")) {
       let material = widget.querySelector(":scope > .jam-deck-canvas-glass-material");
       if (settings.skin !== "glass") { material?.remove(); continue; }
@@ -1914,6 +1927,8 @@ class JamDeckAppearance {
     this.root.style.removeProperty("--jd-glass-blur");
     this.root.style.removeProperty("--jd-glass-canvas-blur");
     this.root.style.removeProperty("--jd-glass-fill-alpha");
+    this.root.style.removeProperty("--jd-text-tint");
+    this.root.style.removeProperty("--jd-text-mix");
   }
 }
 
@@ -1923,6 +1938,7 @@ const DEFAULT_SETTINGS = {
   glassQuality: "balanced",
   glassBlur: 4,
   glassFillOpacity: null,
+  glassTextBrightness: 50,
   hideObsidianSidebar: false,
   hideObsidianTopbar: false,
   glassBackground: "",
@@ -10410,6 +10426,7 @@ class IslandModeController {
       dark: this.plugin.settings.skin === "glass" ? !!this.getElectronRemote().nativeTheme.shouldUseDarkColors : dark,
       animationsEnabled: this.plugin.settings.animationsEnabled !== false,
       typography: jamDeckTypographyValues(this.plugin.settings),
+      textBrightness: jamDeckTextBrightnessValues(this.plugin.settings.glassTextBrightness),
       leaveMs: this.getLeaveMs(),
       items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
@@ -10552,8 +10569,8 @@ class IslandModeController {
     .toast.is-visible { opacity: 1; translate: -50% 0; }
     body.no-motion .toast { transition: none; }
     /* Desktop pixels use the shared glass optics beneath this untouched foreground. */
-    body.is-glass { --glass-ink: #202c35; --glass-muted: #52616b; --glass-line: rgba(255,255,255,.12); --glass-hover: rgba(255,255,255,.08); }
-    body.is-glass.is-dark { --glass-ink: #f1f5f7; --glass-muted: #c5d1d8; --glass-line: rgba(255,255,255,.08); --glass-hover: rgba(255,255,255,.06); }
+    body.is-glass { --glass-ink: color-mix(in srgb, #202c35, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-muted: color-mix(in srgb, #52616b, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-line: rgba(255,255,255,.12); --glass-hover: rgba(255,255,255,.08); }
+    body.is-glass.is-dark { --glass-ink: color-mix(in srgb, #f1f5f7, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-muted: color-mix(in srgb, #c5d1d8, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%)); --glass-line: rgba(255,255,255,.08); --glass-hover: rgba(255,255,255,.06); }
     body.is-glass .surface {
       left: 0; width: 100%; color: var(--glass-ink);
       background: linear-gradient(145deg, rgba(255,255,255,.13), transparent 38%, rgba(255,255,255,.04));
@@ -10741,6 +10758,7 @@ class IslandModeController {
     function render(next) {
       state = next || state;
       for (const [name, value] of Object.entries(state.typography || {})) document.body.style.setProperty(name, value);
+      for (const [name, value] of Object.entries(state.textBrightness)) document.body.style.setProperty(name, value);
       document.body.classList.toggle("is-dark", !!state.dark);
       document.body.classList.toggle("is-glass", !!state.glass);
       document.body.classList.toggle("no-motion", state.animationsEnabled === false);
@@ -10979,11 +10997,12 @@ class IslandModeController {
     await island.webContents.executeJavaScript(`window.jamDeckIslandSetState(${initialState}); new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
   }
 
-  sendState() {
+  sendState(textBrightness = this.plugin.settings.glassTextBrightness) {
     const island = this.islandWindow;
     if (!this.active || !island || island.isDestroyed() || !this.actionChannel) return;
     try {
       const state = this.buildSurfaceState();
+      state.textBrightness = jamDeckTextBrightnessValues(textBrightness);
       this.syncWindowBounds(state);
       this.syncGlassMaterial(state);
       island.webContents.send(`${this.actionChannel}:state`, state);
@@ -21567,6 +21586,28 @@ class JamDeckSettingTab extends PluginSettingTab {
       };
       fillInput.addEventListener("change", () => { void saveFill(Number(fillInput.value)); });
       fillSetting.addButton(button => button.setButtonText("恢复默认").onClick(() => saveFill(null)));
+      const textSetting = new Setting(containerEl).setName("文字与图标明暗")
+        .setDesc("工作台与玻璃灵动岛共用：50% 保持原配色，向左混黑压暗，向右混白提亮；壁纸自适应仍然生效。拖动实时预览。");
+      const textValue = textSetting.controlEl.createEl("span", { cls: "jam-deck-blur-value" });
+      const textInput = textSetting.controlEl.createEl("input", { type: "range", attr: { min: "0", max: "100", step: "1", "aria-label": "文字与图标明暗" } });
+      const syncTextControls = () => {
+        textInput.value = String(this.plugin.settings.glassTextBrightness);
+        textValue.textContent = `${textInput.value}%`;
+      };
+      syncTextControls();
+      textInput.addEventListener("input", () => {
+        const value = Number(textInput.value);
+        textValue.textContent = `${value}%`;
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.appearance?.setTextBrightness(value);
+        if (this.plugin.islandMode?.active) this.plugin.islandMode.sendState(value);
+      });
+      const saveTextBrightness = async value => {
+        await this.plugin.setAppearance("glassTextBrightness", value);
+        this.plugin.applyAppearance();
+        syncTextControls();
+      };
+      textInput.addEventListener("change", () => { void saveTextBrightness(Number(textInput.value)); });
+      textSetting.addButton(button => button.setButtonText("恢复原配色").onClick(() => saveTextBrightness(50)));
       const background = new Setting(containerEl).setName("背景图片或视频")
         .setDesc(this.plugin.settings.glassBackground ? `当前：${this.plugin.settings.glassBackground.split("/").pop()}` : "默认使用柔和的极光渐变。自选文件会导入库内，随库同步。");
       const input = this.plugin.createBackgroundPicker(background.controlEl, () => this.display());
@@ -21791,6 +21832,7 @@ JamDeckPlugin.nextCanvasFileName = jamDeckNextCanvasFileName;
 JamDeckPlugin.Appearance = JamDeckAppearance;
 JamDeckPlugin.appearanceSettings = jamDeckAppearanceSettings;
 JamDeckPlugin.wallpaperLuminance = jamDeckWallpaperLuminance;
+JamDeckPlugin.textBrightnessValues = jamDeckTextBrightnessValues;
 JamDeckPlugin.backgroundKind = jamDeckBackgroundKind;
 JamDeckPlugin.CanvasFilePickerModal = CanvasFilePickerModal;
 JamDeckPlugin.ShortcutEditorModal = ShortcutEditorModal;

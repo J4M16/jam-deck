@@ -491,6 +491,7 @@ function makeIslandDragHarness() {
     body: element(), documentElement: element(), createElement: element,
     getElementById: (id) => nodes[id],
   });
+  document.body.style = { setProperty(name, value) { this[name] = value; } };
   const window = Object.assign(element(), {
     setTimeout(callback) { timers.set(++timerId, callback); return timerId; },
     clearTimeout(id) { timers.delete(id); },
@@ -506,7 +507,7 @@ function makeIslandDragHarness() {
   });
   return {
     sent,
-    render(items) { window.jamDeckIslandSetState({ items, collapsed: false, leaveMs: 1000 }); },
+    render(items) { window.jamDeckIslandSetState({ items, collapsed: false, leaveMs: 1000, textBrightness: JamDeckPlugin.textBrightnessValues(50) }); },
     chip(index = 0) { return nodes.rail.children[index]; },
     drag(chip, type, transfer = true) {
       const data = new Map();

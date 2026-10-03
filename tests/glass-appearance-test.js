@@ -63,7 +63,8 @@ function environment() {
   const source = fs.readFileSync(path.join(__dirname,"../main.js"),"utf8");
   const code = source.slice(source.indexOf("class JamDeckAppearance {"), source.indexOf("const DEFAULT_SETTINGS = {"));
   const Controller = vm.runInNewContext(`${code}\nJamDeckAppearance`, {
-    jamDeckBackgroundKind: Plugin.backgroundKind, jamDeckWallpaperLuminance: Plugin.wallpaperLuminance, Notice: class {},
+    jamDeckBackgroundKind: Plugin.backgroundKind, jamDeckWallpaperLuminance: Plugin.wallpaperLuminance,
+    jamDeckTextBrightnessValues: Plugin.textBrightnessValues, Notice: class {},
     jamDeckCreateGlassEngine: () => {
       const engine = { attached:new Set(), retunes:[], attach(el){this.attached.add(el);}, detach(el){this.attached.delete(el);},
         setOpts(opts){this.retunes.push(opts);return Promise.resolve();}, dispose(){this.disposed=true;this.attached.clear();} };
@@ -142,6 +143,35 @@ function environment() {
   await Promise.all([fillPlugin.setAppearance("glassFillOpacity",25),fillPlugin.setAppearance("glassFillOpacity",80)]);
   assert.equal(fillPlugin.disk.glassFillOpacity,80);
   await fillPlugin.setAppearance("glassFillOpacity",null); assert.equal(fillPlugin.disk.glassFillOpacity,null);
+  assert.equal(Plugin.appearanceSettings({}).glassTextBrightness,50);
+  assert.equal(Plugin.appearanceSettings({glassTextBrightness:null}).glassTextBrightness,50);
+  assert.equal(Plugin.appearanceSettings({glassTextBrightness:"bad"}).glassTextBrightness,50);
+  assert.equal(Plugin.appearanceSettings({glassTextBrightness:-10}).glassTextBrightness,0);
+  assert.equal(Plugin.appearanceSettings({glassTextBrightness:110}).glassTextBrightness,100);
+  for (const value of [0,100,50]) {
+    assert(await fillPlugin.setAppearance("glassTextBrightness",value));
+    const disk=clone(fillPlugin.disk);fillPlugin.loadData=async()=>disk;await fillPlugin.loadSettings();
+    assert.equal(fillPlugin.settings.glassTextBrightness,value,"text brightness survives a full reload");
+    assert.equal(fillPlugin.settings.untouched,"keep");assert(Array.isArray(fillPlugin.settings.deckRoutines));
+  }
+  fillPlugin.saveData=async()=>{throw Error("disk full")};
+  assert.equal(await fillPlugin.setAppearance("glassTextBrightness",80),false);
+  assert.equal(fillPlugin.settings.glassTextBrightness,50,"failed text adjustment rolls back");
+  fillPlugin.saveData=fillPersist;
+  await Promise.all([fillPlugin.setAppearance("glassTextBrightness",20),fillPlugin.setAppearance("glassTextBrightness",75)]);
+  assert.equal(fillPlugin.disk.glassTextBrightness,75,"latest queued brightness wins");
+  assert.deepEqual(Plugin.textBrightnessValues(25),{"--jd-text-tint":"#000","--jd-text-mix":"50%"});
+  assert.deepEqual(Plugin.textBrightnessValues(50),{"--jd-text-tint":"#fff","--jd-text-mix":"0%"});
+  assert.deepEqual(Plugin.textBrightnessValues(75),{"--jd-text-tint":"#fff","--jd-text-mix":"50%"});
+  const island=Object.create(Plugin.IslandModeController.prototype);
+  island.plugin={settings:{...Plugin.appearanceSettings({skin:"glass",glassTextBrightness:75}),clipboardItems:[]}};
+  island.getPrimaryClockWidget=()=>null;island.getLeaveMs=()=>1000;island.getElectronRemote=()=>({nativeTheme:{shouldUseDarkColors:true}});
+  assert.deepEqual(island.buildSurfaceState().textBrightness,Plugin.textBrightnessValues(75));
+  let sent;island.active=true;island.actionChannel="qa";island.islandWindow={isDestroyed:()=>false,webContents:{send:(_,state)=>{sent=state}}};
+  island.syncWindowBounds=()=>{};island.syncGlassMaterial=()=>{};
+  island.sendState(25);assert.deepEqual(sent.textBrightness,Plugin.textBrightnessValues(25));
+  assert.equal(island.plugin.settings.glassTextBrightness,75,"island preview does not write settings");
+  island.sendState();assert.deepEqual(sent.textBrightness,Plugin.textBrightnessValues(75));
   assert.equal(Plugin.appearanceSettings({}).glassBlur,4);
   assert.equal(Plugin.appearanceSettings({glassBlur:99}).glassBlur,16);
   assert.equal(Plugin.appearanceSettings({glassBlur:-1}).glassBlur,0);
@@ -186,6 +216,16 @@ function environment() {
   assert.equal(e.appearance.media,video,"dimming does not recreate the video");
   assert.equal(e.root.surfaces[0],contentIdentity);
   const opticalEngine=e.engines[0];
+  for (const value of [0,25,50,75,100]) {
+    e.appearance.setTextBrightness(value);
+    for (const [name,color] of Object.entries(Plugin.textBrightnessValues(value))) assert.equal(e.root.vars.get(name),color);
+  }
+  e.plugin.settings.glassTextBrightness=75;e.appearance.update();
+  assert.equal(e.root.vars.get("--jd-text-mix"),"50%");
+  e.plugin.settings.glassTextBrightness=50;e.appearance.update();
+  assert.equal(e.root.vars.get("--jd-text-mix"),"0%");
+  assert.equal(e.appearance.media,video,"text preview retains the wallpaper decoder");
+  assert.equal(opticalEngine.retunes.length,0,"text preview does not retune optical filters");
   for (const opacity of [0,25,100]) {
     e.appearance.setFillOpacity(opacity);
     assert.equal(e.root.vars.get("--jd-glass-fill-alpha"),String(opacity/100));
