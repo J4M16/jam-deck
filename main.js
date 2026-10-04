@@ -18460,20 +18460,11 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     }
   }
 
-  // 批量归档已完成项。逐条串行走既有归档链路（写日记本身已排队），
-  // 失败的留在「已完成」不动，返回失败条数交给调用方提示。
+  // 单条与批量共用事务：每阶段只保存一次，同篇日记只 process 一次。
+  // 失败的留在「已完成」，成功项提交后才清理附件。
   async archiveCompletedTasks() {
     const ids = this.settings.deckTasks.filter((task) => task.status === "completed").map((task) => task.id);
-    let failed = 0;
-    for (const id of ids) {
-      try {
-        if (!await this.archiveDeckTask(id)) failed += 1;
-      } catch (error) {
-        console.error("jam-deck batch archive failed", error);
-        failed += 1;
-      }
-    }
-    return failed;
+    return this.archiveDeckTasks(ids);
   }
 
   async completeAndArchiveDeckTask(id) {
@@ -18791,81 +18782,132 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   async archiveDeckTask(id) {
-    if (this.archivingTaskIds.has(id)) return false;
-    const initial = this.getDeckTask(id);
-    if (!initial || initial.status !== "completed") return false;
-    this.archivingTaskIds.add(id);
+    return (await this.archiveDeckTasks([id])) === 0;
+  }
+
+  async archiveDeckTasks(taskIds) {
+    const ids = [...new Set(taskIds)];
+    if (!ids.length) return 0;
+    const locked = ids.filter((id) => !this.archivingTaskIds.has(id) && this.getDeckTask(id)?.status === "completed");
+    if (!locked.length) return ids.length;
+    for (const id of locked) this.archivingTaskIds.add(id);
     this.renderAllViews();
 
     const operation = this.archiveQueue.then(async () => {
-      const task = this.getDeckTask(id);
-      if (!task || task.status !== "completed") throw new Error("待办状态已改变，未归档");
-      let pending = task.pendingJournalOp && task.pendingJournalOp.type === "archive" ? task.pendingJournalOp : null;
-      if (!pending) {
-        const dateKey = this.formatLocalDate(new Date());
-        const category = this.resolveTaskCategory(task);
-        const targetRef = this.buildArchiveRef(task, dateKey, category);
-        task.archiveTargetDate = dateKey;
-        task.archiveTargetPath = targetRef.notePath;
-        task.pendingJournalOp = { type: "archive", taskId: task.id, targetCategory: category, targetDate: dateKey, targetRef, stage: "prepared" };
+      const entries = [];
+      const prepared = [];
+      const dateKey = this.formatLocalDate(new Date());
+      for (const id of locked) {
+        const task = this.getDeckTask(id);
+        if (!task || task.status !== "completed") continue;
+        let pending = task.pendingJournalOp && task.pendingJournalOp.type === "archive" ? task.pendingJournalOp : null;
+        if (!pending) {
+          const category = this.resolveTaskCategory(task);
+          const targetRef = this.buildArchiveRef(task, dateKey, category);
+          prepared.push({ task, previous: { archiveTargetDate: task.archiveTargetDate,
+            archiveTargetPath: task.archiveTargetPath, pendingJournalOp: task.pendingJournalOp } });
+          task.archiveTargetDate = dateKey;
+          task.archiveTargetPath = targetRef.notePath;
+          task.pendingJournalOp = { type: "archive", taskId: task.id, targetCategory: category, targetDate: dateKey, targetRef, stage: "prepared" };
+          pending = task.pendingJournalOp;
+        }
+        const ref = pending.targetRef || this.buildArchiveRef(task, pending.targetDate || task.archiveTargetDate, pending.targetCategory);
+        entries.push({ task, ref, pending, completedAt: task.completedAt });
+      }
+      if (prepared.length) {
         try {
           await this.saveSettings();
         } catch (error) {
-          task.archiveTargetDate = null;
-          task.archiveTargetPath = null;
-          task.pendingJournalOp = null;
+          for (const entry of prepared) Object.assign(entry.task, entry.previous);
           throw error;
         }
-        pending = task.pendingJournalOp;
       }
-      const targetRef = pending.targetRef || this.buildArchiveRef(task, pending.targetDate || task.archiveTargetDate, pending.targetCategory);
-      const completedAtToken = task.completedAt;
-      await this.ensureArchiveFile(targetRef);
-      const attachmentResult = await this.copyTaskImagesToJournal(task, targetRef.notePath);
-      const taskSnapshot = {
-        ...task,
-        links: this.getSafeTaskLinks(task).map((link) => ({ ...link })),
-        images: attachmentResult.images.map((image) => ({ ...image })),
-      };
-      const journalPath = await this.writeTaskToArchive(taskSnapshot, targetRef);
-      task.pendingJournalOp = { ...pending, targetRef, resolvedImages: attachmentResult.images, stage: "targetWritten" };
-      await this.saveSettings();
-      const current = this.getDeckTask(id);
-      if (!current || current.status !== "completed" || current.completedAt !== completedAtToken) {
-        throw new Error("待办在归档期间发生变化；日记已保留，状态未覆盖");
+
+      const groups = new Map();
+      for (const entry of entries) {
+        try {
+          let group = groups.get(entry.ref.notePath);
+          if (!group) {
+            group = { file: await this.ensureArchiveFile(entry.ref), entries: [] };
+            groups.set(entry.ref.notePath, group);
+          }
+          entry.attachments = await this.copyTaskImagesToJournal(entry.task, entry.ref.notePath);
+          entry.snapshot = { ...entry.task, links: this.getSafeTaskLinks(entry.task).map((link) => ({ ...link })),
+            images: entry.attachments.images.map((image) => ({ ...image })) };
+          group.entries.push(entry);
+        } catch (error) { entry.error = error; }
       }
-      const previous = {
-        status: current.status,
-        archivedAt: current.archivedAt,
-        journalPath: current.journalPath,
-        archiveFormat: current.archiveFormat,
-        archiveTargetDate: current.archiveTargetDate,
-        archiveTargetPath: current.archiveTargetPath,
-        images: current.images,
-        archiveRef: current.archiveRef,
-        pendingJournalOp: current.pendingJournalOp,
-      };
-      current.status = "archived";
-      current.archivedAt = Date.now();
-      current.journalPath = journalPath;
-      current.archiveFormat = "simple-v1";
-      current.archiveRef = targetRef;
-      current.archiveDate = targetRef.dateKey;
-      current.archiveTargetDate = null;
-      current.archiveTargetPath = null;
-      current.images = attachmentResult.images;
-      current.pendingJournalOp = { ...current.pendingJournalOp, stage: "committed" };
-      try {
-        await this.saveSettings();
-      } catch (error) {
-        Object.assign(current, previous);
-        throw error;
+      const written = [];
+      for (const group of groups.values()) {
+        if (!group.entries.length) continue;
+        let accepted = [];
+        try {
+          // process 使用最新正文原子更新；坏块只阻止对应待办，不覆盖其他内容。
+          await this.app.vault.process(group.file, (current) => {
+            accepted = [];
+            let result = current;
+            for (const entry of group.entries) {
+              try {
+                result = entry.ref.kind === "work-daily-v2"
+                  ? this.upsertTaskInJournal(result, entry.snapshot)
+                  : this.upsertTaskInLifeDaily(result, entry.snapshot, entry.ref.dateKey);
+                accepted.push(entry);
+              } catch (error) { entry.error = error; }
+            }
+            return result;
+          });
+          for (const entry of accepted) {
+            entry.task.pendingJournalOp = { ...entry.pending, targetRef: entry.ref,
+              resolvedImages: entry.attachments.images, stage: "targetWritten" };
+            written.push(entry);
+          }
+        } catch (error) { for (const entry of group.entries) entry.error = error; }
       }
-      await this.cleanupCommittedTaskAssets(id, attachmentResult.moves);
-      current.pendingJournalOp = null;
-      try { await this.saveSettings(); } catch (error) { current.pendingJournalOp = { ...pending, targetRef, resolvedImages: attachmentResult.images, stage: "committed" }; }
-      new Notice(`Jam Deck：已归档到 ${journalPath}`);
-      return true;
+      if (written.length) await this.saveSettings();
+      const committed = [];
+      for (const entry of written) {
+        const current = this.getDeckTask(entry.task.id);
+        if (current !== entry.task || current.status !== "completed" || current.completedAt !== entry.completedAt) {
+          entry.error = new Error("待办在归档期间发生变化；日记已保留，状态未覆盖");
+          continue;
+        }
+        entry.previous = { status: current.status, archivedAt: current.archivedAt, archiveDate: current.archiveDate,
+          journalPath: current.journalPath, archiveFormat: current.archiveFormat, archiveRef: current.archiveRef,
+          archiveTargetDate: current.archiveTargetDate, archiveTargetPath: current.archiveTargetPath,
+          images: current.images, pendingJournalOp: current.pendingJournalOp };
+        Object.assign(current, { status: "archived", archivedAt: Date.now(), archiveDate: entry.ref.dateKey,
+          journalPath: entry.ref.notePath, archiveFormat: "simple-v1", archiveRef: entry.ref,
+          archiveTargetDate: null, archiveTargetPath: null, images: entry.attachments.images,
+          pendingJournalOp: { ...current.pendingJournalOp, stage: "committed" } });
+        committed.push(entry);
+      }
+      if (committed.length) {
+        try { await this.saveSettings(); }
+        catch (error) {
+          for (const entry of committed) Object.assign(entry.task, entry.previous);
+          throw error;
+        }
+        const cleared = [];
+        for (const entry of committed) {
+          try {
+            await this.cleanupCommittedTaskAssets(entry.task.id, entry.attachments.moves);
+            cleared.push({ task: entry.task, pending: entry.task.pendingJournalOp });
+            entry.task.pendingJournalOp = null;
+          } catch (error) { console.error("jam-deck archived source cleanup failed", error); }
+        }
+        if (cleared.length) {
+          try { await this.saveSettings(); }
+          catch (error) { for (const entry of cleared) entry.task.pendingJournalOp = entry.pending; }
+        }
+        new Notice(ids.length === 1 ? `Jam Deck：已归档到 ${committed[0].ref.notePath}` : `Jam Deck：已归档 ${committed.length} 项`);
+      }
+      for (const entry of entries) if (entry.error) console.error("jam-deck archive failed", entry.error);
+      const failed = ids.length - committed.length;
+      if (failed) {
+        const error = entries.find((entry) => entry.error)?.error;
+        new Notice(ids.length === 1 ? `Jam Deck：归档失败 — ${error?.message || "待办状态已改变"}` : `Jam Deck：${failed} 项归档失败，可重试`);
+      }
+      return failed;
     });
     this.archiveQueue = operation.catch(() => {});
     try {
@@ -18873,9 +18915,9 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     } catch (error) {
       console.error("jam-deck archive failed", error);
       new Notice(`Jam Deck：归档失败 — ${error.message || "未知错误"}`);
-      return false;
+      return ids.length;
     } finally {
-      this.archivingTaskIds.delete(id);
+      for (const id of locked) this.archivingTaskIds.delete(id);
       this.renderAllViews();
     }
   }
