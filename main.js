@@ -1118,7 +1118,8 @@ function jamDeckCreateGlassEngine(ownerWindow) {
     const c = document.createElement('canvas'); c.width = MW; c.height = MH;
     const ctx = c.getContext('2d');
     const img = ctx.createImageData(MW, MH), d = img.data;
-    const img1 = ctx.createImageData(MW, MH), d1 = img1.data;
+    // The balanced material folds in one pass; allocate the inner map only when used.
+    const img1 = twoPass ? ctx.createImageData(MW, MH) : null, d1 = img1?.data;
     const e = 0.5, L = lightOf(o.light);
     let m = 0, m1 = 0, w = 0, ee = 0;
     const put = (x, y, ux, uy, lit) => {
@@ -1127,14 +1128,23 @@ function jamDeckCreateGlassEngine(ownerWindow) {
       d[i + 1] = Math.round(128 + uy * m / MAXD * 127);
       d[i + 2] = Math.round(Math.max(0, Math.min(255, 128 + lit * 127)));   // signed: 128 = neutral
       d[i + 3] = 255;
-      d1[i] = Math.round(128 + ux * m1 / MAXD1 * 127);
-      d1[i + 1] = Math.round(128 + uy * m1 / MAXD1 * 127);
-      d1[i + 2] = Math.round(255 * w);
-      d1[i + 3] = 255;
+      if (d1) {
+        d1[i] = Math.round(128 + ux * m1 / MAXD1 * 127);
+        d1[i + 1] = Math.round(128 + uy * m1 / MAXD1 * 127);
+        d1[i + 2] = Math.round(255 * w);
+        d1[i + 3] = 255;
+      }
     };
     /* Only the lit half is steered by the light — a shade is what the geometry took away and is the
        same all round. Not mirror-symmetric, but recovering it costs one dot product per quadrant. */
-    const litOf = (gx, gy) => { if (ee <= 0) return ee; const f = gx * L[0] + gy * L[1]; return ee * (Math.max(0, f) * 0.78 + Math.max(0, -f) * 0.30); };
+    // Glass-HQ's directional highlight rolloff: concentrate light, not a uniform white ring.
+    // Keep Hyalite's displacement and shade; this only softens the light-facing shoulder.
+    const litOf = (gx, gy) => {
+      if (ee <= 0) return ee;
+      const f = gx * L[0] + gy * L[1];
+      const front = Math.max(0, f), back = Math.max(0, -f);
+      return ee * (front * front * 0.78 + back * back * 0.16);
+    };
     const sym = radii[0] === radii[1] && radii[1] === radii[2] && radii[2] === radii[3];
     const XN = sym ? Math.ceil(MW / 2) : MW, YN = sym ? Math.ceil(MH / 2) : MH;
     for (let y = 0; y < YN; y++) for (let x = 0; x < XN; x++) {

@@ -4606,9 +4606,11 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   --jd-hover: rgb(255 255 255 / 0.08);
   --jd-glass-tint: rgb(246 251 255 / var(--jd-glass-fill-alpha, 0.32));
   --jd-glass-control: rgb(255 255 255 / 0.10);
-  --jd-glass-highlight: rgb(255 255 255 / 0.18);
+  --jd-glass-highlight: rgb(255 255 255 / 0.12);
   --jd-glass-heading: color-mix(in srgb, #46535d, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
-  --jd-glass-shadow: inset 0 1px 1px rgb(255 255 255 / 0.16), 0 8px 24px rgb(31 53 66 / 0.10), 0 1px 3px rgb(31 53 66 / 0.12);
+  --jd-glass-depth-shadow: 0 8px 24px rgb(31 53 66 / 0.10), 0 1px 3px rgb(31 53 66 / 0.12);
+  --jd-glass-shadow: inset 0 1px 1px var(--jd-glass-highlight), var(--jd-glass-depth-shadow);
+  --jd-glass-optical-line: rgb(255 255 255 / 0.06);
   --jd-countdown-card-top: var(--jd-glass-control);
   --jd-countdown-card-bottom: rgb(255 255 255 / 0.05);
   --jd-countdown-card-ink: var(--jd-ink);
@@ -4630,9 +4632,11 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   --jd-hover: rgb(255 255 255 / 0.06);
   --jd-glass-tint: rgb(18 31 41 / var(--jd-glass-fill-alpha, 0.48));
   --jd-glass-control: rgb(236 246 255 / 0.06);
-  --jd-glass-highlight: rgb(255 255 255 / 0.12);
+  --jd-glass-highlight: rgb(255 255 255 / 0.08);
   --jd-glass-heading: color-mix(in srgb, #d7e1e7, var(--jd-text-tint, #fff) var(--jd-text-mix, 0%));
-  --jd-glass-shadow: inset 0 1px 1px rgb(255 255 255 / 0.10), 0 8px 26px rgb(4 15 25 / 0.22), 0 1px 3px rgb(4 15 25 / 0.20);
+  --jd-glass-depth-shadow: 0 8px 26px rgb(4 15 25 / 0.22), 0 1px 3px rgb(4 15 25 / 0.20);
+  --jd-glass-shadow: inset 0 1px 1px var(--jd-glass-highlight), var(--jd-glass-depth-shadow);
+  --jd-glass-optical-line: rgb(255 255 255 / 0.04);
 }
 .jam-deck-backdrop {
   position: absolute;
@@ -4686,7 +4690,7 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
   -webkit-backdrop-filter: blur(var(--jd-glass-canvas-blur, 2px));
   background: var(--jd-glass-tint);
 }
-.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget-header { border-bottom-color: rgb(255 255 255 / 0.13); }
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget-header { border-bottom-color: var(--jd-line); }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-editing { border-style: dashed; border-color: var(--jd-accent); }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-collision { border-color: var(--jd-danger); }
 .jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-widget.is-moving { box-shadow: var(--jd-shadow-lift); }
@@ -4834,6 +4838,12 @@ body:is(.jam-deck-hide-sidebar, .jam-deck-hide-topbar) .jam-deck-root .jam-deck-
 }
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-control-item { color: var(--jd-muted); background: transparent; border-color: var(--jd-line); }
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-card-menu .canvas-card-menu-button svg { fill: none; }
+/* The optical map already lights the rim; avoid adding a second CSS white line. */
+.jam-deck-root[data-jam-deck-skin="glass"] .jam-deck-glass-refract:not(.is-editing, .is-collision, .is-moving),
+.jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-card-menu.jam-deck-node-toolbar--spatial.jam-deck-glass-refract {
+  border-color: var(--jd-glass-optical-line);
+  box-shadow: var(--jd-glass-depth-shadow);
+}
 .jam-deck-canvas-leaf:is(.jam-deck-root[data-jam-deck-skin="glass"] *) .canvas-background { opacity: 0.28; }
 body[data-jam-deck-skin="glass"] .modal:has(:is(.jam-deck-picker, .jam-deck-canvas-picker, .jam-deck-browser-modal,
   .jam-deck-task-modal, .jam-deck-archive-modal, .jam-deck-routine-modal, .jam-deck-shortcut-modal, .jam-deck-folder-rename-modal)) {
