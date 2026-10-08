@@ -465,6 +465,8 @@ function makeIslandDragHarness() {
     const classes = new Set();
     return {
       children: [],
+      dataset: {},
+      get firstElementChild() { return this.children[0] || null; },
       classList: {
         add: (name) => classes.add(name),
         remove: (name) => classes.delete(name),
@@ -500,7 +502,7 @@ function makeIslandDragHarness() {
   controller.actionChannel = "island-drag-test";
   // Capture lifecycle is exercised separately; this fixture isolates existing clipboard drag semantics.
   const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1]
-    .replace(/window\.jamDeckIslandOptics = jamDeckCreateIslandOptics[^\n]+/, "window.jamDeckIslandOptics = {update(){},frame(){},dispose(){}};");
+    .replace(/window\.jamDeckIslandOptics = jamDeckCreateIslandOptics[^\n]+/, "window.jamDeckIslandOptics = {update(){},frame(){},refreshText(){},dispose(){}};");
   vm.runInNewContext(script, {
     document, window, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
     require: () => ({ ipcRenderer: { send: (_channel, payload) => sent.push(payload), on() {} } }),
