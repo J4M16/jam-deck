@@ -1,67 +1,56 @@
 function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
   const context = canvas.getContext("2d", { alpha: false });
-  const video = win.document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
+  const sample = win.document.createElement("canvas");
+  sample.width = 128; sample.height = 6;
+  const pixels = sample.getContext("2d", { willReadFrequently: true });
   const engine = jamDeckCreateGlassEngine(win);
   // Gate the entire filter output: an SVG filter can emit opaque pixels even
   // while its source canvas is hidden and has never received a desktop frame.
   const material = canvas.parentElement;
   material.style.opacity = "0";
-  let config = null, state = null, stream = null, starting = false, disposed = false;
-  let generation = 0, callback = 0, attached = false, opticalKey = "", decoding = false;
+  let config = null, state = null, disposed = false;
+  let generation = 0, attached = false, opticalKey = "", decoding = false, sampledAt = -Infinity, sampledPixels = null;
   const stop = () => {
     generation++;
-    starting = false;
-    if (callback) video.cancelVideoFrameCallback(callback);
-    callback = 0;
-    if (stream) stream.getTracks().forEach(track => track.stop());
-    stream = null;
-    video.pause(); video.srcObject = null;
+    sampledAt = -Infinity;
+    sampledPixels = null;
     material.style.opacity = "0";
     canvas.style.visibility = "hidden";
   };
+  const adaptText = (refresh = false) => {
+    const now = win.performance.now();
+    if (now - sampledAt < 1000 && !refresh) return;
+    if (!refresh && now - sampledAt >= 1000) {
+      sampledAt = now;
+      pixels.drawImage(canvas, 0, 0, sample.width, sample.height);
+      sampledPixels = pixels.getImageData(0, 0, sample.width, sample.height).data;
+    }
+    if (!sampledPixels) return;
+    const data = sampledPixels;
+    const bounds = canvas.getBoundingClientRect();
+    for (const control of win.document.querySelectorAll(".brand, .chip, .timer, .restore, .empty")) {
+      const rect = control.getBoundingClientRect();
+      const left = Math.max(0, Math.floor((rect.left - bounds.left) / bounds.width * sample.width));
+      const right = Math.min(sample.width, Math.ceil((rect.right - bounds.left) / bounds.width * sample.width));
+      if (right <= left) continue;
+      let brightness = 0, count = 0;
+      for (let y = 0; y < sample.height; y++) for (let x = left; x < right; x++) {
+        const offset = (y * sample.width + x) * 4;
+        brightness += .2126 * data[offset] + .7152 * data[offset + 1] + .0722 * data[offset + 2]; count++;
+      }
+      brightness /= count * 255;
+      const previous = control.dataset.glassTone;
+      // A dead band prevents animated desktops from flickering between palettes.
+      control.dataset.glassTone = previous === "dark" ? (brightness > .60 ? "light" : "dark")
+        : previous === "light" ? (brightness < .44 ? "dark" : "light") : brightness >= .52 ? "light" : "dark";
+    }
+  };
   const paint = image => {
     if (disposed || !state?.active || !config) return;
-    const { bounds, display } = config;
-    if (config.platform === "win32") {
-      const scaleX = video.videoWidth / display.width, scaleY = video.videoHeight / display.height;
-      context.drawImage(image, (bounds.x - display.x) * scaleX, (bounds.y - display.y) * scaleY,
-        bounds.width * scaleX, bounds.height * scaleY, 0, 0, canvas.width, canvas.height);
-    } else context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    adaptText();
     canvas.style.visibility = "visible";
     material.style.opacity = "1";
-  };
-  const startVideo = async () => {
-    if (starting || stream || disposed || !state?.active || !config || config.platform !== "win32") return;
-    starting = true;
-    const token = generation;
-    let incoming = null;
-    try {
-      incoming = await win.navigator.mediaDevices.getUserMedia({ audio: false, video: {
-        mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: config.sourceId,
-          maxFrameRate: 30, maxWidth: config.display.width, maxHeight: config.display.height }
-      } });
-      if (disposed || token !== generation || !state?.active) { incoming.getTracks().forEach(track => track.stop()); return; }
-      stream = incoming;
-      stream.getVideoTracks()[0].addEventListener("ended", () => {
-        if (!disposed && token === generation && state?.active) reportFailure("桌面采样已停止");
-      }, { once: true });
-      video.srcObject = stream;
-      await video.play();
-      if (disposed || token !== generation || !state?.active) return;
-      const draw = () => {
-        if (disposed || token !== generation || !state?.active) return;
-        try {
-          paint(video);
-          callback = video.requestVideoFrameCallback(draw);
-        } catch (error) { stop(); reportFailure(error.message || String(error)); }
-      };
-      callback = video.requestVideoFrameCallback(draw);
-    } catch (error) {
-      if (incoming && incoming !== stream) incoming.getTracks().forEach(track => track.stop());
-      if (!disposed && token === generation && state?.active) { stop(); reportFailure(error.message || String(error)); }
-    } finally { if (token === generation) starting = false; }
   };
   const update = next => {
     if (disposed) return;
@@ -84,7 +73,6 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
         canvas.style.filter = `blur(${blur}px)`;
       }
     }
-    void startVideo();
   };
   return {
     configure(value) {
@@ -94,6 +82,7 @@ function jamDeckCreateIslandOptics(win, canvas, reportFailure) {
       if (state) update(state);
     },
     update,
+    refreshText() { if (!disposed && state?.active) adaptText(true); },
     async frame(bytes) {
       if (disposed || !state?.active || decoding) return;
       const token = generation;

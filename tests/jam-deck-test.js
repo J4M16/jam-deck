@@ -465,6 +465,8 @@ function makeIslandDragHarness() {
     const classes = new Set();
     return {
       children: [],
+      dataset: {},
+      get firstElementChild() { return this.children[0] || null; },
       classList: {
         add: (name) => classes.add(name),
         remove: (name) => classes.delete(name),
@@ -500,7 +502,7 @@ function makeIslandDragHarness() {
   controller.actionChannel = "island-drag-test";
   // Capture lifecycle is exercised separately; this fixture isolates existing clipboard drag semantics.
   const script = controller.buildWindowHtml().match(/<script>([\s\S]*?)<\/script>/)[1]
-    .replace(/window\.jamDeckIslandOptics = jamDeckCreateIslandOptics[^\n]+/, "window.jamDeckIslandOptics = {update(){},frame(){},dispose(){}};");
+    .replace(/window\.jamDeckIslandOptics = jamDeckCreateIslandOptics[^\n]+/, "window.jamDeckIslandOptics = {update(){},frame(){},refreshText(){},dispose(){}};");
   vm.runInNewContext(script, {
     document, window, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
     require: () => ({ ipcRenderer: { send: (_channel, payload) => sent.push(payload), on() {} } }),
@@ -3702,7 +3704,7 @@ assert(!pluginSource.includes("dueDate: today") || !pluginSource.includes("task.
 assert(!pluginSource.includes("if (checkbox.checked) await this.plugin.completeAndArchiveDeckTask(task.id);"), "ticking must only mark the task complete; archiving is the deliberate settlement step");
 assert(pluginSource.includes('makeToolbarLabel') || pluginSource.includes('text: "详情"'), "the archive viewer must now sit behind 详情");
 assert(pluginSource.includes('text: "归档", cls: "jam-deck-widget-action", attr: { title: "结算今天：把已完成的待办归档" }') && pluginSource.includes("new DayReceiptModal(this.app, this.plugin).open()"), "归档 must open the day-settlement receipt");
-assert(pluginSource.includes("async archiveCompletedTasks()") && /failed \+= 1;/.test(pluginSource), "batch archiving must run per task and report failures instead of silently dropping them");
+assert(pluginSource.includes("async archiveCompletedTasks()") && pluginSource.includes("return this.archiveDeckTasks(ids);"), "batch archiving must use the shared checkpoint transaction; failure recovery is exercised in archive-batch-test");
 assert(pluginSource.includes("this.strikingTaskId = completed ? null : task.id;") && pluginSource.includes("this.plugin.strikingTaskId = null;"), "the marker stroke must be a one-shot flag consumed at render, or every re-render replays it on all completed rows");
 // Ticking must not reorder the list: a row that jumps plays its stroke outside
 // the visible area, which defeats the whole point of the animation.

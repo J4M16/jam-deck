@@ -14,5 +14,13 @@ assert.equal(helper.readUInt32LE(4), 0x0100000c, "helper targets Apple Silicon")
 assert.equal(hash(helper), payload.sha256, "standard plugin contains an intact macOS helper");
 const read = file => fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
 assert.equal(hash(read("native/island-capture/main.swift")), payload.sourceSha256, "Swift changes require rebuilding the embedded helper");
+const windowsPayload = JSON.parse(source.match(/const WINDOWS_ISLAND_CAPTURE_PAYLOAD = (.+);/)[1]);
+const windowsHelper = zlib.gunzipSync(Buffer.from(windowsPayload.gzip, "base64"));
+assert.equal(windowsHelper.readUInt16LE(0), 0x5a4d, "Windows helper is a PE executable");
+const pe = windowsHelper.readUInt32LE(0x3c);
+assert.equal(windowsHelper.readUInt32LE(pe), 0x4550);
+assert.equal(windowsHelper.readUInt16LE(pe + 4), 0x8664, "Windows helper targets x64");
+assert.equal(hash(windowsHelper), windowsPayload.sha256);
+assert.equal(hash(read("native/island-capture/main.cpp")), windowsPayload.sourceSha256, "C++ changes require rebuilding the embedded helper");
 for (const name of ["renderer", "controller"]) assert(source.replace(/\r\n/g, "\n").includes(read(`native/island-capture/${name}.js`)), `${name} bundle must match maintained source`);
-console.log("Island capture: Apple Silicon binary and embedded source integrity passed");
+console.log("Island capture: Windows x64, Apple Silicon binaries and embedded source integrity passed");

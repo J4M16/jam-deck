@@ -11,36 +11,33 @@ class IslandGlassMaterial {
     this.cancelStart = null;
   }
 
-  launchMac(display) {
-    const fs = require("fs"), payload = MACOS_ISLAND_CAPTURE_PAYLOAD;
+  launchNative(display) {
+    const windows = process.platform === "win32";
+    const fs = require("fs"), payload = windows ? WINDOWS_ISLAND_CAPTURE_PAYLOAD : MACOS_ISLAND_CAPTURE_PAYLOAD;
     const bytes = zlib.gunzipSync(Buffer.from(payload.gzip, "base64"));
     const hash = value => crypto.createHash("sha256").update(value).digest("hex");
     if (hash(bytes) !== payload.sha256) throw Error("Invalid island capture helper");
     const directory = nodePath.join(require("os").tmpdir(), "jam-deck-island-capture");
     fs.mkdirSync(directory, { recursive: true });
-    const executable = nodePath.join(directory, payload.sha256);
+    const executable = nodePath.join(directory, payload.sha256 + (windows ? ".exe" : ""));
     if (!fs.existsSync(executable) || hash(fs.readFileSync(executable)) !== payload.sha256) fs.writeFileSync(executable, bytes, { mode: 0o700 });
-    const windowNumber = String(this.island.getMediaSourceId()).split(":")[1];
-    return spawn(executable, [windowNumber, String(display.id)], { stdio: ["pipe", "pipe", "pipe"] });
+    const windowNumber = windows ? this.island.getNativeWindowHandle().readBigUInt64LE().toString()
+      : String(this.island.getMediaSourceId()).split(":")[1];
+    return spawn(executable, windows ? [windowNumber] : [windowNumber, String(display.id)],
+      { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   }
 
   async start() {
     const display = this.remote.screen.getDisplayMatching(this.island.getBounds());
     const config = { platform: process.platform, bounds: this.island.getBounds(), display: display.bounds };
-    if (process.platform === "win32") {
-      const sources = await this.remote.require("electron").desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 0, height: 0 } });
-      if (this.stopped) return;
-      const source = sources.find(item => item.display_id === String(display.id));
-      if (!source) throw Error("Cannot find island display for capture");
-      config.sourceId = source.id;
-    } else if (process.platform !== "darwin") throw Error("Desktop island capture requires Windows or macOS");
+    if (process.platform !== "win32" && process.platform !== "darwin") throw Error("Desktop island capture requires Windows or macOS");
     await this.island.webContents.executeJavaScript(`window.jamDeckIslandOptics.configure(${JSON.stringify(config)})`);
     if (this.stopped) return;
-    if (process.platform === "darwin") await this.startMac(display);
+    await this.startNative(display);
     if (!this.stopped) this.ready = true;
   }
 
-  startMac(display) {
+  startNative(display) {
     return new Promise((resolve, reject) => {
       let settled = false, buffer = Buffer.alloc(0), diagnostic = "", timer;
       const fail = error => {
@@ -51,7 +48,7 @@ class IslandGlassMaterial {
       };
       this.cancelStart = () => { if (!settled) { settled = true; clearTimeout(timer); reject(Error("Island capture cancelled")); } };
       try {
-        this.child = this.launchMac(display);
+        this.child = this.launchNative(display);
         this.child.once("error", fail);
         this.child.once("exit", code => fail(Error(`Island capture exited (${code}): ${diagnostic}`)));
         this.child.stdin.on("error", fail);

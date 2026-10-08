@@ -2,11 +2,22 @@ name: Build island capture
 on:
   push:
     branches: [develop]
-    paths: ['native/island-capture/main.swift', '.github/workflows/island-capture.yml']
+    paths: ['native/island-capture/main.swift', 'native/island-capture/main.cpp', 'scripts/build-island-capture-windows.ps1', '.github/workflows/island-capture.yml']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  windows-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Windows capture helper
+        shell: powershell
+        run: ./scripts/build-island-capture-windows.ps1 -OutputDirectory dist/island-capture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: island-capture-windows-x64
+          path: dist/island-capture/island-capture-windows-x64.exe
   macos-arm64:
     runs-on: macos-15
     steps:
