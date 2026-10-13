@@ -3452,7 +3452,7 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
   grid-template-columns: 104px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  padding: 8px 12px 0;
+  padding: 24px 12px 8px;
 }
 .jam-deck-music-disc-stage {
   position: relative;
@@ -3510,9 +3510,17 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-music-tonearm-pivot { position: absolute; right: 0; top: 0; width: 13px; height: 13px; border: 2px solid rgb(90 96 92 / .48); border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgb(17 24 20 / .22); }
 .jam-deck-music-tonearm-shaft { position: absolute; right: 5px; top: 10px; width: 4px; height: 48px; border: 1px solid rgb(72 78 74 / .34); border-radius: 4px; background: #fff; box-shadow: 0 2px 5px rgb(17 24 20 / .18); transform: rotate(8deg); transform-origin: top center; }
 .jam-deck-music-tonearm-head { position: absolute; right: 13px; bottom: 1px; width: 12px; height: 6px; border: 1px solid rgb(72 78 74 / .34); border-radius: 2px; background: #fff; transform: rotate(-18deg); }
+.jam-deck-music-details {
+  min-width: 0;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+}
 .jam-deck-music-meta {
   position: static;
-  width: min(100%, 360px);
+  width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -3574,17 +3582,16 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-root .jam-deck-music-source-item[aria-checked="true"] { background: color-mix(in srgb, var(--jd-accent) 16%, transparent); color: var(--jd-ink); }
 .jam-deck-root .jam-deck-music-source-item:focus-visible { outline: none; box-shadow: var(--jd-focus-ring); }
 .jam-deck-music-transport-stage {
-  position: relative;
   min-width: 0;
-  min-height: 38px;
-  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .jam-deck-music-timeline {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding-top: 6px;
 }
 .jam-deck-root input.jam-deck-music-progress {
   --jd-music-progress: 0%;
@@ -3621,35 +3628,9 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-root input.jam-deck-music-progress:disabled { cursor: default; opacity: .46; }
 .jam-deck-music-times { display: flex; justify-content: space-between; color: var(--jd-faint); font-family: "IBM Plex Mono", "Cascadia Mono", monospace; font-size: var(--jd-font-caption, 9px); font-variant-numeric: tabular-nums; }
 .jam-deck-music-controls {
-  position: absolute;
-  z-index: 6;
-  inset: -5px 0 -2px;
-  min-height: 45px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(32px, 1fr));
-  align-items: end;
-  gap: 4px;
-  padding-top: 11px;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    color-mix(in srgb, var(--jd-surface) 58%, transparent) 28%,
-    color-mix(in srgb, var(--jd-surface) 94%, transparent) 52%,
-    var(--jd-surface) 100%
-  );
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(3px);
-  pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
-}
-.jam-deck-music-player:hover .jam-deck-music-controls,
-.jam-deck-music-player:focus-within .jam-deck-music-controls {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-  pointer-events: auto;
-  transition-delay: 0s;
+  grid-template-columns: minmax(32px, 1fr) 56px minmax(32px, 1fr);
+  gap: 6px;
 }
 .jam-deck-root .jam-deck-music-control {
   min-width: 32px;
@@ -3660,7 +3641,7 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--jd-line) 82%, transparent);
-  border-radius: var(--jd-radius-chip);
+  border-radius: var(--jd-radius-pill);
   background: var(--jd-music-control);
   color: var(--jd-muted);
   box-shadow: none;
@@ -3675,13 +3656,12 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 @keyframes jam-deck-music-pending { from { opacity: .52; } to { opacity: 1; } }
 @container (max-width: 270px) {
   .jam-deck-music-player { gap: 9px; }
-  .jam-deck-music-hero { grid-template-columns: 76px minmax(0, 1fr); gap: 8px; padding: 6px 8px 0; }
+  .jam-deck-music-hero { grid-template-columns: 76px minmax(0, 1fr); gap: 12px 8px; padding: 24px 8px 8px; }
   .jam-deck-music-disc-stage { width: 76px; height: 76px; }
   .jam-deck-music-tonearm { top: 2px; right: 2px; width: 27px; height: 49px; transform-origin: 21px 6px; scale: .78; }
-  .jam-deck-music-meta { width: 100%; }
+  .jam-deck-music-details { display: contents; }
   .jam-deck-music-title { font-size: var(--jd-font-lead, 14px); }
-  .jam-deck-music-transport-stage { margin-top: 2px; }
-  .jam-deck-root .jam-deck-music-control { height: 30px; min-height: 30px; }
+  .jam-deck-music-transport-stage { grid-column: 1 / -1; }
 }
 @container (min-width: 430px) {
   .jam-deck-music-hero { grid-template-columns: 128px minmax(0, 1fr); gap: 24px; }

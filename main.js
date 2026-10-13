@@ -15684,8 +15684,8 @@ class JamDeckView extends ItemView {
       attr: { tabindex: "0", role: "group", "aria-label": "音乐播放器" },
     });
     player.dataset.widgetId = widget.id;
-    this.renderMusicHero(player, widget);
-    this.renderMusicTransport(player, widget);
+    const details = this.renderMusicHero(player, widget);
+    this.renderMusicTransport(player, widget, details);
     this.updateMusicPlayerEl(player, widget);
     void this.plugin.ensureMusicMedia();
   }
@@ -15724,7 +15724,8 @@ class JamDeckView extends ItemView {
     tonearm.createSpan({ cls: "jam-deck-music-tonearm-shaft" });
     tonearm.createSpan({ cls: "jam-deck-music-tonearm-head" });
 
-    const meta = hero.createDiv({ cls: "jam-deck-music-meta" });
+    const details = hero.createDiv({ cls: "jam-deck-music-details" });
+    const meta = details.createDiv({ cls: "jam-deck-music-meta" });
     const closeSourceMenu = (restoreFocus = false) => {
       sourceMenu.hidden = true;
       sourceButton.setAttribute("aria-expanded", "false");
@@ -15770,10 +15771,11 @@ class JamDeckView extends ItemView {
       cover.removeAttribute("src");
       player.removeClass("has-artwork");
     });
+    return details;
   }
 
-  renderMusicTransport(player, widget) {
-    const transportStage = player.createDiv({ cls: "jam-deck-music-transport-stage" });
+  renderMusicTransport(player, widget, details) {
+    const transportStage = details.createDiv({ cls: "jam-deck-music-transport-stage" });
     const timeline = transportStage.createDiv({ cls: "jam-deck-music-timeline" });
     const progress = timeline.createEl("input", {
       cls: "jam-deck-music-progress",

@@ -411,9 +411,6 @@ assert(styleSource.includes(".jam-deck-music-cover"), "the rotating CD must keep
 assert(styleSource.includes(".jam-deck-music-tonearm") && styleSource.includes(".jam-deck-music-player.is-playing .jam-deck-music-tonearm"), "the CD must include a white tonearm driven by authoritative playback state");
 assert(pluginSource.includes('type: "range"') && pluginSource.includes('"seek"'), "the progress control must expose draggable seek");
 assert(pluginSource.includes('aria-haspopup": "menu"') && pluginSource.includes('role: "menuitemradio"'), "the compact source button must expose an accessible single-select menu");
-assert(styleSource.includes(".jam-deck-music-player:hover .jam-deck-music-controls") && styleSource.includes(".jam-deck-music-player:focus-within .jam-deck-music-controls"), "transport controls must reveal on hover and keyboard focus");
-assert(pluginSource.includes("jam-deck-music-transport-stage") && styleSource.includes(".jam-deck-music-transport-stage"), "transport controls and timeline must share one overlay stage");
-assert(styleSource.includes("color-mix(in srgb, var(--jd-surface) 94%, transparent)") && styleSource.includes("justify-self: start") && styleSource.includes("text-align: left"), "hover transport must veil the timeline and metadata must follow the screenshot's left-aligned beside-disc layout");
 assert(styleSource.includes("@container (max-width: 270px)"), "the music widget must adapt to narrow dashboard columns");
 const existingAnimationSource = pluginSource.slice(0, pluginSource.indexOf("function jamDeckCreateGlassEngine("))
   + pluginSource.slice(pluginSource.indexOf("const DEFAULT_SETTINGS = {"));
