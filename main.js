@@ -17050,7 +17050,7 @@ class JamDeckPlugin extends Plugin {
           const arrayBuffer = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength);
           await this.app.vault.createBinary(`${CLIPBOARD_DIR}/${filename}`, arrayBuffer);
           this.settings.clipboardItems.unshift({ type: "image", ts, filename });
-          await this.trimClipboardHistory();
+          this.trimClipboardHistory();
           await this.saveSettings();
           this.renderClipboardViews();
           return;
@@ -17059,7 +17059,7 @@ class JamDeckPlugin extends Plugin {
       if (text && text !== this.lastText) {
         this.lastText = text;
         this.settings.clipboardItems.unshift({ type: "text", ts: Date.now(), content: text.slice(0, 2000) });
-        await this.trimClipboardHistory();
+        this.trimClipboardHistory();
         await this.saveSettings();
         this.renderClipboardViews();
       }
@@ -17082,34 +17082,39 @@ class JamDeckPlugin extends Plugin {
     }
   }
 
-  async trimClipboardHistory() {
+  // Vault deletes on the cloud-synced drive take seconds each, so records are
+  // dropped first and attachments are removed afterwards. Files that fail to
+  // delete become orphans that cleanupClipboard sweeps after CLIPBOARD_MAX_AGE_MS.
+  removeClipboardAttachmentsLater(items) {
+    const filenames = items.filter((item) => item.type === "image" && item.filename).map((item) => item.filename);
+    if (!filenames.length) return Promise.resolve(0);
+    return (async () => {
+      let failed = 0;
+      for (const filename of filenames) {
+        if (!await this.removeClipboardAttachment(filename)) failed++;
+      }
+      if (failed) new Notice(`Jam Deck：${failed} 个剪贴板附件删除失败，将在 24 小时后自动清理`);
+      return failed;
+    })();
+  }
+
+  trimClipboardHistory() {
     const maxItems = Math.max(10, Number(this.settings.clipboardMaxItems) || 60);
     if (this.settings.clipboardItems.length <= maxItems) return;
     const overflow = this.settings.clipboardItems.slice(maxItems);
-    const retained = this.settings.clipboardItems.slice(0, maxItems);
-    for (const item of overflow) {
-      if (item.type === "image" && item.filename) await this.removeClipboardAttachment(item.filename);
-    }
-    this.settings.clipboardItems = retained;
+    this.settings.clipboardItems = this.settings.clipboardItems.slice(0, maxItems);
+    void this.removeClipboardAttachmentsLater(overflow);
   }
 
   async cleanupClipboard() {
     const threshold = Date.now() - CLIPBOARD_MAX_AGE_MS;
-    let changed = false;
-    const retained = [];
-
-    for (const item of this.settings.clipboardItems) {
-      if (item.ts >= threshold) {
-        retained.push(item);
-        continue;
-      }
-      if (item.type !== "image" || !item.filename || await this.removeClipboardAttachment(item.filename)) {
-        changed = true;
-      } else {
-        retained.push(item);
-      }
+    const expired = this.settings.clipboardItems.filter((item) => item.ts < threshold);
+    if (expired.length) {
+      this.settings.clipboardItems = this.settings.clipboardItems.filter((item) => item.ts >= threshold);
+      this.renderClipboardViews();
+      await this.saveSettings();
+      await this.removeClipboardAttachmentsLater(expired);
     }
-    this.settings.clipboardItems = retained;
 
     const attachments = this.app.vault.getFiles().filter((file) =>
       file.path.startsWith(`${CLIPBOARD_DIR}/`) && file.stat.mtime < threshold
@@ -17117,30 +17122,19 @@ class JamDeckPlugin extends Plugin {
     for (const attachment of attachments) {
       try {
         await this.app.vault.delete(attachment);
-        changed = true;
       } catch (e) {
         console.error("jam-deck orphan attachment cleanup failed", e);
       }
     }
-
-    if (changed) {
-      await this.saveSettings();
-      this.renderAllViews();
-    }
   }
 
   async clearClipboard() {
-    const retained = [];
-    for (const item of this.settings.clipboardItems) {
-      if (item.type !== "image" || !item.filename || await this.removeClipboardAttachment(item.filename)) {
-        continue;
-      }
-      retained.push(item);
-    }
-    this.settings.clipboardItems = retained;
+    const removed = this.settings.clipboardItems;
+    this.settings.clipboardItems = [];
+    this.renderClipboardViews();
+    new Notice("Jam Deck：剪贴板记录已清空");
     await this.saveSettings();
-    this.renderAllViews();
-    new Notice(retained.length ? "Jam Deck：部分附件删除失败，记录已保留" : "Jam Deck：剪贴板记录已清空");
+    void this.removeClipboardAttachmentsLater(removed);
   }
 
   async askDeckAi(userText, canvasContext) {
@@ -17729,12 +17723,10 @@ class JamDeckPlugin extends Plugin {
   }
 
   async deleteClipboardItem(item) {
-    if (item.type === "image" && item.filename) {
-      await this.removeClipboardAttachment(item.filename);
-    }
     this.settings.clipboardItems = this.settings.clipboardItems.filter((entry) => entry.ts !== item.ts || entry.type !== item.type);
+    this.renderClipboardViews();
     await this.saveSettings();
-    this.renderAllViews();
+    void this.removeClipboardAttachmentsLater([item]);
   }
 
   async copyClipboardItem(item) {

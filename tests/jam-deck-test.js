@@ -3330,6 +3330,38 @@ async function testArchiveIntegration() {
   assert(createdClipboardPath.startsWith("attachments/jam-deck-clipboard/clip-"), "new image must be persisted immediately");
   assert.strictEqual(clipboardRefreshes, 1, "only clipboard widgets should refresh");
 
+  // Cloud-drive deletes take seconds each; the list must clear before any attachment delete finishes.
+  const clearPlugin = new JamDeckPlugin();
+  const clipFiles = new Set(["attachments/jam-deck-clipboard/clip-1.png", "attachments/jam-deck-clipboard/clip-2.png"]);
+  let releaseDeletes;
+  const deletesGate = new Promise((resolve) => { releaseDeletes = resolve; });
+  clearPlugin.app = { vault: {
+    getAbstractFileByPath: (path) => clipFiles.has(path) ? { path } : null,
+    async delete(file) { await deletesGate; clipFiles.delete(file.path); },
+  } };
+  clearPlugin.settings = { clipboardItems: [
+    { type: "image", ts: 2, filename: "clip-2.png" },
+    { type: "text", ts: 3, content: "keep-order" },
+    { type: "image", ts: 1, filename: "clip-1.png" },
+  ] };
+  let clearSaves = 0;
+  let clearRefreshes = 0;
+  clearPlugin.saveSettings = async () => { clearSaves++; };
+  clearPlugin.renderClipboardViews = () => { clearRefreshes++; };
+  clearPlugin.renderAllViews = () => { throw new Error("clearing the clipboard must not redraw the whole deck"); };
+  await clearPlugin.deleteClipboardItem(clearPlugin.settings.clipboardItems[0]);
+  assert.deepStrictEqual(clearPlugin.settings.clipboardItems.map((item) => item.ts), [3, 1], "deleting one record must not wait for its attachment delete");
+  await clearPlugin.clearClipboard();
+  assert.deepStrictEqual(clearPlugin.settings.clipboardItems, [], "clearing must not wait for attachment deletes");
+  assert.strictEqual(clearSaves, 2, "each clipboard removal must persist once");
+  assert.strictEqual(clearRefreshes, 2, "each clipboard removal must refresh the clipboard widgets");
+  assert.strictEqual(clipFiles.size, 2, "attachments are still being deleted in the background");
+  clearPlugin.settings.clipboardItems.unshift({ type: "text", ts: 4, content: "copied while deleting" });
+  releaseDeletes();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.strictEqual(clipFiles.size, 0, "background deletes must remove every attachment");
+  assert.deepStrictEqual(clearPlugin.settings.clipboardItems.map((item) => item.ts), [4], "items copied during background deletes must survive");
+
   const files = new Map();
   const folders = new Set();
   const vault = {
