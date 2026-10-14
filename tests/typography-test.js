@@ -22,6 +22,9 @@ async function setup(saved={dataVersion:4,widgets:[]}) {
   plugin.settingsSaveQueue=Promise.resolve();
   plugin.loadData=async()=>clone(saved);
   plugin.saveData=async settings=>{plugin.disk=clone(settings);};
+  plugin.manifest={dir:".obsidian/plugins/jam-deck"};
+  plugin.localStore={backupSettings:async()=>{},readLatestBackup:async()=>null,preserveCorruptSettings:async()=>{}};
+  plugin.app.vault={adapter:{exists:async()=>true,read:async()=>JSON.stringify(await plugin.loadData()),stat:async()=>null}};
   plugin.renderAllViews=()=>{throw new Error("Typography must not rebuild views or stop live sessions");};
   await plugin.loadSettings();
   return {plugin,first,second};

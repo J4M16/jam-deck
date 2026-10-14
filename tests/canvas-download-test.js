@@ -22,7 +22,8 @@ async function main() {
     const session = new EventEmitter(), events = [];
     const contents = [1, 2, 3].map(id => ({ id, session, isDestroyed: () => false, getType: () => "webview" }));
     const req = name => name === "electron" ? { webContents: { fromId: id => contents.find(w => w.id === id) } } : require(name);
-    const service = create(req, { root, directory: "attachments/downloads", temporary: ".cache/downloads" }, text => events.push(JSON.parse(text)));
+    const temporary = path.join(root, "..", `${path.basename(root)}-partial`);
+    const service = create(req, { root, directory: "attachments/downloads", temporary }, text => events.push(JSON.parse(text)));
     const owner = { canvasPath: "A.canvas", nodeId: "web", rect: { x: 0, y: 0, width: 500, height: 300 } };
     service.register(1, JSON.stringify(owner));
     service.register(2, JSON.stringify({ ...owner, canvasPath: "B.canvas" }));
@@ -31,7 +32,7 @@ async function main() {
     assert.equal(unrelated.file, undefined, "unowned tabs keep ordinary downloads");
     const first = new Item("../../data.json"), second = new Item("../../data.json");
     session.emit("will-download", {}, first, contents[0]); session.emit("will-download", {}, second, contents[1]);
-    assert(first.file.includes(`${path.sep}.cache${path.sep}`));
+    assert(first.file.startsWith(temporary + path.sep), "partial downloads must stay outside the synced vault");
     service.unregister(1); first.finish(); second.finish();
     const completed = events.filter(event => event.type === "completed");
     assert.equal(completed.length, 2);
@@ -50,18 +51,23 @@ async function main() {
     const pending = new Item("pending.mp4"); session.emit("will-download", {}, pending, contents[1]); service.dispose();
     assert(pending.cancelled); assert(!fs.existsSync(pending.file));
     assert.equal(session.listenerCount("will-download"), 0); assert.equal(pending.listenerCount("done"), 0);
-    assert.throws(() => create(req, { root, directory: "../escape", temporary: ".cache" }, () => {}), /Invalid/);
+    assert.throws(() => create(req, { root, directory: "../escape", temporary }, () => {}), /Invalid/);
+    fs.rmSync(temporary, { recursive: true, force: true });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
   for (const [api, root] of [[path.win32, "C:\\Users\\Jam\\Vault"], [path.posix, "/Users/jam/Vault"]]) {
     const session = new EventEmitter(), events = [], files = new Set();
     const wc = { id: 9, session, isDestroyed: () => false, getType: () => "webview" };
-    const fakeFs = { mkdirSync() {}, linkSync: (from, to) => files.add(to), unlinkSync: file => files.delete(file) };
+    const fakeFs = { constants: fs.constants, mkdirSync() {}, linkSync: () => { throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" }); },
+      copyFileSync: (from, to, mode) => { assert.equal(mode, fs.constants.COPYFILE_EXCL); if (files.has(to)) throw new Error("exists"); files.add(to); }, unlinkSync: file => files.delete(file) };
+    const temporary = api === path.win32 ? "C:\\Users\\Jam\\AppData\\Local\\Temp\\jam-deck-canvas-downloads" : "/private/tmp/jam-deck-canvas-downloads";
     const service = create(name => name === "fs" ? fakeFs : name === "path" ? api : name === "electron" ? { webContents: { fromId: () => wc } } : require(name),
-      { root, directory: "attachments/downloads", temporary: ".cache/downloads" }, text => events.push(JSON.parse(text)));
+      { root, directory: "attachments/downloads", temporary }, text => events.push(JSON.parse(text)));
     service.register(9, JSON.stringify({ canvasPath: "A.canvas" }));
     const item = new Item("CON.txt"); item.setSavePath = file => { item.file = file; files.add(file); };
     session.emit("will-download", {}, item, wc); item.finish(); service.dispose();
     const saved = events.find(event => event.type === "completed");
+    assert(saved, "downloads must complete on drives without hard-link support");
+    assert(item.file.startsWith(temporary + api.sep) && !files.has(item.file), "partial file must be removed after the copy");
     assert(saved.path.startsWith("attachments/downloads/") && !saved.path.includes("\\"));
     assert(api.resolve(root, saved.path).startsWith(root + api.sep));
   }

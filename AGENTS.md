@@ -7,12 +7,13 @@
 - `D:\Project\JamDeck` 是唯一开发源；不要直接在 Vault 插件目录开发。
 - Obsidian 运行副本位于 `X:\jam16\Jamnote\.obsidian\plugins\jam-deck`，只能通过部署脚本更新。
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
-- **`data.json` 会被"旧结构"覆盖，新增的 settings 字段可能整段丢失（2026-09-27 两次事故，根因未定论）**。当天 `deckRoutines` 九条模板与全部实例丢了两次，第二次发生在整体重启、确认进程数归零之后，所以**不能简单归因为热重载僵尸**。已确证的事实与已排除项如下，下次遇到照这个清单走，别重复我的误判：
-  - **可靠判定手法**：读磁盘 `data.json` 的顶层 key 数与清单。当前代码的 `loadSettings` 一定会把 `deckRoutines` 补成数组，因此**磁盘缺这个 key 就说明最后一次写入不是当前实例做的**（事故时磁盘 37 个 key，运行中实例内存 38 个）。再对比文件 mtime 与 `clipboardItems[0].ts`：两次事故中它们都精确吻合到秒，且内容正是用户刚复制的文字。
-  - 已排除：插件重复注册（`app.plugins.manifests` 只有一条 `jam-deck`，指向正确目录）；部署备份目录被当插件加载（`.jam-deck-backup-*` 未出现在 manifests 里）；代码层面的丢字段路径（全仓只有一处 `this.settings = ...` 赋值，`saveSettings` / `setAppearance` / `pollClipboard` 全部保存 `this.settings` 全量）。
-  - 两个仍未排除的嫌疑：① `plugin:reload` 残留的旧实例仍在轮询剪贴板并持有旧 settings 快照；② **vault 位于坚果云 FUSE 挂载盘**（`X:` 卷标 `zhanghonglicloud`，`FileSystem=FUSE`，本机运行 `NutstoreDriverSvc`），云端把旧版本同步回来覆盖本地。第二次事故中同一句复制被记成两个不同时间戳（21:46:50 与 21:47:08），说明**存在两个各自写盘的写入方**，但本机进程列表只有一个 Obsidian。未见坚果云冲突副本。
-  - 因此操作纪律（无论最终根因是哪个都适用）：一次会话内**不要连续多轮 reload**，改动攒一起、部署后只重载一次；**新增会被持久化的 settings 字段、或改动 `saveSettings` 链路后，部署完整体重启 Obsidian**；种入或修改运行数据后**立刻复核磁盘 key 清单**，并在几分钟后再复核一次，确认没有被回滚；涉及运行数据的改动先备份 `data.json` 到 `debug-backups/`。
-  - 若再次复现，优先做这个判别实验：记下 mtime → 用 eval 让当前实例保存一次 → 立刻读磁盘确认 key 数为 38 → 静置观察 mtime 是否在无人操作时自行变化。mtime 自行变化即指向云同步；仅在复制后变化且 key 数掉回 37 即指向旧实例写入。
+- **Vault 在云同步盘上（2026-10 起为腾讯 iTFS，`C:\Program Files (x86)\Tencent\itfs`；本机坚果云服务已停用），`data.json` 有两条已证实的丢失路径**，1.3.9 起插件已设防，改动持久化链路时不得拆掉这些防线：
+  - **半截写入被默认值固化（2026-10-13 13:45 事故，已证实）**：Obsidian 的 `saveData` 底层是 `fs.promises.writeFile`，原地截断再写，不走临时文件改名；进程在写入中途退出会留下 0 字节文件。旧 `loadSettings` 把读不到当成全新安装，下一次保存就把默认值写回去。现在：读到空文件或坏 JSON 时，先从本机备份恢复；没有备份就禁止写盘并常驻提示；坏文件另存为 `corrupt-*.json`。
+  - **其他设备的新版本被旧内存覆盖**：Jam 会在两台设备上打开这个库（不同时）。现在：每次保存前比对磁盘内容（不能只比 mtime，iTFS 可能改写自己保存的 mtime），发现是外部更新就采纳外部版本、放弃本次写入；另外实现了 `onExternalSettingsChange`，窗口获得焦点或变为可见时也会复查。
+  - **本机数据目录**：`%LOCALAPPDATA%\JamDeck\vaults\<app.appId>`（Mac 为 `~/Library/Application Support/JamDeck/vaults/<app.appId>`）。`backups/latest.json` 每次保存都更新；`data-*.json` 快照至少间隔 15 分钟，24 小时内全部保留，更早的每天留一份，保留 30 天。剪贴板历史与图片在 `clipboard/`，**已不在 `data.json` 和库里**。部署备份在 `%LOCALAPPDATA%\JamDeck\deploy`，只留最近 5 份。
+  - 2026-09-27 那两次 `deckRoutines` 丢失根因未定论（嫌疑：热重载残留旧实例，或当时的坚果云把旧版本同步回来），以上防线对两种情况都能兜底。
+  - 操作纪律不变：一次会话内**不要连续多轮 reload**，改动攒一起、部署后只重载一次；**新增会被持久化的 settings 字段、或改动 `saveSettings` 链路后，部署完整体重启 Obsidian**；种入或修改运行数据后**立刻复核磁盘 key 清单**，几分钟后再复核一次；涉及运行数据的改动先备份 `data.json` 到 `debug-backups/`。
+  - 判定写入方：读磁盘 `data.json` 顶层 key 清单，与运行中实例 `Object.keys(settings)` 对比；1.3.9 起 `clipboardItems` 不再写入 `data.json`，磁盘上再出现这个 key，就说明写入方不是新代码。
 - 修改后至少运行 `npm run verify`。
 - 发布到 Obsidian：**无需关闭 Obsidian**（正常运行不锁插件文件），`npm run deploy`（部署目标 = 环境变量 `JAM_DECK_TARGET_PLUGIN_DIR`，未设置则需 `npm run deploy -- -TargetPluginDir <目录>` 显式传参；脚本拒绝无目标静默执行）；部署后用 `Obsidian.com plugin:reload id=jam-deck vault=Jamnote` 热重载（JS 与 CSS 一并刷新）。仅在 Obsidian 处于异常状态（如 GPU 崩溃残留 zombie 进程锁文件）时才需先关闭再部署。
 - Obsidian 启停：**GUI 启动用 `Obsidian.exe`**（不是 Obsidian.com——它只是 CLI wrapper）。**RDP 会话下 GPU 进程常崩溃**（`GPU process isn't usable`），必须带参数：

@@ -76,11 +76,13 @@ if ($sourceManifest.id -ne "jam-deck") { throw "Source manifest id is not jam-de
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $nonce = [Guid]::NewGuid().ToString("N").Substring(0, 8)
-$targetParent = Split-Path -Parent $target
-$staging = Join-Path $targetParent ".jam-deck-staging-$stamp-$nonce"
-$backup = Join-Path $targetParent ".jam-deck-backup-$stamp-$nonce"
-New-Item -ItemType Directory -Path $staging | Out-Null
-New-Item -ItemType Directory -Path $backup | Out-Null
+# The vault sits on a cloud-sync drive; staging and backups stay on the local disk.
+$deployRoot = Join-Path $env:LOCALAPPDATA "JamDeck\deploy"
+$keepBackups = 5
+$staging = Join-Path $deployRoot "staging-$stamp-$nonce"
+$backup = Join-Path $deployRoot "backup-$stamp-$nonce"
+New-Item -ItemType Directory -Path $staging -Force | Out-Null
+New-Item -ItemType Directory -Path $backup -Force | Out-Null
 
 $replaced = [Collections.Generic.List[string]]::new()
 $success = $false
@@ -133,6 +135,10 @@ try {
   Write-Host "Jam Deck deployed successfully."
   Write-Host "Protected data.json state: $($dataAfter.Hash) ($($dataAfter.Length) bytes)"
   Write-Host "Backup retained at: $backup"
+  Get-ChildItem -LiteralPath $deployRoot -Directory -Filter "backup-*" |
+    Sort-Object Name -Descending |
+    Select-Object -Skip $keepBackups |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
 } catch {
   foreach ($name in $replaced) {
     $backupPath = Join-Path $backup $name

@@ -4,7 +4,7 @@ const fs = require("fs"), os = require("os"), path = require("path"), vm = requi
 const root = path.join(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "main.js"), "utf8");
 const start = source.indexOf("    const captionDirectory =");
-const end = source.indexOf("    await this.ensureClipboardDir();", start);
+const end = source.indexOf("    this.clipboardBusy = false;", start);
 assert(start >= 0 && end > start);
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-optional-"));
 try {

@@ -13,7 +13,9 @@ const GRID_COLS = 40;
 const GRID_ROWS = 36;
 const JAM_DECK_LEGACY_GRID_COLS = 12;
 const CLIPBOARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const CLIPBOARD_DIR = "attachments/jam-deck-clipboard";
+const SETTINGS_BACKUP_INTERVAL_MS = 15 * 60 * 1000;
+const SETTINGS_BACKUP_RECENT_MS = 24 * 60 * 60 * 1000;
+const SETTINGS_BACKUP_DAILY_DAYS = 30;
 const CANVAS_ASSET_DIR = "attachments/jam-deck-canvas-assets";
 const CANVAS_DOWNLOAD_DIR = "attachments/jam-deck-canvas-downloads";
 const ICON_DIR = "attachments/jam-deck-icons";
@@ -101,6 +103,188 @@ function jamDeckVaultBasePath(app) {
     return String(adapter.getBasePath() || "");
   } catch (error) {
     return "";
+  }
+}
+
+// The vault lives on a cloud-sync drive where data.json can be truncated by an
+// interrupted write or replaced by another device, so settings backups and the
+// clipboard history stay on the local disk, one directory per vault.
+function jamDeckLocalDataDir(platform, env, homedir, pathApi, vaultId) {
+  const root = platform === "win32"
+    ? pathApi.join(env.LOCALAPPDATA || pathApi.join(homedir, "AppData", "Local"), "JamDeck")
+    : pathApi.join(homedir, "Library", "Application Support", "JamDeck");
+  return pathApi.join(root, "vaults", String(vaultId || "default").replace(/[^A-Za-z0-9_-]/g, "_"));
+}
+
+// Mirrors FileSystemAdapter.getResourcePath for files outside the vault.
+function jamDeckLocalResourceUrl(adapter, absolutePath, pathToFileURL) {
+  let href = pathToFileURL(absolutePath).href;
+  if (href.startsWith("file:///")) href = href.substring(8);
+  else if (href.startsWith("file://")) href = `%5C%5C${href.substring(7)}`;
+  return `${adapter.resourcePathPrefix}${href}`;
+}
+
+function jamDeckParseSettingsText(text) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function jamDeckBackupStamp(time) {
+  const date = new Date(time);
+  const pad = (value, size = 2) => String(value).padStart(size, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
+}
+
+function jamDeckBackupTime(name) {
+  const match = /^data-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})\.json$/.exec(String(name));
+  if (!match) return 0;
+  const [year, month, day, hour, minute, second, ms] = match.slice(1).map(Number);
+  return new Date(year, month - 1, day, hour, minute, second, ms).getTime();
+}
+
+// Keeps every snapshot from the last day plus the newest snapshot of each older day.
+function jamDeckBackupsToPrune(names, now) {
+  const snapshots = names
+    .map((name) => ({ name, time: jamDeckBackupTime(name) }))
+    .filter((entry) => entry.time)
+    .sort((a, b) => b.time - a.time);
+  const keptDays = new Set();
+  const prune = [];
+  for (const entry of snapshots) {
+    const age = now - entry.time;
+    if (age <= SETTINGS_BACKUP_RECENT_MS) continue;
+    const day = new Date(entry.time).toDateString();
+    if (age <= SETTINGS_BACKUP_DAILY_DAYS * 24 * 60 * 60 * 1000 && !keptDays.has(day)) {
+      keptDays.add(day);
+      continue;
+    }
+    prune.push(entry.name);
+  }
+  return prune;
+}
+
+class JamDeckLocalStore {
+  constructor(fs, pathApi, directory) {
+    this.fs = fs.promises;
+    this.path = pathApi;
+    this.backupDir = pathApi.join(directory, "backups");
+    this.clipboardDir = pathApi.join(directory, "clipboard");
+    this.clipboardHistoryPath = pathApi.join(this.clipboardDir, "history.json");
+    this.lastSnapshotAt = null;
+    this.clipboardQueue = Promise.resolve();
+  }
+
+  async writeAtomic(file, data) {
+    await this.fs.mkdir(this.path.dirname(file), { recursive: true });
+    const temporary = `${file}.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
+    try {
+      await this.fs.writeFile(temporary, data);
+      await this.fs.rename(temporary, file);
+    } catch (error) {
+      await this.fs.unlink(temporary).catch(() => {});
+      throw error;
+    }
+  }
+
+  async backupNames() {
+    try {
+      return await this.fs.readdir(this.backupDir);
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  async backupSettings(text, now = Date.now()) {
+    await this.writeAtomic(this.path.join(this.backupDir, "latest.json"), text);
+    const names = await this.backupNames();
+    if (this.lastSnapshotAt === null) this.lastSnapshotAt = Math.max(0, ...names.map(jamDeckBackupTime));
+    if (now - this.lastSnapshotAt < SETTINGS_BACKUP_INTERVAL_MS) return;
+    const name = `data-${jamDeckBackupStamp(now)}.json`;
+    await this.writeAtomic(this.path.join(this.backupDir, name), text);
+    this.lastSnapshotAt = now;
+    for (const stale of jamDeckBackupsToPrune([...names, name], now)) {
+      await this.fs.unlink(this.path.join(this.backupDir, stale)).catch(() => {});
+    }
+  }
+
+  async readLatestBackup() {
+    const snapshots = (await this.backupNames()).filter(jamDeckBackupTime).sort((a, b) => jamDeckBackupTime(b) - jamDeckBackupTime(a));
+    for (const name of ["latest.json", ...snapshots]) {
+      const file = this.path.join(this.backupDir, name);
+      try {
+        const data = jamDeckParseSettingsText(await this.fs.readFile(file, "utf8"));
+        if (data) return { data, name, time: (await this.fs.stat(file)).mtimeMs };
+      } catch (error) {}
+    }
+    return null;
+  }
+
+  async preserveCorruptSettings(text, now = Date.now()) {
+    if (!text) return;
+    await this.writeAtomic(this.path.join(this.backupDir, `corrupt-${jamDeckBackupStamp(now)}.json`), text);
+  }
+
+  clipboardImagePath(filename) {
+    return this.path.join(this.clipboardDir, this.path.basename(String(filename)));
+  }
+
+  async loadClipboard() {
+    try {
+      const items = JSON.parse(await this.fs.readFile(this.clipboardHistoryPath, "utf8"));
+      return Array.isArray(items) ? items.filter((item) => item && (item.type === "text" || item.type === "image") && Number(item.ts)) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  saveClipboard(items) {
+    const text = JSON.stringify(items);
+    const operation = this.clipboardQueue.then(() => this.writeAtomic(this.clipboardHistoryPath, text));
+    this.clipboardQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async writeClipboardImage(filename, bytes) {
+    await this.fs.mkdir(this.clipboardDir, { recursive: true });
+    await this.fs.writeFile(this.clipboardImagePath(filename), bytes, { flag: "wx" });
+  }
+
+  readClipboardImage(filename) {
+    return this.fs.readFile(this.clipboardImagePath(filename));
+  }
+
+  async removeClipboardImage(filename) {
+    try {
+      await this.fs.unlink(this.clipboardImagePath(filename));
+      return true;
+    } catch (error) {
+      if (error.code === "ENOENT") return true;
+      console.error("jam-deck clipboard image delete failed", error);
+      return false;
+    }
+  }
+
+  async listClipboardImages() {
+    let names = [];
+    try {
+      names = await this.fs.readdir(this.clipboardDir);
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+    const images = [];
+    for (const name of names.filter((entry) => /^clip-.*\.png$/.test(entry))) {
+      try {
+        images.push({ name, mtimeMs: (await this.fs.stat(this.path.join(this.clipboardDir, name))).mtimeMs });
+      } catch (error) {}
+    }
+    return images;
   }
 }
 
@@ -1988,7 +2172,6 @@ const DEFAULT_SETTINGS = {
     { id: "calendar-1", type: "calendar", x: 1, y: 17, w: 5, h: 9, config: {} },
     { id: "clipboard-1", type: "clipboard", x: 1, y: 26, w: 5, h: 11, config: {} },
   ],
-  clipboardItems: [],
   deckTasks: [],
   // 每日固定待办模板。每天首次打开工作台时按模板生成当天的普通待办，勾选与归档走既有路径。
   deckRoutines: [],
@@ -6457,11 +6640,10 @@ function jamDeckCreateCanvasDownloadService(require, options, notify) {
   const bindings = new Map(), sessions = new Map(), jobs = new Map();
   const root = path.resolve(options.root);
   const directory = path.resolve(root, options.directory);
-  const temporary = path.resolve(root, options.temporary);
-  for (const target of [directory, temporary]) {
-    const relative = path.relative(root, target);
-    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Invalid Canvas download directory");
-  }
+  // Partial downloads stay off the synced vault; only finished files are copied in.
+  const temporary = path.resolve(options.temporary);
+  const relative = path.relative(root, directory);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Invalid Canvas download directory");
   let disposed = false;
   const send = (event) => { if (!disposed) { try { notify(JSON.stringify(event)); } catch (error) {} } };
   const cleanTemporary = (file) => { try { fs.unlinkSync(file); } catch (error) { if (error.code !== "ENOENT") console.error("Jam Deck download cleanup", error); } };
@@ -6492,8 +6674,8 @@ function jamDeckCreateCanvasDownloadService(require, options, notify) {
           return;
         }
         try {
-          // UUID destinations never overwrite an existing Vault attachment.
-          fs.linkSync(part, destination);
+          // Cloud-sync drives reject hard links; EXCL keeps UUID destinations from overwriting.
+          fs.copyFileSync(part, destination, fs.constants.COPYFILE_EXCL);
           cleanTemporary(part);
           send({ type: "completed", id, owner, path: relativePath });
         } catch (error) {
@@ -6582,7 +6764,7 @@ class CanvasDownloadCoordinator {
     );
     this.service = factory({
       root: jamDeckVaultBasePath(this.app), directory: CANVAS_DOWNLOAD_DIR,
-      temporary: `${this.adapter.deckView.plugin.manifest.dir}/.cache/canvas-downloads`,
+      temporary: nodePath.join(require("os").tmpdir(), "jam-deck-canvas-downloads"),
     }, (message) => this.receive(JSON.parse(message)));
     return this.service;
   }
@@ -10400,13 +10582,11 @@ class IslandModeController {
     };
     if (state.type !== "image" || !state.filename) return state;
     state.mime = this.plugin.imageMimeFromName(state.filename);
-    const vaultPath = `${CLIPBOARD_DIR}/${state.filename}`;
-    try { state.resourceUrl = this.app.vault.adapter.getResourcePath(vaultPath); } catch (error) {}
     try {
-      const base = this.app.vault.adapter.getBasePath();
       const { pathToFileURL } = require("url");
-      state.filePath = nodePath.join(base, ...vaultPath.split("/"));
+      state.filePath = this.plugin.clipboardImagePath(state.filename);
       state.fileUrl = pathToFileURL(state.filePath).href;
+      state.resourceUrl = this.plugin.clipboardImageUrl(state.filename);
     } catch (error) {}
     return state;
   }
@@ -10425,7 +10605,7 @@ class IslandModeController {
       typography: jamDeckTypographyValues(this.plugin.settings),
       textBrightness: jamDeckTextBrightnessValues(this.plugin.settings.glassTextBrightness),
       leaveMs: this.getLeaveMs(),
-      items: (this.plugin.settings.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
+      items: (this.plugin.clipboardItems || []).slice(0, 16).map((item) => this.clipboardItemState(item)),
       countdown: widget && countdown ? {
         widgetId: widget.id,
         enabled: countdown.enabled,
@@ -10892,12 +11072,12 @@ class IslandModeController {
       return;
     }
     if (payload.type === "copy") {
-      const item = (this.plugin.settings.clipboardItems || []).find((entry) => Number(entry && entry.ts) === Number(payload.ts) && entry.type === payload.itemType);
+      const item = (this.plugin.clipboardItems || []).find((entry) => Number(entry && entry.ts) === Number(payload.ts) && entry.type === payload.itemType);
       if (item) await this.plugin.copyClipboardItem(item);
       return;
     }
     if (payload.type === "drag-image") {
-      const item = (this.plugin.settings.clipboardItems || []).find((entry) => Number(entry && entry.ts) === Number(payload.ts) && entry.type === "image");
+      const item = (this.plugin.clipboardItems || []).find((entry) => Number(entry && entry.ts) === Number(payload.ts) && entry.type === "image");
       if (item) this.startImageDrag(item);
       return;
     }
@@ -10915,8 +11095,7 @@ class IslandModeController {
     const island = this.islandWindow;
     if (!island || island.isDestroyed() || !item || !item.filename) return;
     try {
-      const base = this.app.vault.adapter.getBasePath();
-      const file = nodePath.join(base, ...`${CLIPBOARD_DIR}/${item.filename}`.split("/"));
+      const file = this.plugin.clipboardImagePath(item.filename);
       const electron = require("electron");
       let icon = electron.nativeImage.createFromPath(file);
       if (icon && !icon.isEmpty()) icon = icon.resize({ width: 48, height: 48, quality: "good" });
@@ -14725,7 +14904,7 @@ class JamDeckView extends ItemView {
       if (item && item.type === "image" && item.filename) {
         event.preventDefault();
         event.stopPropagation();
-        await this.loadAiImageIntoChat(`${CLIPBOARD_DIR}/${item.filename}`, item.filename);
+        await this.loadAiImageIntoChat(this.plugin.clipboardImagePath(item.filename), item.filename);
         return;
       }
       const files = Array.from((transfer && transfer.files) || []);
@@ -15302,7 +15481,7 @@ class JamDeckView extends ItemView {
   }
 
   renderClipboard(body) {
-    const items = this.plugin.settings.clipboardItems || [];
+    const items = this.plugin.clipboardItems || [];
     if (!items.length) {
       body.createDiv({ text: "暂无记录\n复制文字或截图后会自动出现", cls: "jam-deck-empty" });
       return;
@@ -15322,14 +15501,13 @@ class JamDeckView extends ItemView {
       });
 
       if (item.type === "image") {
-        const path = `${CLIPBOARD_DIR}/${item.filename}`;
-        const src = this.app.vault.adapter.getResourcePath(path);
+        const src = this.plugin.clipboardImageUrl(item.filename);
         const media = card.createDiv({ cls: "jam-deck-clip-media" });
         media.createEl("img", { attr: { src, loading: "lazy", decoding: "async", draggable: "false", alt: item.filename || "剪贴板图片" } });
         const meta = card.createDiv({ cls: "jam-deck-clip-meta" });
         meta.createSpan({ text: timeLabel, cls: "jam-deck-clip-overlay" });
         meta.createSpan({ text: "IMAGE", cls: "jam-deck-clip-kind" });
-        this.plugin.hydrateClipboardImageDrag(card, item, path, src);
+        this.plugin.hydrateClipboardImageDrag(card, item, src);
       } else {
         card.createSpan({ text: timeLabel, cls: "jam-deck-clip-text-time" });
         card.createDiv({ text: item.content, cls: "jam-deck-clip-text-body" });
@@ -16550,7 +16728,9 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictReconcileQueued = false;
     this.canvasNativeConflictDisposed = false;
     this.islandMode = new IslandModeController(this);
+    this.localStore = new JamDeckLocalStore(require("fs"), nodePath, jamDeckLocalDataDir(process.platform, process.env, require("os").homedir(), nodePath, this.app.appId));
     await this.loadSettings();
+    this.clipboardItems = await this.localStore.loadClipboard();
     this.applyTypography();
     this.applyAppearance();
     this.register(() => this.clearAppearance());
@@ -16564,7 +16744,6 @@ class JamDeckPlugin extends Plugin {
         this.captions = captionRequire(captionHostPath)(this, { FuzzySuggestModal, Notice, setIcon, model: JAM_DECK_DEEPSEEK_MODEL, directory: captionDirectory });
       } catch (error) { this.captionLoadError = `字幕扩展加载失败，请重新安装：${error.message}`; }
     }
-    await this.ensureClipboardDir();
     this.clipboardBusy = false;
     this.canvasInkOwners = new Map();
     this.primeClipboard();
@@ -16604,6 +16783,10 @@ class JamDeckPlugin extends Plugin {
     const reconcileCanvasConflicts = () => { this.applyTypography(); this.applyAppearance(); this.scheduleCanvasNativeConflictReconcile(); };
     this.registerEvent(this.app.workspace.on("layout-change", reconcileCanvasConflicts));
     this.registerEvent(this.app.workspace.on("active-leaf-change", reconcileCanvasConflicts));
+    this.registerDomEvent(window, "focus", () => { void this.checkExternalSettings(); });
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if (document.visibilityState === "visible") void this.checkExternalSettings();
+    });
 
     this.registerInterval(window.setInterval(() => this.pollClipboard(), this.settings.clipboardPollMs));
     this.registerInterval(window.setInterval(() => this.updateClockDisplays(), 1000));
@@ -16650,45 +16833,65 @@ class JamDeckPlugin extends Plugin {
     return this.islandMode.exit();
   }
 
+  settingsDataPath() {
+    return `${this.manifest.dir}/data.json`;
+  }
+
+  async readSettingsFile() {
+    const adapter = this.app.vault.adapter;
+    const path = this.settingsDataPath();
+    if (!await adapter.exists(path)) return { state: "missing", text: "", data: null };
+    const text = await adapter.read(path);
+    const data = jamDeckParseSettingsText(text);
+    return { state: data ? "valid" : "invalid", text, data };
+  }
+
+  async settingsFileMtime() {
+    const stat = await this.app.vault.adapter.stat(this.settingsDataPath());
+    return stat ? stat.mtime : null;
+  }
+
+  // Obsidian writes data.json by truncating it in place, so a quit mid-write
+  // leaves an empty file. Treating that as a fresh install and saving defaults
+  // would make the loss permanent; restore the local backup or refuse to write.
   async loadSettings() {
-    const saved = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved || {});
-    Object.assign(this.settings, jamDeckAppearanceSettings(this.settings));
-    this.settings.textSize = jamDeckTextSize(saved?.textSize, saved ? "small" : "medium");
-    this.settings.captionTextSize = jamDeckTextSize(saved?.captionTextSize, "follow");
-    this.settings.widgets = Array.isArray(this.settings.widgets) ? this.settings.widgets : DEFAULT_SETTINGS.widgets;
-    this.settings.savedLayout = Array.isArray(this.settings.savedLayout) && this.settings.savedLayout.length
-      ? jamDeckSnapshotWidgetLayout(this.settings.savedLayout)
-      : null;
-    this.settings.clipboardItems = Array.isArray(this.settings.clipboardItems) ? this.settings.clipboardItems : [];
-    this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
-      ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
-      : [];
-    this.settings.deckRoutines = Array.isArray(this.settings.deckRoutines)
-      ? this.settings.deckRoutines.map((routine) => jamDeckNormalizeRoutine(routine))
-      : [];
-    if (this.repairDuplicateDeckTaskIds()) {
+    const file = await this.readSettingsFile();
+    let saved = file.data;
+    let restored = null;
+    this.settingsWriteBlocked = false;
+    if (!saved) {
+      restored = await this.localStore.readLatestBackup();
+      if (restored) saved = restored.data;
+      if (file.state === "invalid") {
+        try { await this.localStore.preserveCorruptSettings(file.text); } catch (error) {
+          console.error("jam-deck corrupt settings copy failed", error);
+        }
+      }
+      if (!restored && file.state === "invalid") this.settingsWriteBlocked = true;
+    }
+    this.settingsSnapshot = file.data ? JSON.stringify(file.data) : null;
+    this.settingsDiskMtime = file.state === "missing" ? null : await this.settingsFileMtime();
+    const repaired = this.applyLoadedSettings(saved);
+    if (this.settingsWriteBlocked) {
+      new Notice("Jam Deck：data.json 已损坏且本机没有备份，已暂停保存以免覆盖。请检查同步盘后重启 Obsidian。", 0);
+    } else if (restored) {
+      try {
+        await this.saveSettings();
+        new Notice(`Jam Deck：data.json ${file.state === "missing" ? "丢失" : "已损坏"}，已从本机备份恢复（${new Date(restored.time).toLocaleString("zh-CN", { hour12: false })}）`, 0);
+      } catch (error) {
+        console.error("jam-deck settings restore failed to save", error);
+      }
+    } else if (repaired) {
       try { await this.saveSettings(); } catch (error) {
         console.error("jam-deck duplicate task id repair failed to save", error);
       }
+    } else if (file.data) {
+      try { await this.localStore.backupSettings(JSON.stringify(this.settings)); } catch (error) {
+        console.error("jam-deck settings backup failed", error);
+      }
     }
-    this.settings.musicLikes = Array.isArray(this.settings.musicLikes)
-      ? this.settings.musicLikes.filter((value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)).slice(0, 500)
-      : [];
-    const lastConnectedProvider = this.settings.musicLauncher && this.settings.musicLauncher.lastConnectedProvider;
-    this.settings.musicLauncher = {
-      schemaVersion: 1,
-      lastConnectedProvider: ["qqmusic", "netease", "qishui"].includes(lastConnectedProvider) ? lastConnectedProvider : null,
-    };
-    this.settings.aiLocalWorkspacePath = typeof this.settings.aiLocalWorkspacePath === "string"
-      ? this.settings.aiLocalWorkspacePath.trim()
-      : "";
-    this.settings.canvasExportDir = typeof this.settings.canvasExportDir === "string"
-      ? this.settings.canvasExportDir.trim()
-      : "";
-    this.settings.islandLeaveMs = jamDeckNormalizeIslandLeaveMs(this.settings.islandLeaveMs);
     const savedVersion = saved ? Number(saved.dataVersion) || 0 : DEFAULT_SETTINGS.dataVersion;
-    if (savedVersion < 4) {
+    if (savedVersion < 4 && !this.settingsWriteBlocked) {
       const previousWidgets = this.settings.widgets;
       // Existing decks were authored on a 12-column grid; keep their proportions on the denser grid.
       if (savedVersion > 0) {
@@ -16706,9 +16909,97 @@ class JamDeckPlugin extends Plugin {
     }
   }
 
+  // Returns true when duplicate task ids were repaired and need saving.
+  applyLoadedSettings(saved) {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved || {});
+    delete this.settings.clipboardItems;
+    Object.assign(this.settings, jamDeckAppearanceSettings(this.settings));
+    this.settings.textSize = jamDeckTextSize(saved?.textSize, saved ? "small" : "medium");
+    this.settings.captionTextSize = jamDeckTextSize(saved?.captionTextSize, "follow");
+    this.settings.widgets = Array.isArray(this.settings.widgets) ? this.settings.widgets : DEFAULT_SETTINGS.widgets;
+    this.settings.savedLayout = Array.isArray(this.settings.savedLayout) && this.settings.savedLayout.length
+      ? jamDeckSnapshotWidgetLayout(this.settings.savedLayout)
+      : null;
+    this.settings.deckTasks = Array.isArray(this.settings.deckTasks)
+      ? this.settings.deckTasks.map((task) => this.normalizeDeckTask(task))
+      : [];
+    this.settings.deckRoutines = Array.isArray(this.settings.deckRoutines)
+      ? this.settings.deckRoutines.map((routine) => jamDeckNormalizeRoutine(routine))
+      : [];
+    const repaired = this.repairDuplicateDeckTaskIds();
+    this.settings.musicLikes = Array.isArray(this.settings.musicLikes)
+      ? this.settings.musicLikes.filter((value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)).slice(0, 500)
+      : [];
+    const lastConnectedProvider = this.settings.musicLauncher && this.settings.musicLauncher.lastConnectedProvider;
+    this.settings.musicLauncher = {
+      schemaVersion: 1,
+      lastConnectedProvider: ["qqmusic", "netease", "qishui"].includes(lastConnectedProvider) ? lastConnectedProvider : null,
+    };
+    this.settings.aiLocalWorkspacePath = typeof this.settings.aiLocalWorkspacePath === "string"
+      ? this.settings.aiLocalWorkspacePath.trim()
+      : "";
+    this.settings.canvasExportDir = typeof this.settings.canvasExportDir === "string"
+      ? this.settings.canvasExportDir.trim()
+      : "";
+    this.settings.islandLeaveMs = jamDeckNormalizeIslandLeaveMs(this.settings.islandLeaveMs);
+    return repaired;
+  }
+
   async saveSettings() {
-    const operation = this.settingsSaveQueue.then(() => this.saveData(this.settings));
+    const operation = this.settingsSaveQueue.then(() => this.writeSettings());
     this.settingsSaveQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  // Must run inside settingsSaveQueue. Returns false when another device's
+  // newer data.json was adopted instead of overwriting it.
+  async writeSettings() {
+    if (this.settingsWriteBlocked) throw new Error("Jam Deck：data.json 已损坏，已暂停保存");
+    if (await this.adoptExternalSettings()) {
+      new Notice("Jam Deck：data.json 已被其他设备更新，已载入新版本；刚才的改动没有保存，请重做。", 8000);
+      return false;
+    }
+    const text = JSON.stringify(this.settings);
+    await this.saveData(this.settings);
+    this.settingsSnapshot = text;
+    this.settingsDiskMtime = await this.settingsFileMtime();
+    try { await this.localStore.backupSettings(text); } catch (error) {
+      console.error("jam-deck settings backup failed", error);
+    }
+    return true;
+  }
+
+  // Compares content rather than mtime alone: the sync drive may rewrite the
+  // mtime of our own saves. An unreadable file is left for the next save to repair.
+  async adoptExternalSettings() {
+    const mtime = await this.settingsFileMtime();
+    if (mtime === this.settingsDiskMtime) return false;
+    const file = await this.readSettingsFile();
+    if (file.state !== "valid") return false;
+    const text = JSON.stringify(file.data);
+    this.settingsDiskMtime = mtime;
+    if (text === this.settingsSnapshot) return false;
+    this.applyLoadedSettings(file.data);
+    this.settingsSnapshot = text;
+    this.settingsWriteBlocked = false;
+    try { await this.localStore.backupSettings(JSON.stringify(this.settings)); } catch (error) {
+      console.error("jam-deck settings backup failed", error);
+    }
+    this.applyTypography();
+    this.applyAppearance();
+    this.renderAllViews();
+    return true;
+  }
+
+  onExternalSettingsChange() {
+    return this.checkExternalSettings();
+  }
+
+  checkExternalSettings() {
+    const operation = this.settingsSaveQueue.then(async () => {
+      if (await this.adoptExternalSettings()) new Notice("Jam Deck：已载入其他设备对 data.json 的更新");
+    });
+    this.settingsSaveQueue = operation.catch((error) => console.error("jam-deck external settings check failed", error));
     return operation;
   }
 
@@ -16813,8 +17104,9 @@ class JamDeckPlugin extends Plugin {
         if (this.appearanceDisposed) return false;
         const previous = this.settings[key];
         this.settings[key] = jamDeckAppearanceSettings({ ...this.settings, [key]: value })[key];
-        try { await this.saveData(this.settings); }
-        catch (error) {
+        try {
+          if (!await this.writeSettings()) return false;
+        } catch (error) {
           this.settings[key] = previous;
           if (!this.appearanceDisposed) new Notice("Jam Deck：外观保存失败，请重试");
           return false;
@@ -16998,9 +17290,21 @@ class JamDeckPlugin extends Plugin {
     return links;
   }
 
-  async ensureClipboardDir() {
-    if (!this.app.vault.getAbstractFileByPath(CLIPBOARD_DIR)) {
-      try { await this.app.vault.createFolder(CLIPBOARD_DIR); } catch (e) {}
+  clipboardImagePath(filename) {
+    return this.localStore.clipboardImagePath(filename);
+  }
+
+  clipboardImageUrl(filename) {
+    return jamDeckLocalResourceUrl(this.app.vault.adapter, this.clipboardImagePath(filename), require("url").pathToFileURL);
+  }
+
+  async readClipboardImage(filename) {
+    try {
+      const bytes = await this.localStore.readClipboardImage(filename);
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    } catch (error) {
+      if (error && error.code === "ENOENT") throw new Error("剪贴板图片已经过期");
+      throw error;
     }
   }
 
@@ -17046,22 +17350,16 @@ class JamDeckPlugin extends Plugin {
           if (text) this.lastText = text;
           const ts = Date.now();
           const filename = `clip-${ts}.png`;
-          const png = image.toPNG();
-          const arrayBuffer = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength);
-          await this.app.vault.createBinary(`${CLIPBOARD_DIR}/${filename}`, arrayBuffer);
-          this.settings.clipboardItems.unshift({ type: "image", ts, filename });
-          this.trimClipboardHistory();
-          await this.saveSettings();
-          this.renderClipboardViews();
+          await this.localStore.writeClipboardImage(filename, image.toPNG());
+          this.clipboardItems.unshift({ type: "image", ts, filename });
+          await this.commitClipboardItems(this.trimClipboardHistory());
           return;
         }
       }
       if (text && text !== this.lastText) {
         this.lastText = text;
-        this.settings.clipboardItems.unshift({ type: "text", ts: Date.now(), content: text.slice(0, 2000) });
-        this.trimClipboardHistory();
-        await this.saveSettings();
-        this.renderClipboardViews();
+        this.clipboardItems.unshift({ type: "text", ts: Date.now(), content: text.slice(0, 2000) });
+        await this.commitClipboardItems(this.trimClipboardHistory());
       }
     } catch (e) {
       console.error("jam-deck clipboard poll error", e);
@@ -17070,71 +17368,41 @@ class JamDeckPlugin extends Plugin {
     }
   }
 
-  async removeClipboardAttachment(filename) {
-    const file = this.app.vault.getAbstractFileByPath(`${CLIPBOARD_DIR}/${filename}`);
-    if (!file) return true;
-    try {
-      await this.app.vault.delete(file);
-      return true;
-    } catch (e) {
-      console.error("jam-deck attachment delete failed", e);
-      return false;
-    }
-  }
-
-  // Vault deletes on the cloud-synced drive take seconds each, so records are
-  // dropped first and attachments are removed afterwards. Files that fail to
-  // delete become orphans that cleanupClipboard sweeps after CLIPBOARD_MAX_AGE_MS.
-  removeClipboardAttachmentsLater(items) {
-    const filenames = items.filter((item) => item.type === "image" && item.filename).map((item) => item.filename);
-    if (!filenames.length) return Promise.resolve(0);
-    return (async () => {
-      let failed = 0;
-      for (const filename of filenames) {
-        if (!await this.removeClipboardAttachment(filename)) failed++;
-      }
-      if (failed) new Notice(`Jam Deck：${failed} 个剪贴板附件删除失败，将在 24 小时后自动清理`);
-      return failed;
-    })();
-  }
-
   trimClipboardHistory() {
     const maxItems = Math.max(10, Number(this.settings.clipboardMaxItems) || 60);
-    if (this.settings.clipboardItems.length <= maxItems) return;
-    const overflow = this.settings.clipboardItems.slice(maxItems);
-    this.settings.clipboardItems = this.settings.clipboardItems.slice(0, maxItems);
-    void this.removeClipboardAttachmentsLater(overflow);
+    const overflow = this.clipboardItems.slice(maxItems);
+    this.clipboardItems = this.clipboardItems.slice(0, maxItems);
+    return overflow;
+  }
+
+  // History is persisted before images are deleted; an image whose delete fails
+  // is swept by cleanupClipboard once it is older than CLIPBOARD_MAX_AGE_MS.
+  async commitClipboardItems(removed = []) {
+    this.renderClipboardViews();
+    await this.localStore.saveClipboard(this.clipboardItems);
+    for (const item of removed) {
+      if (item.type === "image" && item.filename) await this.localStore.removeClipboardImage(item.filename);
+    }
   }
 
   async cleanupClipboard() {
     const threshold = Date.now() - CLIPBOARD_MAX_AGE_MS;
-    const expired = this.settings.clipboardItems.filter((item) => item.ts < threshold);
+    const expired = this.clipboardItems.filter((item) => item.ts < threshold);
     if (expired.length) {
-      this.settings.clipboardItems = this.settings.clipboardItems.filter((item) => item.ts >= threshold);
-      this.renderClipboardViews();
-      await this.saveSettings();
-      await this.removeClipboardAttachmentsLater(expired);
+      this.clipboardItems = this.clipboardItems.filter((item) => item.ts >= threshold);
+      await this.commitClipboardItems(expired);
     }
-
-    const attachments = this.app.vault.getFiles().filter((file) =>
-      file.path.startsWith(`${CLIPBOARD_DIR}/`) && file.stat.mtime < threshold
-    );
-    for (const attachment of attachments) {
-      try {
-        await this.app.vault.delete(attachment);
-      } catch (e) {
-        console.error("jam-deck orphan attachment cleanup failed", e);
-      }
+    const referenced = new Set(this.clipboardItems.map((item) => item.filename).filter(Boolean));
+    for (const image of await this.localStore.listClipboardImages()) {
+      if (!referenced.has(image.name) && image.mtimeMs < threshold) await this.localStore.removeClipboardImage(image.name);
     }
   }
 
   async clearClipboard() {
-    const removed = this.settings.clipboardItems;
-    this.settings.clipboardItems = [];
-    this.renderClipboardViews();
+    const removed = this.clipboardItems;
+    this.clipboardItems = [];
     new Notice("Jam Deck：剪贴板记录已清空");
-    await this.saveSettings();
-    void this.removeClipboardAttachmentsLater(removed);
+    await this.commitClipboardItems(removed);
   }
 
   async askDeckAi(userText, canvasContext) {
@@ -17723,10 +17991,8 @@ class JamDeckPlugin extends Plugin {
   }
 
   async deleteClipboardItem(item) {
-    this.settings.clipboardItems = this.settings.clipboardItems.filter((entry) => entry.ts !== item.ts || entry.type !== item.type);
-    this.renderClipboardViews();
-    await this.saveSettings();
-    void this.removeClipboardAttachmentsLater([item]);
+    this.clipboardItems = this.clipboardItems.filter((entry) => entry.ts !== item.ts || entry.type !== item.type);
+    await this.commitClipboardItems([item]);
   }
 
   async copyClipboardItem(item) {
@@ -17735,14 +18001,11 @@ class JamDeckPlugin extends Plugin {
       this.clipboard.writeText(item.content);
       this.lastText = item.content;
     } else if (item.type === "image" && item.filename) {
-      const file = this.app.vault.getAbstractFileByPath(`${CLIPBOARD_DIR}/${item.filename}`);
-      if (file) {
-        const data = await this.app.vault.readBinary(file);
-        const nativeImage = require("electron").nativeImage;
-        const image = nativeImage.createFromBuffer(Buffer.from(data));
-        this.clipboard.writeImage(image);
-        this.lastImageSignature = this.imageSignature(image);
-      }
+      const data = await this.readClipboardImage(item.filename);
+      const nativeImage = require("electron").nativeImage;
+      const image = nativeImage.createFromBuffer(Buffer.from(data));
+      this.clipboard.writeImage(image);
+      this.lastImageSignature = this.imageSignature(image);
     }
   }
 
@@ -17900,22 +18163,15 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     return false;
   }
 
-  async hydrateClipboardImageDrag(card, item, vaultPath, resourceUrl) {
-    const file = this.app.vault.getAbstractFileByPath(vaultPath);
-    if (!file) return;
+  async hydrateClipboardImageDrag(card, item, resourceUrl) {
     try {
-      const data = await this.app.vault.readBinary(file);
-      const bytes = new Uint8Array(data);
+      const bytes = new Uint8Array(await this.readClipboardImage(item.filename));
       const mime = this.imageMimeFromName(item.filename);
       if (typeof File === "function") card._jamDeckDragFile = new File([bytes], item.filename, { type: mime });
       card._jamDeckDragDataUrl = `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
       card._jamDeckDragResourceUrl = resourceUrl;
-      try {
-        const { pathToFileURL } = require("url");
-        const path = require("path");
-        const base = this.app.vault.adapter.getBasePath();
-        card._jamDeckDragFileUrl = pathToFileURL(path.join(base, ...vaultPath.split("/"))).href;
-      } catch (error) {}
+      const { pathToFileURL } = require("url");
+      card._jamDeckDragFileUrl = pathToFileURL(this.clipboardImagePath(item.filename)).href;
     } catch (error) {
       console.error("jam-deck prepare image drag failed", error);
     }
@@ -17930,15 +18186,13 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     if (!item || item.type !== "image" || !item.filename) throw new Error("剪贴板图片无效");
     const operation = async () => {
       if (signal && signal.aborted) throw new Error("Canvas 已关闭");
-      const sourcePath = `${CLIPBOARD_DIR}/${item.filename}`;
-      const source = this.app.vault.getAbstractFileByPath(sourcePath);
-      if (!source) throw new Error("剪贴板临时图片不存在");
+      const data = await this.readClipboardImage(item.filename);
       let targetPath = "";
       if (this.app.fileManager && typeof this.app.fileManager.getAvailablePathForAttachment === "function") {
         targetPath = await this.app.fileManager.getAvailablePathForAttachment(item.filename, canvasFilePath);
       }
       const safeName = String(item.filename).replace(/[\\/:*?"<>|]/g, "-");
-      if (!targetPath || targetPath === sourcePath || targetPath.startsWith(`${CLIPBOARD_DIR}/`)) {
+      if (!targetPath) {
         targetPath = `${CANVAS_ASSET_DIR}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${safeName}`;
       }
       if (signal && signal.aborted) throw new Error("Canvas 已关闭");
@@ -17948,7 +18202,6 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
         targetPath = `${CANVAS_ASSET_DIR}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${safeName}`;
         await this.ensureVaultFolder(CANVAS_ASSET_DIR);
       }
-      const data = await this.app.vault.readBinary(source);
       if (signal && signal.aborted) throw new Error("Canvas 已关闭");
       await this.app.vault.createBinary(targetPath, data);
       const file = this.app.vault.getAbstractFileByPath(targetPath);
@@ -17983,7 +18236,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     if (this.app.fileManager && typeof this.app.fileManager.getAvailablePathForAttachment === "function") {
       targetPath = await this.app.fileManager.getAvailablePathForAttachment(safeName, canvasFilePath);
     }
-    if (!targetPath || targetPath.startsWith(`${CLIPBOARD_DIR}/`) || targetPath.startsWith(`${CANVAS_ASSET_DIR}/`)) {
+    if (!targetPath || targetPath.startsWith(`${CANVAS_ASSET_DIR}/`)) {
       targetPath = `${CANVAS_ASSET_DIR}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${safeName}`;
     }
     if (signal && signal.aborted) throw new Error("Canvas closed");
@@ -18025,22 +18278,6 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     return result;
   }
 
-  prepareObsidianImageDrag(event, item) {
-    if (!item || item.type !== "image" || !item.filename) return false;
-    const file = this.app.vault.getAbstractFileByPath(`${CLIPBOARD_DIR}/${item.filename}`);
-    const dragManager = this.app.dragManager;
-    if (!file || !dragManager || typeof dragManager.dragFile !== "function" || typeof dragManager.onDragStart !== "function") return false;
-    try {
-      const draggable = dragManager.dragFile(event, file);
-      if (!draggable) return false;
-      dragManager.onDragStart(event, draggable);
-      return true;
-    } catch (error) {
-      console.error("jam-deck native image drag failed", error);
-      return false;
-    }
-  }
-
   prepareClipboardDrag(event, item, card) {
     const transfer = event.dataTransfer;
     if (!transfer) return;
@@ -18053,7 +18290,6 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
       transfer.setData("text/plain", item.content || "");
       return;
     }
-    this.prepareObsidianImageDrag(event, item);
     const mime = this.imageMimeFromName(item.filename);
     if (card._jamDeckDragFile && transfer.items && typeof transfer.items.add === "function") {
       try { transfer.items.add(card._jamDeckDragFile); } catch (error) {}
@@ -18083,7 +18319,7 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
     if (!raw) return null;
     try {
       const payload = JSON.parse(raw);
-      return (this.settings.clipboardItems || []).find((item) => item.ts === payload.ts && item.type === payload.type) || null;
+      return (this.clipboardItems || []).find((item) => item.ts === payload.ts && item.type === payload.type) || null;
     } catch (error) {
       return null;
     }
@@ -18198,11 +18434,8 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
         if (!text) return false;
         task.description = [previousDescription.trim(), text].filter(Boolean).join("\n");
       } else if (internal && internal.type === "image") {
-        const sourcePath = `${CLIPBOARD_DIR}/${internal.filename}`;
-        const file = this.app.vault.getAbstractFileByPath(sourcePath);
-        if (!file) throw new Error("剪贴板图片已经过期");
         const image = await this.createTaskAssetFromBuffer(
-          await this.app.vault.readBinary(file),
+          await this.readClipboardImage(internal.filename),
           internal.filename,
           task.id,
           previousImages.length
@@ -18290,11 +18523,9 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   async createTaskFromClipboardImage(item) {
-    const sourcePath = `${CLIPBOARD_DIR}/${item.filename}`;
-    const file = this.app.vault.getAbstractFileByPath(sourcePath);
-    if (!file) throw new Error("剪贴板图片已经过期");
+    const data = await this.readClipboardImage(item.filename);
     const id = this.nextDeckTaskId();
-    const image = await this.createTaskAssetFromBuffer(await this.app.vault.readBinary(file), item.filename, id, 0);
+    const image = await this.createTaskAssetFromBuffer(data, item.filename, id, 0);
     const task = this.makeDeckTask(id, `图片待办 · ${item.filename}`, "", [image]);
     await this.persistNewDroppedTask(task, [image.path]);
   }
@@ -21892,6 +22123,11 @@ JamDeckPlugin.shortcutCharacter = jamDeckShortcutCharacter;
 JamDeckPlugin.renderShortcutIcon = jamDeckRenderShortcutIcon;
 JamDeckPlugin.canonicalWindowsPath = jamDeckCanonicalWindowsPath;
 JamDeckPlugin.localWorkspacePath = jamDeckLocalWorkspacePath;
+JamDeckPlugin.LocalStore = JamDeckLocalStore;
+JamDeckPlugin.localDataDir = jamDeckLocalDataDir;
+JamDeckPlugin.localResourceUrl = jamDeckLocalResourceUrl;
+JamDeckPlugin.backupsToPrune = jamDeckBackupsToPrune;
+JamDeckPlugin.backupStamp = jamDeckBackupStamp;
 JamDeckPlugin.dshValue = jamDeckDshValue;
 JamDeckPlugin.dshRpc = jamDeckDshRpc;
 JamDeckPlugin.prepareDshWorkspace = jamDeckPrepareDshWorkspace;

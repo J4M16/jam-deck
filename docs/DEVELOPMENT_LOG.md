@@ -1,8 +1,14 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-10-14 — 1.3.9 云同步盘整体加固
+
+- 排查结论（只读实测）：X: 是腾讯 iTFS（坚果云服务已停用），adapter.write = fs.promises.writeFile 原地截断，10-13 事故的 iTFS 日志记录到 data.json 0 字节中间态；loadSettings 的 `saved || {}` 把损坏当全新安装。iTFS 不支持 fs.linkSync（ENOTSUP），导致 Canvas 下载必然失败；写入延迟波动大（中午建 9ms、删 5ms、改写已有笔记 0.4–0.5s，昨晚删一次 0.75–4.2s）；42 份部署备份堆在 .obsidian/plugins。另发现窗口 hidden 时 Chromium 把定时器压到每分钟最多一次，剪贴板轮询实际约 60 秒一次（与同步盘无关，未修）。
+- 实现：新增 JamDeckLocalStore（按 app.appId 区分库；Win 走 LOCALAPPDATA，Mac 走 Application Support），原子写为临时文件加 rename。loadSettings 改为自读 data.json 判定 missing / valid / invalid：invalid 或 missing 且有备份则恢复并写回，invalid 且无备份则 settingsWriteBlocked；applyLoadedSettings 抽出供外部重载复用。writeSettings 在保存队列里先执行 adoptExternalSettings（mtime 变化后读盘，紧凑 JSON 与上次读写快照比对，不同才采纳），再 saveData，然后记录 mtime 并写备份。setAppearance 也走 writeSettings。onExternalSettingsChange、window focus 与 visibilitychange 统一走 checkExternalSettings。剪贴板改为 plugin.clipboardItems 加本机 history.json；所有图片读取（渲染、拖拽、Canvas、待办、AI、灵动岛、复制）都通过 readClipboardImage / clipboardImagePath / clipboardImageUrl，后者复刻 FileSystemAdapter.getResourcePath 规则。删除 prepareObsidianImageDrag。Canvas 下载改用 copyFileSync COPYFILE_EXCL，临时目录改为 os.tmpdir()。deploy.ps1 的暂存和备份移到 LOCALAPPDATA，只留 5 份。
+- 验证：npm run verify 全绿；新增 testSettingsGuard 等回归。实机：完整重启后 1.3.9 未禁写，内存与磁盘均为 39 个 key、无 clipboardItems，118 条待办、9 条模板与密钥完好；剪贴板文字与图片探针存入本机，组件经 app:// 显示（naturalWidth 32），删除后文件清除，探针结束后恢复原剪贴板；iTFS 上 COPYFILE_EXCL 复制成功，重复复制报 EEXIST。拖到笔记导入附件、外部设备覆盖场景只有单测覆盖，待 Jam 实际使用确认。Mac M5 未实机验证。工具：Cursor；处理模型签名：具体模型标识不可见（主代理、诊断、实现与验证；explore 子代理负责代码盘点）。
+
 ## 2026-10-13 — 1.3.8 剪贴板清空不再卡住
 
-- 现象：点剪贴板「清空」后界面无反应、列表不消失，重启后才显示已清空。根因：Vault 位于坚果云 FUSE 盘，Obsidian 内用临时 300KB 文件实测 createBinary 1.4–9.8s、vault.delete 0.75–4.2s；clearClipboard 逐张 await 删除图片附件后才清列表、保存、重绘，几十张图需排队数分钟，磁盘结果最终正确但期间毫无反馈。修复：清空、单条删除、超量裁剪改为先移除记录→仅 renderClipboardViews→保存→后台串行删除附件（串行以免占满 libuv 线程池拖慢 data.json 写入）；删除失败的成为孤儿文件，由既有按 mtime 的 24 小时清理回收并提示一次。顺带消除旧逻辑在删除期间整体赋值吞掉新复制条目的竞态，cleanupClipboard 改为同步过滤过期记录。整板重绘实测 61ms，非卡点。npm run verify 全绿，新增删除挂起时的回归测试。Mac M5 共用 Vault 实现，未实机验证。工具：Cursor；处理模型签名：具体模型标识不可见（主代理、诊断、实现与验证）。
+- 现象：点剪贴板「清空」后界面无反应、列表不消失，重启后才显示已清空。根因：Vault 位于云同步盘（腾讯 iTFS，原记录误写为坚果云，已更正），Obsidian 内用临时 300KB 文件实测 createBinary 1.4–9.8s、vault.delete 0.75–4.2s；clearClipboard 逐张 await 删除图片附件后才清列表、保存、重绘，几十张图需排队数分钟，磁盘结果最终正确但期间毫无反馈。修复：清空、单条删除、超量裁剪改为先移除记录→仅 renderClipboardViews→保存→后台串行删除附件（串行以免占满 libuv 线程池拖慢 data.json 写入）；删除失败的成为孤儿文件，由既有按 mtime 的 24 小时清理回收并提示一次。顺带消除旧逻辑在删除期间整体赋值吞掉新复制条目的竞态，cleanupClipboard 改为同步过滤过期记录。整板重绘实测 61ms，非卡点。npm run verify 全绿，新增删除挂起时的回归测试。Mac M5 共用 Vault 实现，未实机验证。工具：Cursor；处理模型签名：具体模型标识不可见（主代理、诊断、实现与验证）。
 
 ## 2026-10-13 — 1.3.8 音乐播放器布局
 

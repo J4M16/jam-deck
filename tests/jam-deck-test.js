@@ -453,6 +453,17 @@ Module._load = function(request, parent, isMain) {
 
 const JamDeckPlugin = require(mainPath);
 
+// Feature tests only care about saveData; the sync-drive guard sees an unchanged disk.
+function stubSettingsDisk(plugin) {
+  plugin.app = plugin.app || {};
+  plugin.app.vault = plugin.app.vault || {};
+  plugin.app.vault.adapter = Object.assign({ stat: async () => null }, plugin.app.vault.adapter);
+  plugin.manifest = plugin.manifest || { dir: ".obsidian/plugins/jam-deck" };
+  plugin.localStore = plugin.localStore || { backupSettings: async () => {} };
+  plugin.settingsDiskMtime = null;
+  return plugin;
+}
+
 function makeIslandDragHarness() {
   const sent = [];
   const timers = new Map();
@@ -622,7 +633,8 @@ function makeIslandLifecycleHarness() {
   };
   const plugin = {
     app: { workspace: { getLeavesOfType: () => [{ view }] } },
-    settings: { animationsEnabled: true, clipboardItems: [], widgets: [] },
+    settings: { animationsEnabled: true, widgets: [] },
+    clipboardItems: [],
     openDeck: async () => {},
     formatTime: () => "",
     imageMimeFromName: () => "image/png",
@@ -2943,17 +2955,17 @@ const plugin = new JamDeckPlugin();
 assert.strictEqual(plugin.getCanvasInkSidecarPath("Work/Board.canvas"), "Work/Board.canvas.jam-deck.json");
 assert.throws(() => plugin.getCanvasInkSidecarPath("data.json"), /Canvas/);
 assert.strictEqual(plugin.canvasInkOwnerKey("Work/Board.canvas"), plugin.canvasInkOwnerKey("work/board.canvas"), "Canvas ink registry keys must be case-insensitive on Windows");
-const nativeDragFile = { path: "attachments/jam-deck-clipboard/clip.png", extension: "png" };
-let nativeDragStarted = null;
-plugin.app = {
-  vault: { getAbstractFileByPath: (path) => path === nativeDragFile.path ? nativeDragFile : null },
-  dragManager: {
-    dragFile: (event, file) => ({ type: "file", file }),
-    onDragStart: (event, draggable) => { nativeDragStarted = draggable; },
-  },
-};
-assert(plugin.prepareObsidianImageDrag({}, { type: "image", filename: "clip.png" }));
-assert.strictEqual(nativeDragStarted.file, nativeDragFile, "clipboard image must register as an Obsidian file drag");
+{
+  // Clipboard images live outside the vault and expire, so drags must carry the
+  // image bytes for Obsidian to import instead of linking a temporary vault file.
+  const added = [];
+  const dragData = new Map();
+  const card = { _jamDeckDragFile: { name: "clip.png" }, _jamDeckDragFileUrl: "file:///C:/Local/clip.png", addClass() {}, querySelector: () => null };
+  plugin.app = { dragManager: { dragFile: () => assert.fail("clipboard images must not use vault file drags"), onDragStart() {} } };
+  plugin.prepareClipboardDrag({ dataTransfer: { items: { add: (file) => added.push(file) }, setData: (type, value) => dragData.set(type, value) } }, { type: "image", ts: 7, filename: "clip.png" }, card);
+  assert.deepStrictEqual(added, [card._jamDeckDragFile], "clipboard image drags must carry the image file");
+  assert.strictEqual(dragData.get("text/uri-list"), card._jamDeckDragFileUrl);
+}
 const task = {
   id: "task-test-1",
   text: "【设计】Jam Deck 详情",
@@ -3204,6 +3216,7 @@ async function testArchiveIntegration() {
   countdownPlugin.settingsSaveQueue = Promise.resolve();
   countdownPlugin.countdownCompletionLocks = new Set();
   countdownPlugin.saveData = async () => {};
+  stubSettingsDisk(countdownPlugin);
   countdownPlugin.renderAllViews = () => {};
   countdownPlugin.sendWindowsNativeCountdownNotification = async () => {
     notificationRecord = { title: "Jam Deck · 倒计时结束", options: { body: "设定时间已到。" } };
@@ -3228,6 +3241,7 @@ async function testArchiveIntegration() {
   };
   mediaPlugin.settingsSaveQueue = Promise.resolve();
   mediaPlugin.saveData = async () => { mediaSaveCount++; };
+  stubSettingsDisk(mediaPlugin);
   mediaPlugin.musicArtworkUrls = new Map();
   mediaPlugin.musicSnapshot = { sessions: [], selected: null, revision: 0 };
   mediaPlugin.musicPending = null;
@@ -3313,54 +3327,64 @@ async function testArchiveIntegration() {
     resize: () => ({ toBitmap: () => sampleBitmap }),
     toPNG: () => pngBuffer,
   };
-  let createdClipboardPath = "";
+  // Clipboard history lives on the local disk, never in data.json or the synced vault.
+  const clipboardRoot = fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-clipboard-"));
+  const clipboardStore = new JamDeckPlugin.LocalStore(fs, path, clipboardRoot);
   let clipboardRefreshes = 0;
-  pollPlugin.app = { vault: { createBinary: async (path) => { createdClipboardPath = path; } } };
+  pollPlugin.app = { vault: { createBinary: async () => assert.fail("clipboard images must not be written into the vault") } };
+  pollPlugin.localStore = clipboardStore;
+  pollPlugin.clipboardItems = [];
   pollPlugin.clipboard = { readText: () => "https://image-source.example/", readImage: () => clipboardImage };
-  pollPlugin.settings = { clipboardItems: [], clipboardMaxItems: 60 };
+  pollPlugin.settings = { clipboardMaxItems: 60 };
   pollPlugin.clipboardBusy = false;
   pollPlugin.lastText = "";
   pollPlugin.lastImageSignature = "";
-  pollPlugin.saveSettings = async () => {};
+  pollPlugin.saveSettings = async () => assert.fail("clipboard changes must not rewrite data.json");
   pollPlugin.renderClipboardViews = () => { clipboardRefreshes++; };
   pollPlugin.renderAllViews = () => { throw new Error("clipboard polling must not redraw the whole deck"); };
   assert(!pollPlugin.imageSignature(clipboardImage).includes("data:"), "image signature must use a sampled bitmap, not a data URL");
   await pollPlugin.pollClipboard();
-  assert.strictEqual(pollPlugin.settings.clipboardItems[0].type, "image", "image must win over companion URL text");
-  assert(createdClipboardPath.startsWith("attachments/jam-deck-clipboard/clip-"), "new image must be persisted immediately");
+  const polledImage = pollPlugin.clipboardItems[0];
+  assert.strictEqual(polledImage.type, "image", "image must win over companion URL text");
+  assert.deepStrictEqual(fs.readFileSync(path.join(clipboardRoot, "clipboard", polledImage.filename)), pngBuffer, "new image must be stored locally immediately");
+  assert.deepStrictEqual(await clipboardStore.loadClipboard(), pollPlugin.clipboardItems, "history must persist to the local store");
   assert.strictEqual(clipboardRefreshes, 1, "only clipboard widgets should refresh");
+  assert.deepStrictEqual(Buffer.from(await pollPlugin.readClipboardImage(polledImage.filename)), pngBuffer);
+  await assert.rejects(pollPlugin.readClipboardImage("clip-missing.png"), /过期/, "missing images must read as expired");
+  assert.strictEqual(clipboardStore.clipboardImagePath("../../data.json"), path.join(clipboardRoot, "clipboard", "data.json"), "image names must not escape the clipboard folder");
 
-  // Cloud-drive deletes take seconds each; the list must clear before any attachment delete finishes.
   const clearPlugin = new JamDeckPlugin();
-  const clipFiles = new Set(["attachments/jam-deck-clipboard/clip-1.png", "attachments/jam-deck-clipboard/clip-2.png"]);
-  let releaseDeletes;
-  const deletesGate = new Promise((resolve) => { releaseDeletes = resolve; });
-  clearPlugin.app = { vault: {
-    getAbstractFileByPath: (path) => clipFiles.has(path) ? { path } : null,
-    async delete(file) { await deletesGate; clipFiles.delete(file.path); },
-  } };
-  clearPlugin.settings = { clipboardItems: [
+  clearPlugin.localStore = clipboardStore;
+  clearPlugin.settings = { clipboardMaxItems: 60 };
+  for (const name of ["clip-1.png", "clip-2.png"]) await clipboardStore.writeClipboardImage(name, Buffer.from([1]));
+  clearPlugin.clipboardItems = [
     { type: "image", ts: 2, filename: "clip-2.png" },
     { type: "text", ts: 3, content: "keep-order" },
     { type: "image", ts: 1, filename: "clip-1.png" },
-  ] };
-  let clearSaves = 0;
+  ];
   let clearRefreshes = 0;
-  clearPlugin.saveSettings = async () => { clearSaves++; };
+  clearPlugin.saveSettings = async () => assert.fail("clipboard changes must not rewrite data.json");
   clearPlugin.renderClipboardViews = () => { clearRefreshes++; };
   clearPlugin.renderAllViews = () => { throw new Error("clearing the clipboard must not redraw the whole deck"); };
-  await clearPlugin.deleteClipboardItem(clearPlugin.settings.clipboardItems[0]);
-  assert.deepStrictEqual(clearPlugin.settings.clipboardItems.map((item) => item.ts), [3, 1], "deleting one record must not wait for its attachment delete");
+  await clearPlugin.deleteClipboardItem(clearPlugin.clipboardItems[0]);
+  assert.deepStrictEqual(clearPlugin.clipboardItems.map((item) => item.ts), [3, 1]);
+  assert(!fs.existsSync(clipboardStore.clipboardImagePath("clip-2.png")), "deleting a record must delete its image");
   await clearPlugin.clearClipboard();
-  assert.deepStrictEqual(clearPlugin.settings.clipboardItems, [], "clearing must not wait for attachment deletes");
-  assert.strictEqual(clearSaves, 2, "each clipboard removal must persist once");
+  assert.deepStrictEqual(clearPlugin.clipboardItems, []);
+  assert.deepStrictEqual(await clipboardStore.loadClipboard(), [], "clearing must persist the empty history");
+  assert(!fs.existsSync(clipboardStore.clipboardImagePath("clip-1.png")), "clearing must delete every image");
   assert.strictEqual(clearRefreshes, 2, "each clipboard removal must refresh the clipboard widgets");
-  assert.strictEqual(clipFiles.size, 2, "attachments are still being deleted in the background");
-  clearPlugin.settings.clipboardItems.unshift({ type: "text", ts: 4, content: "copied while deleting" });
-  releaseDeletes();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.strictEqual(clipFiles.size, 0, "background deletes must remove every attachment");
-  assert.deepStrictEqual(clearPlugin.settings.clipboardItems.map((item) => item.ts), [4], "items copied during background deletes must survive");
+
+  await clipboardStore.writeClipboardImage("clip-orphan.png", Buffer.from([1]));
+  await clipboardStore.writeClipboardImage("clip-fresh.png", Buffer.from([1]));
+  const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  fs.utimesSync(clipboardStore.clipboardImagePath("clip-orphan.png"), stale, stale);
+  clearPlugin.clipboardItems = [{ type: "image", ts: Date.now() - 25 * 60 * 60 * 1000, filename: "clip-old.png" }, { type: "text", ts: Date.now(), content: "fresh" }];
+  await clearPlugin.cleanupClipboard();
+  assert.deepStrictEqual(clearPlugin.clipboardItems.map((item) => item.content), ["fresh"], "expired records must be dropped");
+  assert(!fs.existsSync(clipboardStore.clipboardImagePath("clip-orphan.png")), "stale orphan images must be swept");
+  assert(fs.existsSync(clipboardStore.clipboardImagePath("clip-fresh.png")), "a just-written image may not be referenced yet and must survive");
+  fs.rmSync(clipboardRoot, { recursive: true, force: true });
 
   const files = new Map();
   const folders = new Set();
@@ -3392,6 +3416,11 @@ async function testArchiveIntegration() {
   };
   const instance = new JamDeckPlugin();
   instance.app = { vault, workspace: { getLeavesOfType: () => [] } };
+  const instanceLocalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-local-"));
+  process.on("exit", () => fs.rmSync(instanceLocalRoot, { recursive: true, force: true }));
+  instance.localStore = new JamDeckPlugin.LocalStore(fs, path, instanceLocalRoot);
+  instance.clipboardItems = [];
+  stubSettingsDisk(instance);
   instance.settingsSaveQueue = Promise.resolve();
   instance.archiveQueue = Promise.resolve();
   instance.archivingTaskIds = new Set();
@@ -3399,7 +3428,6 @@ async function testArchiveIntegration() {
   instance.saveData = async () => {};
   instance.settings = {
     dataVersion: 3,
-    clipboardItems: [],
     widgets: [
       { id: "launcher-test", type: "launcher", config: { shortcuts: [] } },
       { id: "launcher-url-test", type: "launcher", config: { shortcuts: [] } },
@@ -3407,7 +3435,7 @@ async function testArchiveIntegration() {
     deckTasks: [{ ...task, status: "completed", createdAt: 1, completedAt: 2, archivedAt: null, journalPath: null, archiveFormat: null, archiveTargetDate: null, archiveTargetPath: null }],
   };
   files.set("Work/Test.canvas", JSON.stringify({ nodes: [], edges: [] }));
-  files.set("attachments/jam-deck-clipboard/clip-persist.png", Buffer.from([9, 8, 7]));
+  await instance.localStore.writeClipboardImage("clip-persist.png", Buffer.from([9, 8, 7]));
   files.set(task.images[0].path, Buffer.from([1, 3, 3, 7]));
   instance.app.fileManager = {
     getAvailablePathForAttachment: async (filename, sourcePath) =>
@@ -3415,7 +3443,7 @@ async function testArchiveIntegration() {
         ? `Life/附件/${filename}`
         : String(sourcePath).endsWith(".md")
         ? `Work/工作日记/附件/${filename}`
-        : "attachments/jam-deck-clipboard/clip-persist.png",
+        : `attachments/${filename}`,
   };
 
   const canonical = instance.normalizeHttpUrl("https://WWW.Example.com:443/path?q=1#section");
@@ -3432,7 +3460,7 @@ async function testArchiveIntegration() {
   await instance.saveShortcut("launcher-url-test", webpShortcut.id, webpShortcut.name, webpShortcut.path);
   assert.strictEqual(webpShortcut.iconPath, "attachments/jam-deck-icons/sc-webp-test.webp", "direct shortcut save must write back a verified WebP fallback");
 
-  instance.settings.clipboardItems.push({ ts: 101, type: "text", content: "https://www.figma.com/design/test#node" });
+  instance.clipboardItems.push({ ts: 101, type: "text", content: "https://www.figma.com/design/test#node" });
   await instance.handleLauncherDrop("launcher-url-test", {
     types: ["application/x-jam-deck-clipboard+json", "text/plain"],
     files: [],
@@ -3488,9 +3516,9 @@ async function testArchiveIntegration() {
     "Work/Test.canvas",
     new AbortController().signal
   );
-  assert(persistentCanvasImage.path.startsWith("attachments/jam-deck-canvas-assets/"), "Canvas attachments must escape the temporary clipboard folder");
-  assert(files.has(persistentCanvasImage.path), "persistent Canvas attachment must be written before node creation");
-  await instance.removeClipboardAttachment("clip-persist.png");
+  assert.strictEqual(persistentCanvasImage.path, "attachments/clip-persist.png", "Canvas attachments must follow the vault attachment location");
+  assert.deepStrictEqual(Buffer.from(files.get(persistentCanvasImage.path)), Buffer.from([9, 8, 7]), "the local clipboard image must be copied into the vault before node creation");
+  await instance.localStore.removeClipboardImage("clip-persist.png");
   assert(files.has(persistentCanvasImage.path), "clearing a clipboard source must not delete its Canvas attachment");
 
   // 0.30 统一归档格式：默认 file 模式（单文件按日期分节，简单块）。
@@ -3873,7 +3901,7 @@ function testRoutinePlanner() {
 }
 
 async function testDailyRoutines() {
-  const plugin = new JamDeckPlugin();
+  const plugin = stubSettingsDisk(new JamDeckPlugin());
   plugin.settingsSaveQueue = Promise.resolve();
   plugin.saveData = async () => {};
   plugin.renderAllViews = () => {};
@@ -3916,10 +3944,125 @@ async function testDailyRoutines() {
   assert(!plugin.settings.deckTasks.some((task) => task.routineId === "r-sleep" && task.status === "active"), "deleting a template must pull its unfinished card");
 }
 
+// data.json sits on a cloud-sync drive: Obsidian truncates it in place on save and
+// other devices may replace it. Loading must never turn a damaged file into defaults.
+async function testSettingsGuard() {
+  assert.strictEqual(JamDeckPlugin.localDataDir("win32", { LOCALAPPDATA: "C:\\Users\\Jam\\AppData\\Local" }, "C:\\Users\\Jam", path.win32, "2c99/x"),
+    "C:\\Users\\Jam\\AppData\\Local\\JamDeck\\vaults\\2c99_x");
+  assert.strictEqual(JamDeckPlugin.localDataDir("darwin", {}, "/Users/jam", path.posix, "2c99"),
+    "/Users/jam/Library/Application Support/JamDeck/vaults/2c99");
+  assert.strictEqual(JamDeckPlugin.localResourceUrl({ resourcePathPrefix: "app://h/" }, "C:\\L\\clip.png", require("url").pathToFileURL), "app://h/C:/L/clip.png");
+  assert.strictEqual(JamDeckPlugin.localResourceUrl({ resourcePathPrefix: "app://h/" }, "/Users/jam/clip.png", (p) => ({ href: `file://${p}` })), "app://h/Users/jam/clip.png");
+
+  const day = 24 * 60 * 60 * 1000;
+  const now = new Date(2026, 9, 14, 12, 0, 0).getTime();
+  const name = (time) => `data-${JamDeckPlugin.backupStamp(time)}.json`;
+  const recent = [now - 60 * 1000, now - 23 * 60 * 60 * 1000].map(name);
+  const olderDay = [now - 2 * day, now - 2 * day - 60 * 60 * 1000].map(name);
+  const expired = name(now - 31 * day);
+  assert.deepStrictEqual(JamDeckPlugin.backupsToPrune(["latest.json", "corrupt-x.json", ...recent, ...olderDay, expired], now).sort(), [olderDay[1], expired].sort(),
+    "backups keep the last day, then the newest snapshot per day for 30 days");
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-guard-"));
+  try {
+    const store = new JamDeckPlugin.LocalStore(fs, path, root);
+    await store.backupSettings('{"v":1}', now);
+    await store.backupSettings('{"v":2}', now + 60 * 1000);
+    let names = fs.readdirSync(path.join(root, "backups"));
+    assert.strictEqual(names.filter((entry) => entry.startsWith("data-")).length, 1, "snapshots are spaced by the backup interval");
+    assert.strictEqual(fs.readFileSync(path.join(root, "backups", "latest.json"), "utf8"), '{"v":2}', "latest.json mirrors every save");
+    assert.strictEqual((await store.readLatestBackup()).data.v, 2);
+    fs.writeFileSync(path.join(root, "backups", "latest.json"), "");
+    assert.strictEqual((await store.readLatestBackup()).data.v, 1, "a damaged mirror falls back to the newest snapshot");
+    assert(!names.some((entry) => entry.endsWith(".tmp")), "atomic writes leave no temporary files");
+
+    const makePlugin = (disk) => {
+      const plugin = new JamDeckPlugin();
+      const writes = [];
+      plugin.manifest = { dir: ".obsidian/plugins/jam-deck" };
+      plugin.settingsSaveQueue = Promise.resolve();
+      plugin.localStore = store;
+      plugin.app = { vault: { adapter: {
+        exists: async () => disk.text !== null,
+        read: async () => disk.text,
+        stat: async () => disk.text === null ? null : { mtime: disk.mtime },
+      } } };
+      plugin.saveData = async (settings) => { writes.push(JSON.parse(JSON.stringify(settings))); disk.text = JSON.stringify(settings, null, 2); disk.mtime++; };
+      plugin.applyTypography = () => {};
+      plugin.applyAppearance = () => {};
+      plugin.renderAllViews = () => {};
+      return { plugin, writes };
+    };
+    const full = { dataVersion: 4, widgets: [], deckTasks: [{ id: "t1", text: "keep", status: "active" }], deckRoutines: [], clipboardItems: [{ type: "text", ts: 1, content: "old" }] };
+    await store.backupSettings(JSON.stringify(full), now + 2 * 60 * 1000);
+
+    const truncated = { text: "", mtime: 10 };
+    const restored = makePlugin(truncated);
+    await restored.plugin.loadSettings();
+    assert.strictEqual(restored.plugin.settings.deckTasks[0].text, "keep", "an empty data.json must be restored from the local backup");
+    assert.strictEqual(restored.writes.length, 1, "the restored settings must be written back once");
+    assert.strictEqual(JSON.parse(truncated.text).deckTasks.length, 1);
+    assert(!("clipboardItems" in restored.plugin.settings), "clipboard history must no longer live in data.json");
+    assert(fs.readdirSync(path.join(root, "backups")).some((entry) => entry.startsWith("corrupt-")) === false, "an empty file has nothing worth preserving");
+
+    const garbled = { text: '{"deckTasks": [', mtime: 20 };
+    const preserved = makePlugin(garbled);
+    await preserved.plugin.loadSettings();
+    assert(fs.readdirSync(path.join(root, "backups")).some((entry) => entry.startsWith("corrupt-")), "a garbled data.json must be kept for inspection");
+    assert.strictEqual(preserved.plugin.settings.deckTasks[0].text, "keep");
+
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-guard-bare-"));
+    try {
+      const blockedDisk = { text: "", mtime: 30 };
+      const blocked = makePlugin(blockedDisk);
+      blocked.plugin.localStore = new JamDeckPlugin.LocalStore(fs, path, bareRoot);
+      await blocked.plugin.loadSettings();
+      assert.strictEqual(blocked.plugin.settingsWriteBlocked, true, "a damaged file without any backup must block writes");
+      await assert.rejects(blocked.plugin.saveSettings(), /暂停保存/);
+      assert.strictEqual(blocked.writes.length, 0, "defaults must never overwrite a damaged data.json");
+      blockedDisk.text = JSON.stringify(full);
+      blockedDisk.mtime++;
+      await blocked.plugin.checkExternalSettings();
+      assert.strictEqual(blocked.plugin.settingsWriteBlocked, false, "a repaired data.json from the sync drive lifts the block");
+      assert.strictEqual(blocked.plugin.settings.deckTasks[0].text, "keep");
+
+      const fresh = makePlugin({ text: null, mtime: 0 });
+      fresh.plugin.localStore = new JamDeckPlugin.LocalStore(fs, path, fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-guard-new-")));
+      await fresh.plugin.loadSettings();
+      assert.strictEqual(fresh.plugin.settingsWriteBlocked, false, "a first install without data.json starts from defaults");
+      assert.strictEqual(fresh.writes.length, 0);
+      fs.rmSync(path.dirname(fresh.plugin.localStore.backupDir), { recursive: true, force: true });
+    } finally {
+      fs.rmSync(bareRoot, { recursive: true, force: true });
+    }
+
+    const shared = { text: JSON.stringify(full), mtime: 40 };
+    const device = makePlugin(shared);
+    await device.plugin.loadSettings();
+    assert.strictEqual(fs.readFileSync(path.join(root, "backups", "latest.json"), "utf8"), JSON.stringify(device.plugin.settings), "a valid load refreshes the local backup");
+    device.plugin.settings.deckTasks[0].text = "edited here";
+    assert.strictEqual(await device.plugin.saveSettings(), true);
+    shared.mtime += 5;
+    assert.strictEqual(await device.plugin.saveSettings(), true, "an mtime change with identical content is not a conflict");
+    const other = JSON.parse(shared.text);
+    other.deckTasks[0].text = "edited on the Mac";
+    shared.text = JSON.stringify(other, null, 2);
+    shared.mtime++;
+    const writesBefore = device.writes.length;
+    device.plugin.settings.deckTasks[0].text = "stale local edit";
+    assert.strictEqual(await device.plugin.saveSettings(), false, "a newer data.json from another device must not be overwritten");
+    assert.strictEqual(device.writes.length, writesBefore);
+    assert.strictEqual(device.plugin.settings.deckTasks[0].text, "edited on the Mac", "the other device's version is adopted");
+    assert.strictEqual(await device.plugin.saveSettings(), true, "saves resume after adopting the external version");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 testCanvasCreateName();
 testRoutinePlanner();
 testDayReceipt();
-testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testDailyRoutines()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
+testIslandLifecycle().then(() => testAiLocalWebBootstrap()).then(() => testArchiveIntegration()).then(() => testDailyRoutines()).then(() => testSettingsGuard()).then(() => testCanvasNativeConflictLifecycle()).then(() => testCanvasAsyncTeardown()).then(() => {
   console.log("jam-deck fixtures: passed");
 }).catch((error) => {
   console.error(error);

@@ -12,6 +12,14 @@ Module._load = function(name, ...args) {
 const Plugin = require("../main.js");
 Module._load = originalLoad;
 const clone = value => JSON.parse(JSON.stringify(value));
+// Serves data.json through the test's loadData mock; the sync-drive guard sees an unchanged disk.
+function settingsDisk(plugin) {
+  plugin.manifest = {dir:".obsidian/plugins/jam-deck"};
+  plugin.localStore = {backupSettings:async()=>{},readLatestBackup:async()=>null,preserveCorruptSettings:async()=>{}};
+  plugin.app = plugin.app || {};
+  plugin.app.vault = plugin.app.vault || {};
+  plugin.app.vault.adapter = Object.assign({exists:async()=>true,read:async()=>JSON.stringify(await plugin.loadData()),stat:async()=>null},plugin.app.vault.adapter);
+}
 
 class Target {
   constructor() { this.events = new Map(); }
@@ -84,6 +92,7 @@ function environment() {
   plugin.settingsSaveQueue = Promise.resolve();
   plugin.loadData = async () => ({dataVersion:4,widgets:[]});
   plugin.saveData = async settings => { plugin.disk = clone(settings); };
+  settingsDisk(plugin);
   plugin.renderAllViews = () => { throw new Error("Skin change must preserve Canvas, captions, focus and AI sessions"); };
   await plugin.loadSettings();
   assert.equal(plugin.settings.skin,"spatial");
@@ -130,6 +139,7 @@ function environment() {
   fillPlugin.settingsSaveQueue=Promise.resolve(); fillPlugin.applyAppearance=()=>{};
   fillPlugin.loadData=async()=>({dataVersion:4,widgets:[],deckRoutines:[],untouched:"keep"});
   fillPlugin.saveData=async settings=>{fillPlugin.disk=clone(settings);};
+  settingsDisk(fillPlugin);
   await fillPlugin.loadSettings();
   assert(await fillPlugin.setAppearance("glassFillOpacity",0));
   const fillSaved=clone(fillPlugin.disk); fillPlugin.loadData=async()=>fillSaved; await fillPlugin.loadSettings();
@@ -164,7 +174,7 @@ function environment() {
   assert.deepEqual(Plugin.textBrightnessValues(50),{"--jd-text-tint":"#fff","--jd-text-mix":"0%"});
   assert.deepEqual(Plugin.textBrightnessValues(75),{"--jd-text-tint":"#fff","--jd-text-mix":"50%"});
   const island=Object.create(Plugin.IslandModeController.prototype);
-  island.plugin={settings:{...Plugin.appearanceSettings({skin:"glass",glassTextBrightness:75}),clipboardItems:[]}};
+  island.plugin={settings:{...Plugin.appearanceSettings({skin:"glass",glassTextBrightness:75})},clipboardItems:[]};
   island.getPrimaryClockWidget=()=>null;island.getLeaveMs=()=>1000;island.getElectronRemote=()=>({nativeTheme:{shouldUseDarkColors:true}});
   assert.deepEqual(island.buildSurfaceState().textBrightness,Plugin.textBrightnessValues(75));
   let sent;island.active=true;island.actionChannel="qa";island.islandWindow={isDestroyed:()=>false,webContents:{send:(_,state)=>{sent=state}}};
@@ -319,7 +329,7 @@ function environment() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),"jamdeck-background-"));
   try {
     const source = path.join(dir,"source.mp4"); fs.writeFileSync(source,"test-video-bytes");
-    plugin.app.vault = {adapter:{getBasePath:()=>dir,remove:async rel=>fs.promises.unlink(path.join(dir,rel))}};
+    plugin.app.vault = {adapter:{getBasePath:()=>dir,remove:async rel=>fs.promises.unlink(path.join(dir,rel)),stat:async()=>null}};
     plugin.ensureVaultFolder = async rel => fs.promises.mkdir(path.join(dir,rel),{recursive:true});
     plugin.getDroppedFilePath = () => source;
     assert(await plugin.importGlassBackground({name:"背景.mp4",arrayBuffer(){throw new Error("large video must use streamed OS copy");}}));
