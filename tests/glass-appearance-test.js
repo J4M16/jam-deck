@@ -14,7 +14,7 @@ Module._load = originalLoad;
 const clone = value => JSON.parse(JSON.stringify(value));
 // Serves data.json through the test's loadData mock; the sync-drive guard sees an unchanged disk.
 function settingsDisk(plugin) {
-  plugin.manifest = {dir:".obsidian/plugins/jam-deck"};
+  plugin.manifest = {dir:".obsidian/plugins/jam-deck"}; plugin.deviceId = "device-test";
   plugin.localStore = {backupSettings:async()=>{},readLatestBackup:async()=>null,preserveCorruptSettings:async()=>{}};
   plugin.app = plugin.app || {};
   plugin.app.vault = plugin.app.vault || {};

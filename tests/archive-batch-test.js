@@ -22,7 +22,7 @@ function fixture(Plugin = loadPlugin(), options = {}) {
   plugin.settings = { widgets:[], deckRoutines:[], deckTasks:[],
     workArchiveMode:"file", workArchiveFile:"Work/工作.md", lifeArchiveMode:"file", lifeArchiveFile:"Life/Daily.md" };
   plugin.archiveQueue = Promise.resolve(); plugin.settingsSaveQueue = Promise.resolve(); plugin.archivingTaskIds = new Set();
-  plugin.manifest = { dir: ".obsidian/plugins/jam-deck" }; plugin.settingsDiskMtime = null;
+  plugin.manifest = { dir: ".obsidian/plugins/jam-deck" }; plugin.settingsCheckedAt = Date.now(); plugin.deviceId = "device-test";
   plugin.localStore = { backupSettings: async () => {} };
   plugin.renderAllViews = () => { stats.renders++; const end = performance.now() + (options.renderMs || 0); while (performance.now() < end) {} };
   plugin.saveData = async settings => {
@@ -34,7 +34,6 @@ function fixture(Plugin = loadPlugin(), options = {}) {
   plugin.app = { workspace:{getLeavesOfType:()=>[]}, fileManager:{
     getAvailablePathForAttachment: async (filename, source) => `${path.posix.dirname(source)}/附件/${filename}`
   }, vault:{
-    adapter: { stat: async () => null },
     getAbstractFileByPath: name => files.has(name) ? {path:name} : folders.has(name) ? {path:name} : null,
     createFolder: async name => { folders.add(name); },
     create: async (name, text) => { if (files.has(name)) throw Error("exists"); files.set(name,text); return {path:name}; },

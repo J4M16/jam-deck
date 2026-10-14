@@ -16,6 +16,7 @@ const CLIPBOARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SETTINGS_BACKUP_INTERVAL_MS = 15 * 60 * 1000;
 const SETTINGS_BACKUP_RECENT_MS = 24 * 60 * 60 * 1000;
 const SETTINGS_BACKUP_DAILY_DAYS = 30;
+const SETTINGS_EXTERNAL_CHECK_MS = 30 * 1000;
 const CANVAS_ASSET_DIR = "attachments/jam-deck-canvas-assets";
 const CANVAS_DOWNLOAD_DIR = "attachments/jam-deck-canvas-downloads";
 const ICON_DIR = "attachments/jam-deck-icons";
@@ -134,6 +135,11 @@ function jamDeckParseSettingsText(text) {
   }
 }
 
+function jamDeckSyncStampTime(settings) {
+  const time = Number(settings && settings.syncStamp && settings.syncStamp.savedAt);
+  return Number.isFinite(time) && time > 0 ? time : 0;
+}
+
 function jamDeckBackupStamp(time) {
   const date = new Date(time);
   const pad = (value, size = 2) => String(value).padStart(size, "0");
@@ -172,6 +178,7 @@ class JamDeckLocalStore {
   constructor(fs, pathApi, directory) {
     this.fs = fs.promises;
     this.path = pathApi;
+    this.devicePath = pathApi.join(directory, "device.json");
     this.backupDir = pathApi.join(directory, "backups");
     this.clipboardDir = pathApi.join(directory, "clipboard");
     this.clipboardHistoryPath = pathApi.join(this.clipboardDir, "history.json");
@@ -189,6 +196,17 @@ class JamDeckLocalStore {
       await this.fs.unlink(temporary).catch(() => {});
       throw error;
     }
+  }
+
+  // Identifies this machine's writes in data.json; the directory is never synced.
+  async deviceId() {
+    try {
+      const saved = JSON.parse(await this.fs.readFile(this.devicePath, "utf8"));
+      if (saved && typeof saved.id === "string" && saved.id) return saved.id;
+    } catch (error) {}
+    const id = `device-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    await this.writeAtomic(this.devicePath, JSON.stringify({ id }));
+    return id;
   }
 
   async backupNames() {
@@ -16729,6 +16747,7 @@ class JamDeckPlugin extends Plugin {
     this.canvasNativeConflictDisposed = false;
     this.islandMode = new IslandModeController(this);
     this.localStore = new JamDeckLocalStore(require("fs"), nodePath, jamDeckLocalDataDir(process.platform, process.env, require("os").homedir(), nodePath, this.app.appId));
+    this.deviceId = await this.localStore.deviceId();
     await this.loadSettings();
     this.clipboardItems = await this.localStore.loadClipboard();
     this.applyTypography();
@@ -16846,11 +16865,6 @@ class JamDeckPlugin extends Plugin {
     return { state: data ? "valid" : "invalid", text, data };
   }
 
-  async settingsFileMtime() {
-    const stat = await this.app.vault.adapter.stat(this.settingsDataPath());
-    return stat ? stat.mtime : null;
-  }
-
   // Obsidian writes data.json by truncating it in place, so a quit mid-write
   // leaves an empty file. Treating that as a fresh install and saving defaults
   // would make the loss permanent; restore the local backup or refuse to write.
@@ -16869,8 +16883,8 @@ class JamDeckPlugin extends Plugin {
       }
       if (!restored && file.state === "invalid") this.settingsWriteBlocked = true;
     }
-    this.settingsSnapshot = file.data ? JSON.stringify(file.data) : null;
-    this.settingsDiskMtime = file.state === "missing" ? null : await this.settingsFileMtime();
+    this.knownSavedAt = jamDeckSyncStampTime(saved);
+    this.settingsCheckedAt = Date.now();
     const repaired = this.applyLoadedSettings(saved);
     if (this.settingsWriteBlocked) {
       new Notice("Jam Deck：data.json 已损坏且本机没有备份，已暂停保存以免覆盖。请检查同步盘后重启 Obsidian。", 0);
@@ -16886,9 +16900,7 @@ class JamDeckPlugin extends Plugin {
         console.error("jam-deck duplicate task id repair failed to save", error);
       }
     } else if (file.data) {
-      try { await this.localStore.backupSettings(JSON.stringify(this.settings)); } catch (error) {
-        console.error("jam-deck settings backup failed", error);
-      }
+      this.scheduleSettingsBackup();
     }
     const savedVersion = saved ? Number(saved.dataVersion) || 0 : DEFAULT_SETTINGS.dataVersion;
     if (savedVersion < 4 && !this.settingsWriteBlocked) {
@@ -16955,40 +16967,44 @@ class JamDeckPlugin extends Plugin {
   // newer data.json was adopted instead of overwriting it.
   async writeSettings() {
     if (this.settingsWriteBlocked) throw new Error("Jam Deck：data.json 已损坏，已暂停保存");
-    if (await this.adoptExternalSettings()) {
-      new Notice("Jam Deck：data.json 已被其他设备更新，已载入新版本；刚才的改动没有保存，请重做。", 8000);
+    const adopted = await this.adoptExternalSettings();
+    if (adopted) {
+      new Notice(`Jam Deck：另一台设备在 ${adopted} 保存了更新的数据，已载入；刚才的改动没有保存，请重做。`, 8000);
       return false;
     }
-    const text = JSON.stringify(this.settings);
-    await this.saveData(this.settings);
-    this.settingsSnapshot = text;
-    this.settingsDiskMtime = await this.settingsFileMtime();
-    try { await this.localStore.backupSettings(text); } catch (error) {
-      console.error("jam-deck settings backup failed", error);
-    }
+    const savedAt = Math.max(Date.now(), (this.knownSavedAt || 0) + 1);
+    const syncStamp = { device: this.deviceId, savedAt };
+    await this.saveData({ ...this.settings, syncStamp });
+    this.settings.syncStamp = syncStamp;
+    this.knownSavedAt = savedAt;
+    this.settingsCheckedAt = Date.now();
+    this.scheduleSettingsBackup();
     return true;
   }
 
-  // Compares content rather than mtime alone: the sync drive may rewrite the
-  // mtime of our own saves. An unreadable file is left for the next save to repair.
+  // The sync drive rewrites mtimes after upload and can serve the previously
+  // committed content right after a local write, so neither mtime nor content
+  // identifies an external change. Only a stamp from another device that is
+  // newer than anything seen here does. Checks are throttled because every
+  // read on the drive can take hundreds of milliseconds.
+  // Returns the adopted save time label, or "" when nothing was adopted.
   async adoptExternalSettings() {
-    const mtime = await this.settingsFileMtime();
-    if (mtime === this.settingsDiskMtime) return false;
+    if (!this.settingsWriteBlocked && Date.now() - this.settingsCheckedAt < SETTINGS_EXTERNAL_CHECK_MS) return "";
     const file = await this.readSettingsFile();
-    if (file.state !== "valid") return false;
-    const text = JSON.stringify(file.data);
-    this.settingsDiskMtime = mtime;
-    if (text === this.settingsSnapshot) return false;
+    this.settingsCheckedAt = Date.now();
+    if (file.state !== "valid") return "";
+    const stamp = file.data.syncStamp;
+    const external = stamp && stamp.device !== this.deviceId && jamDeckSyncStampTime(file.data) > this.knownSavedAt;
+    if (!external && !this.settingsWriteBlocked) return "";
     this.applyLoadedSettings(file.data);
-    this.settingsSnapshot = text;
+    this.knownSavedAt = Math.max(this.knownSavedAt, jamDeckSyncStampTime(file.data));
     this.settingsWriteBlocked = false;
-    try { await this.localStore.backupSettings(JSON.stringify(this.settings)); } catch (error) {
-      console.error("jam-deck settings backup failed", error);
-    }
+    this.scheduleSettingsBackup();
     this.applyTypography();
     this.applyAppearance();
     this.renderAllViews();
-    return true;
+    const time = jamDeckSyncStampTime(file.data);
+    return time ? new Date(time).toLocaleString("zh-CN", { hour12: false }) : "未知时间";
   }
 
   onExternalSettingsChange() {
@@ -16997,10 +17013,28 @@ class JamDeckPlugin extends Plugin {
 
   checkExternalSettings() {
     const operation = this.settingsSaveQueue.then(async () => {
-      if (await this.adoptExternalSettings()) new Notice("Jam Deck：已载入其他设备对 data.json 的更新");
+      const adopted = await this.adoptExternalSettings();
+      if (adopted) new Notice(`Jam Deck：已载入另一台设备在 ${adopted} 保存的数据`);
     });
     this.settingsSaveQueue = operation.catch((error) => console.error("jam-deck external settings check failed", error));
     return operation;
+  }
+
+  // Backups run beside the save queue so a slow disk never delays saving;
+  // bursts of saves collapse into one write of the newest settings.
+  scheduleSettingsBackup() {
+    this.settingsBackupPending = JSON.stringify(this.settings);
+    if (this.settingsBackupRunning) return;
+    this.settingsBackupRunning = (async () => {
+      while (this.settingsBackupPending) {
+        const text = this.settingsBackupPending;
+        this.settingsBackupPending = null;
+        try { await this.localStore.backupSettings(text); } catch (error) {
+          console.error("jam-deck settings backup failed", error);
+        }
+      }
+      this.settingsBackupRunning = null;
+    })();
   }
 
   localWorkspacePath() {

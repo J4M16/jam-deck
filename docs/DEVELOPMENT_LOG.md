@@ -1,5 +1,11 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-10-14 — 1.3.10 修复 1.3.9 的误采纳与保存变慢
+
+- 取证：iTFS app.log 中 18:44:53–18:46:17 的 data.json 写入全部来自本机（workspace modify 加 published local file write notification），没有远端下载，也就是 Mac 没写过；18:45:59.345 有一次只读打开（src=committed，126666 字节），而 0.2 秒前本机刚写入 128247 字节，说明 iTFS 存在写后读到旧版本的不一致。磁盘上的 data.json 不含 clipboardItems，写入方是新代码。运行中实例的 settingsDiskMtime 比 iTFS 改写后的 mtime 晚 1 秒，说明 iTFS 上传后确实会改写 mtime。当时本机写一个小文件要 0.4–0.7s，backupSettings 一次 2.35s，iTFS 的 stat 和 read 在 2–800ms 之间。备份目录里那个 0 字节的 tmp 只是取证时正好撞见的在途写入，之后已写完。
+- 修复：删除 settingsFileMtime、settingsDiskMtime 和 settingsSnapshot；writeSettings 写入 `{ ...settings, syncStamp: { device, savedAt } }`，成功后才把 stamp 和 knownSavedAt 记进内存；adoptExternalSettings 在禁写状态下才强制检查，否则受 30 秒间隔限制，只有 stamp.device 不是本机、且 savedAt 大于 knownSavedAt 时才采纳。LocalStore 新增 deviceId（本机数据目录下的 device.json）；新增 scheduleSettingsBackup，在保存队列之外合并执行备份。
+- 验证：npm run verify 全绿，guard 测试补齐上述回归。实机：完整重启后 1.3.10，磁盘 syncStamp.device 是本机 ID，内存与磁盘共 40 个 key（新增 syncStamp），保存三次分别 3948、745、2137ms，此时只剩 saveData 本身的开销；目标待办已归档，附件和链接都在。剩余的慢来自 iTFS 写入（打开、检出、提交流程，日志里约 0.3–1s 起，偶尔数秒），未处理。工具：Cursor；处理模型签名：具体模型标识不可见（主代理、诊断、实现与验证）。
+
 ## 2026-10-14 — 1.3.9 云同步盘整体加固
 
 - 排查结论（只读实测）：X: 是腾讯 iTFS（坚果云服务已停用），adapter.write = fs.promises.writeFile 原地截断，10-13 事故的 iTFS 日志记录到 data.json 0 字节中间态；loadSettings 的 `saved || {}` 把损坏当全新安装。iTFS 不支持 fs.linkSync（ENOTSUP），导致 Canvas 下载必然失败；写入延迟波动大（中午建 9ms、删 5ms、改写已有笔记 0.4–0.5s，昨晚删一次 0.75–4.2s）；42 份部署备份堆在 .obsidian/plugins。另发现窗口 hidden 时 Chromium 把定时器压到每分钟最多一次，剪贴板轮询实际约 60 秒一次（与同步盘无关，未修）。

@@ -453,14 +453,12 @@ Module._load = function(request, parent, isMain) {
 
 const JamDeckPlugin = require(mainPath);
 
-// Feature tests only care about saveData; the sync-drive guard sees an unchanged disk.
+// Feature tests only care about saveData; the sync-drive guard has just checked the disk.
 function stubSettingsDisk(plugin) {
-  plugin.app = plugin.app || {};
-  plugin.app.vault = plugin.app.vault || {};
-  plugin.app.vault.adapter = Object.assign({ stat: async () => null }, plugin.app.vault.adapter);
   plugin.manifest = plugin.manifest || { dir: ".obsidian/plugins/jam-deck" };
   plugin.localStore = plugin.localStore || { backupSettings: async () => {} };
-  plugin.settingsDiskMtime = null;
+  plugin.deviceId = "device-test";
+  plugin.settingsCheckedAt = Date.now();
   return plugin;
 }
 
@@ -3979,19 +3977,20 @@ async function testSettingsGuard() {
     const makePlugin = (disk) => {
       const plugin = new JamDeckPlugin();
       const writes = [];
+      const reads = { count: 0 };
       plugin.manifest = { dir: ".obsidian/plugins/jam-deck" };
       plugin.settingsSaveQueue = Promise.resolve();
       plugin.localStore = store;
+      plugin.deviceId = "device-win";
       plugin.app = { vault: { adapter: {
         exists: async () => disk.text !== null,
-        read: async () => disk.text,
-        stat: async () => disk.text === null ? null : { mtime: disk.mtime },
+        read: async () => { reads.count++; return disk.text; },
       } } };
-      plugin.saveData = async (settings) => { writes.push(JSON.parse(JSON.stringify(settings))); disk.text = JSON.stringify(settings, null, 2); disk.mtime++; };
+      plugin.saveData = async (settings) => { writes.push(JSON.parse(JSON.stringify(settings))); disk.text = JSON.stringify(settings, null, 2); };
       plugin.applyTypography = () => {};
       plugin.applyAppearance = () => {};
       plugin.renderAllViews = () => {};
-      return { plugin, writes };
+      return { plugin, writes, reads };
     };
     const full = { dataVersion: 4, widgets: [], deckTasks: [{ id: "t1", text: "keep", status: "active" }], deckRoutines: [], clipboardItems: [{ type: "text", ts: 1, content: "old" }] };
     await store.backupSettings(JSON.stringify(full), now + 2 * 60 * 1000);
@@ -4021,10 +4020,10 @@ async function testSettingsGuard() {
       await assert.rejects(blocked.plugin.saveSettings(), /暂停保存/);
       assert.strictEqual(blocked.writes.length, 0, "defaults must never overwrite a damaged data.json");
       blockedDisk.text = JSON.stringify(full);
-      blockedDisk.mtime++;
       await blocked.plugin.checkExternalSettings();
       assert.strictEqual(blocked.plugin.settingsWriteBlocked, false, "a repaired data.json from the sync drive lifts the block");
       assert.strictEqual(blocked.plugin.settings.deckTasks[0].text, "keep");
+      await blocked.plugin.settingsBackupRunning;
 
       const fresh = makePlugin({ text: null, mtime: 0 });
       fresh.plugin.localStore = new JamDeckPlugin.LocalStore(fs, path, fs.mkdtempSync(path.join(os.tmpdir(), "jam-deck-guard-new-")));
@@ -4036,24 +4035,61 @@ async function testSettingsGuard() {
       fs.rmSync(bareRoot, { recursive: true, force: true });
     }
 
-    const shared = { text: JSON.stringify(full), mtime: 40 };
+    const shared = { text: JSON.stringify(full) };
     const device = makePlugin(shared);
     await device.plugin.loadSettings();
+    await device.plugin.settingsBackupRunning;
     assert.strictEqual(fs.readFileSync(path.join(root, "backups", "latest.json"), "utf8"), JSON.stringify(device.plugin.settings), "a valid load refreshes the local backup");
+    const committedBeforeEdit = shared.text;
     device.plugin.settings.deckTasks[0].text = "edited here";
     assert.strictEqual(await device.plugin.saveSettings(), true);
-    shared.mtime += 5;
-    assert.strictEqual(await device.plugin.saveSettings(), true, "an mtime change with identical content is not a conflict");
-    const other = JSON.parse(shared.text);
-    other.deckTasks[0].text = "edited on the Mac";
-    shared.text = JSON.stringify(other, null, 2);
-    shared.mtime++;
+    assert.strictEqual(JSON.parse(shared.text).syncStamp.device, "device-win", "every save stamps its writer");
+    const readsAfterLoad = device.reads.count;
+    await device.plugin.saveSettings();
+    await device.plugin.saveSettings();
+    assert.strictEqual(device.reads.count, readsAfterLoad, "back-to-back saves must not re-read the slow drive");
+
+    // 2026-10-14 incident: right after a local write the drive served the older committed file.
+    shared.text = committedBeforeEdit;
+    device.plugin.settingsCheckedAt = 0;
+    assert.strictEqual(await device.plugin.saveSettings(), true, "a stale read of an older file must not be mistaken for another device");
+    assert.strictEqual(device.plugin.settings.deckTasks[0].text, "edited here");
+    const ownOlder = JSON.parse(shared.text);
+    ownOlder.deckTasks[0].text = "own older";
+    ownOlder.syncStamp = { device: "device-win", savedAt: 1 };
+    shared.text = JSON.stringify(ownOlder);
+    device.plugin.settingsCheckedAt = 0;
+    assert.strictEqual(await device.plugin.saveSettings(), true, "this device's own older write is never adopted");
+    assert.strictEqual(device.plugin.settings.deckTasks[0].text, "edited here");
+
+    const mac = JSON.parse(shared.text);
+    mac.deckTasks[0].text = "edited on the Mac";
+    mac.syncStamp = { device: "device-mac", savedAt: device.plugin.knownSavedAt + 1000 };
+    shared.text = JSON.stringify(mac, null, 2);
+    device.plugin.settingsCheckedAt = 0;
     const writesBefore = device.writes.length;
     device.plugin.settings.deckTasks[0].text = "stale local edit";
     assert.strictEqual(await device.plugin.saveSettings(), false, "a newer data.json from another device must not be overwritten");
     assert.strictEqual(device.writes.length, writesBefore);
     assert.strictEqual(device.plugin.settings.deckTasks[0].text, "edited on the Mac", "the other device's version is adopted");
     assert.strictEqual(await device.plugin.saveSettings(), true, "saves resume after adopting the external version");
+    assert(JSON.parse(shared.text).syncStamp.savedAt > mac.syncStamp.savedAt, "the next local save outranks the adopted version");
+
+    const macOlder = JSON.parse(shared.text);
+    macOlder.deckTasks[0].text = "older Mac copy";
+    macOlder.syncStamp = { device: "device-mac", savedAt: mac.syncStamp.savedAt - 1 };
+    shared.text = JSON.stringify(macOlder);
+    device.plugin.settingsCheckedAt = 0;
+    assert.strictEqual(await device.plugin.saveSettings(), true, "a stale copy of an earlier Mac save is ignored");
+    assert.strictEqual(device.plugin.settings.deckTasks[0].text, "edited on the Mac");
+
+    await device.plugin.settingsBackupRunning;
+    device.plugin.localStore = { backupSettings: () => new Promise(() => {}) };
+    device.plugin.settingsBackupRunning = null;
+    assert.strictEqual(await device.plugin.saveSettings(), true, "a stuck backup must never block saving");
+    assert.strictEqual(await device.plugin.saveSettings(), true);
+    device.plugin.localStore = store;
+    for (const entry of [restored, preserved]) await entry.plugin.settingsBackupRunning;
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

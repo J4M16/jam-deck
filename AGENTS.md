@@ -9,7 +9,7 @@
 - `data.json` 是个人运行数据，禁止复制、提交、覆盖或删除。
 - **Vault 在云同步盘上（2026-10 起为腾讯 iTFS，`C:\Program Files (x86)\Tencent\itfs`；本机坚果云服务已停用），`data.json` 有两条已证实的丢失路径**，1.3.9 起插件已设防，改动持久化链路时不得拆掉这些防线：
   - **半截写入被默认值固化（2026-10-13 13:45 事故，已证实）**：Obsidian 的 `saveData` 底层是 `fs.promises.writeFile`，原地截断再写，不走临时文件改名；进程在写入中途退出会留下 0 字节文件。旧 `loadSettings` 把读不到当成全新安装，下一次保存就把默认值写回去。现在：读到空文件或坏 JSON 时，先从本机备份恢复；没有备份就禁止写盘并常驻提示；坏文件另存为 `corrupt-*.json`。
-  - **其他设备的新版本被旧内存覆盖**：Jam 会在两台设备上打开这个库（不同时）。现在：每次保存前比对磁盘内容（不能只比 mtime，iTFS 可能改写自己保存的 mtime），发现是外部更新就采纳外部版本、放弃本次写入；另外实现了 `onExternalSettingsChange`，窗口获得焦点或变为可见时也会复查。
+  - **其他设备的新版本被旧内存覆盖**：Jam 会在两台设备上打开这个库（不同时）。现在：每次保存都在 `data.json` 写入 `syncStamp`（本机设备 ID 存在本机数据目录的 `device.json`，加保存时间）；只有读到**另一台设备、且比本机已知更新**的 stamp 才采纳，放弃本次写入。检查最多 30 秒一次，`onExternalSettingsChange`、窗口获得焦点和变为可见时同样触发。**不能用 mtime 或内容比对判断外部更新**（1.3.9 的错误做法，10-14 已出事）：iTFS 上传后会改写 mtime，而且刚写完时可能把旧的已提交版本读回来，导致自己的旧版本被当成“Mac 的更新”采纳，冲掉刚保存的改动。本机备份在保存队列之外后台合并执行，不得阻塞保存。
   - **本机数据目录**：`%LOCALAPPDATA%\JamDeck\vaults\<app.appId>`（Mac 为 `~/Library/Application Support/JamDeck/vaults/<app.appId>`）。`backups/latest.json` 每次保存都更新；`data-*.json` 快照至少间隔 15 分钟，24 小时内全部保留，更早的每天留一份，保留 30 天。剪贴板历史与图片在 `clipboard/`，**已不在 `data.json` 和库里**。部署备份在 `%LOCALAPPDATA%\JamDeck\deploy`，只留最近 5 份。
   - 2026-09-27 那两次 `deckRoutines` 丢失根因未定论（嫌疑：热重载残留旧实例，或当时的坚果云把旧版本同步回来），以上防线对两种情况都能兜底。
   - 操作纪律不变：一次会话内**不要连续多轮 reload**，改动攒一起、部署后只重载一次；**新增会被持久化的 settings 字段、或改动 `saveSettings` 链路后，部署完整体重启 Obsidian**；种入或修改运行数据后**立刻复核磁盘 key 清单**，几分钟后再复核一次；涉及运行数据的改动先备份 `data.json` 到 `debug-backups/`。
