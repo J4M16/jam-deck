@@ -1,5 +1,9 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-10-20 — 通用外拖原生桥接与构建
+
+- 通用外拖开发：新增 Windows / macOS 原生桥接源码与构建流程，目标为微信、企微及桌面，正文落桌面为 TXT，保留画布移动和堆叠。Windows 编译、格式自测、载荷回归及 npm run verify 通过；Mac 构建待 CI、M5 真机未验，尚未接入界面或部署。工具：Codex；处理模型签名：具体模型标识不可见（Executor、Windows Advisor、Canvas Advisor、macOS Advisor）。
+
 ## 2026-10-14 — 1.3.10 修复 1.3.9 的误采纳与保存变慢
 
 - 取证：iTFS app.log 中 18:44:53–18:46:17 的 data.json 写入全部来自本机（workspace modify 加 published local file write notification），没有远端下载，也就是 Mac 没写过；18:45:59.345 有一次只读打开（src=committed，126666 字节），而 0.2 秒前本机刚写入 128247 字节，说明 iTFS 存在写后读到旧版本的不一致。磁盘上的 data.json 不含 clipboardItems，写入方是新代码。运行中实例的 settingsDiskMtime 比 iTFS 改写后的 mtime 晚 1 秒，说明 iTFS 上传后确实会改写 mtime。当时本机写一个小文件要 0.4–0.7s，backupSettings 一次 2.35s，iTFS 的 stat 和 read 在 2–800ms 之间。备份目录里那个 0 字节的 tmp 只是取证时正好撞见的在途写入，之后已写完。

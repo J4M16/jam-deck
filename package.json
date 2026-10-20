@@ -8,7 +8,7 @@
     "test": "node tests/jam-deck-test.js && node tests/archive-batch-test.js && node tests/typography-test.js && node tests/glass-appearance-test.js && node tests/glass-optics-test.js && node tests/canvas-folders-test.js && node tests/canvas-download-test.js && node tests/canvas-picker-test.js && node tests/shortcut-appearance-test.js && node tests/caption-wall-test.js && node tests/caption-distribution-test.js && node tests/caption-source-test.js && node scripts/run-python.js tests/caption-package-test.py && node scripts/run-python.js tests/caption-macos-test.py",
     "package": "node scripts/run-python.js scripts/package-release.py",
     "setup:captions": "node scripts/setup-captions.js",
-    "verify": "npm run check && npm test && node tests/island-capture-test.js && node tests/island-glass-distribution-test.js && node tests/canvas-toolbar-idle-test.js",
+    "verify": "npm run check && npm test && node tests/island-capture-test.js && node tests/island-glass-distribution-test.js && node tests/canvas-toolbar-idle-test.js && node tests/external-drag-test.js",
     "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"
   },
   "engines": {

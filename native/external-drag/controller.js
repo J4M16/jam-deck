@@ -1,0 +1,273 @@
+// Source for the external drag bundle. No Canvas node or settings writes.
+function jamDeckExternalDragEntries(canvas, vault) {
+  const entries = [];
+  for (const [index, node] of Array.from(canvas?.selection?.values?.() || []).entries()) {
+    const data = node?.getData?.();
+    if (!data) continue;
+    const order = { x: Number(data.x) || 0, y: Number(data.y) || 0, index };
+    if (data.type === "text" && String(data.text || "").trim()) {
+      entries.push({ ...order, kind: "text", value: String(data.text) });
+    } else if (data.type === "link" && data.url) {
+      entries.push({ ...order, kind: "link", value: String(data.url) });
+    } else if (data.type === "file") {
+      const file = vault.getAbstractFileByPath(data.file);
+      if (file?.path && !Array.isArray(file.children)) entries.push({ ...order, kind: "file", value: file.path });
+    }
+  }
+  return entries.sort((a, b) => a.y - b.y || a.x - b.x || a.index - b.index);
+}
+
+function jamDeckRenderedPlainText(root) {
+  const blocks = new Set(["P", "DIV", "SECTION", "BLOCKQUOTE", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "PRE", "TABLE", "TR"]);
+  const visit = node => {
+    if (node.nodeType === 3) return node.nodeValue || "";
+    const tag = String(node.tagName || "").toUpperCase();
+    if (["SCRIPT", "STYLE"].includes(tag)) return "";
+    if (tag === "BR") return "\n";
+    if (tag === "INPUT") return node.checked ? "[x] " : "[ ] ";
+    const text = Array.from(node.childNodes || []).map(visit).join("");
+    if (tag === "LI") return `• ${text.trim()}\n`;
+    if (tag === "TD" || tag === "TH") return `${text}\t`;
+    return blocks.has(tag) ? `${text.replace(/\n+$/, "")}\n\n` : text;
+  };
+  // Markdown rendering already resolves escapes. A second unescape would damage code.
+  return visit(root).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function jamDeckBuildExternalDragPayload(entries, { plainText, absolutePath, writeTextFile }) {
+  const texts = [], files = [], seen = new Set();
+  for (const entry of entries) {
+    if (entry.kind === "file") {
+      const path = absolutePath(entry.value);
+      if (!seen.has(path)) { seen.add(path); files.push(path); }
+    } else {
+      const text = entry.kind === "link" ? entry.value : await plainText(entry.value);
+      if (text.trim()) texts.push(text.trim());
+    }
+  }
+  const text = texts.join("\n\n");
+  const textFile = text ? await writeTextFile(text, files) : "";
+  return { text, textFile, files };
+}
+
+function jamDeckExternalDragPacket(payload, ownerPid) {
+  const parts = [Buffer.from("JD01")];
+  const number = value => { const b = Buffer.alloc(4); b.writeUInt32LE(value); parts.push(b); };
+  const string = value => { const b = Buffer.from(value, "utf16le"); number(b.length); parts.push(b); };
+  number(ownerPid);
+  string(payload.text); string(payload.textFile);
+  number(payload.files.length); payload.files.forEach(string);
+  return Buffer.concat(parts);
+}
+
+function jamDeckExternalDragBinary(platform) {
+  const fs = require("fs");
+  const payload = platform === "win32" ? WINDOWS_EXTERNAL_DRAG_PAYLOAD : MACOS_EXTERNAL_DRAG_PAYLOAD;
+  const bytes = zlib.gunzipSync(Buffer.from(payload.gzip, "base64"));
+  const hash = value => crypto.createHash("sha256").update(value).digest("hex");
+  if (hash(bytes) !== payload.sha256) throw Error("拖出辅助程序校验失败");
+  const directory = nodePath.join(require("os").tmpdir(), "jam-deck-external-drag", "bin");
+  fs.mkdirSync(directory, { recursive: true });
+  const executable = nodePath.join(directory, payload.sha256 + (platform === "win32" ? ".exe" : ".node"));
+  if (!fs.existsSync(executable) || hash(fs.readFileSync(executable)) !== payload.sha256) fs.writeFileSync(executable, bytes, { mode: 0o700 });
+  return executable;
+}
+
+class JamDeckExternalDragController {
+  constructor(toolbar) {
+    this.toolbar = toolbar;
+    this.plugin = toolbar.runtime.deckView.plugin;
+    this.button = null;
+    this.prepared = null;
+    this.pressed = null;
+    this.signature = "";
+    this.generation = 0;
+    this.destroyed = false;
+    this.active = false;
+    this.cancelNative = null;
+  }
+
+  sync(menu, blocked) {
+    if (this.destroyed || this.active) return;
+    if (!menu) {
+      if (this.button) this.button.hidden = true;
+      return;
+    }
+    if (!this.button?.isConnected || this.button.parentElement !== menu) {
+      this.button?.remove();
+      const button = this.toolbar.entry.ownerDocument.createElement("button");
+      button.type = "button";
+      button.className = "clickable-icon jam-deck-canvas-drag-out";
+      button.draggable = true;
+      button.setAttribute("aria-label", "拖出所选内容");
+      button.setAttribute("title", "拖到应用或桌面；桌面正文保存为 TXT");
+      setIcon(button, "share");
+      button.addEventListener("pointerdown", event => {
+        event.stopPropagation();
+        this.pressed = this.prepared;
+      });
+      button.addEventListener("dragstart", event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const payload = this.pressed;
+        this.pressed = null;
+        if (!payload || this.destroyed || this.active) {
+          if (!this.destroyed && !this.active) new Notice("Jam Deck：内容准备中，请稍后再拖");
+          return;
+        }
+        void this.start(payload);
+      });
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      });
+      menu.appendChild(button);
+      this.button = button;
+    }
+    const entries = blocked ? [] : jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault);
+    this.button.hidden = entries.length === 0;
+    const signature = JSON.stringify(entries);
+    if (signature === this.signature) return;
+    this.signature = signature;
+    this.prepared = null;
+    const generation = ++this.generation;
+    this.button.setAttribute("aria-busy", entries.length ? "true" : "false");
+    if (!entries.length) return;
+    void this.prepare(entries).then(payload => {
+      if (this.destroyed || generation !== this.generation) return;
+      this.prepared = payload;
+      this.button?.setAttribute("aria-busy", "false");
+    }).catch(error => {
+      if (this.destroyed || generation !== this.generation) return;
+      console.error("jam-deck external drag preparation failed", error);
+      this.button?.setAttribute("aria-busy", "false");
+      new Notice(`Jam Deck：无法准备拖出内容：${error.message}`);
+    });
+  }
+
+  async prepare(entries) {
+    const fs = require("fs");
+    const { MarkdownRenderer, Component } = require("obsidian");
+    const sourcePath = this.toolbar.entry.leaf?.view?.file?.path || "";
+    return jamDeckBuildExternalDragPayload(entries, {
+      plainText: async markdown => {
+        const component = new Component();
+        const el = this.toolbar.entry.ownerDocument.createElement("div");
+        component.load();
+        try {
+          await MarkdownRenderer.render(this.plugin.app, markdown, el, sourcePath, component);
+          return jamDeckRenderedPlainText(el);
+        } finally { component.unload(); el.remove(); }
+      },
+      absolutePath: path => {
+        const absolute = this.plugin.absoluteFromVaultRel(path);
+        if (!fs.existsSync(absolute)) throw Error(`文件不可用：${path}`);
+        return absolute;
+      },
+      writeTextFile: async (text, files) => {
+        const root = nodePath.join(require("os").tmpdir(), "jam-deck-external-drag", "text");
+        await fs.promises.mkdir(root, { recursive: true });
+        // Only our generated, UUID-named directories are eligible for later cleanup.
+        for (const entry of await fs.promises.readdir(root, { withFileTypes: true })) {
+          if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/.test(entry.name)) continue;
+          const dir = nodePath.resolve(root, entry.name);
+          if (nodePath.dirname(dir) !== nodePath.resolve(root)) continue;
+          const stat = await fs.promises.stat(dir);
+          if (Date.now() - stat.mtimeMs > 86400000) await fs.promises.rm(dir, { recursive: true, force: true });
+        }
+        const directory = nodePath.join(root, crypto.randomUUID());
+        await fs.promises.mkdir(directory);
+        const names = new Set(files.map(file => nodePath.basename(file).toLowerCase()));
+        let name = "正文.txt", suffix = 2;
+        while (names.has(name.toLowerCase())) name = `正文 (${suffix++}).txt`;
+        const file = nodePath.join(directory, name);
+        await fs.promises.writeFile(file, "\uFEFF" + text.replace(/\r?\n/g, "\r\n"), "utf8");
+        return file;
+      },
+    });
+  }
+
+  async start(payload) {
+    if (this.active || this.destroyed || this.plugin.externalDragClipboardOwner) return;
+    this.active = true;
+    this.plugin.externalDragClipboardOwner = this;
+    let result;
+    try {
+      const remote = require("@electron/remote");
+      const window = remote.getCurrentWindow();
+      if (process.platform === "win32") result = await this.startWindows(payload, remote.process.pid);
+      else if (process.platform === "darwin") result = await this.startMac(payload, remote, window);
+      else throw Error("拖出支持 Windows 和 macOS");
+      if (!this.destroyed && result?.status === "dropped" && result.target === "chat" && payload.text && payload.files.length && !result.pasteInjected) {
+        new Notice("Jam Deck：文件已拖出，正文未补入（焦点已变化或需要辅助功能权限）");
+      }
+    } catch (error) {
+      if (!this.destroyed) new Notice(`Jam Deck：拖出失败：${error.message}`);
+      console.error("jam-deck external drag failed", error);
+    } finally {
+      // Native writes are not a new user copy. Preserve any unrelated clipboard change.
+      if (this.plugin.clipboard?.readText() === payload.text) this.plugin.lastText = payload.text;
+      if (this.plugin.externalDragClipboardOwner === this) this.plugin.externalDragClipboardOwner = null;
+      this.cancelNative = null;
+      this.active = false;
+      if (!this.destroyed) this.toolbar.scheduleToolbarSync();
+    }
+    return result;
+  }
+
+  startWindows(payload, ownerPid) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(jamDeckExternalDragBinary("win32"), [], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+      let output = "", diagnostic = "", settled = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        child.stdin.end();
+        error ? reject(error) : resolve(result);
+      };
+      this.cancelNative = () => { child.stdin.end(); };
+      child.stdout.on("data", bytes => { output += bytes.toString("utf8"); });
+      child.stderr.on("data", bytes => { diagnostic = (diagnostic + bytes.toString("utf8")).slice(-2048); });
+      child.once("error", error => finish(error));
+      child.stdin.on("error", () => {});
+      child.once("exit", code => {
+        try {
+          const result = JSON.parse(output.trim());
+          if (result.status === "error") throw Error(result.reason || diagnostic || "系统拖放失败");
+          finish(null, result);
+        } catch (error) { finish(Error(diagnostic || `系统拖放退出 (${code})：${error.message}`)); }
+      });
+      child.stdin.write(jamDeckExternalDragPacket(payload, ownerPid));
+    });
+  }
+
+  startMac(payload, remote, window) {
+    const native = remote.require(jamDeckExternalDragBinary("darwin"));
+    const id = native.begin(window.getNativeWindowHandle(), payload);
+    return new Promise((resolve, reject) => {
+      let timer;
+      const finish = () => { clearInterval(timer); };
+      this.cancelNative = () => {
+        native.cancel(id);
+        finish();
+        resolve({ status: "cancelled" });
+      };
+      timer = setInterval(() => {
+        try {
+          const result = native.poll(id);
+          if (result) { finish(); resolve(result); }
+        } catch (error) { finish(); reject(error); }
+      }, 80);
+    });
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    ++this.generation;
+    this.prepared = this.pressed = null;
+    this.button?.remove();
+    this.button = null;
+    this.cancelNative?.();
+  }
+}

@@ -1,0 +1,39 @@
+name: Build external drag
+on:
+  push:
+    branches: [develop]
+    paths: ['native/external-drag/main.cpp', 'native/external-drag/main.mm', 'scripts/build-external-drag-windows.ps1', '.github/workflows/external-drag.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test Windows drag formats
+        shell: powershell
+        run: ./scripts/build-external-drag-windows.ps1 -OutputDirectory dist/external-drag
+      - uses: actions/upload-artifact@v4
+        with:
+          name: external-drag-windows-x64
+          path: dist/external-drag/external-drag-windows-x64.exe
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build Node-API Apple Silicon drag adapter
+        run: |
+          npm install --prefix .cache/drag-build --no-save --ignore-scripts node-api-headers@1.9.0
+          mkdir -p dist/external-drag
+          xcrun clang++ -std=c++17 -fobjc-arc -O2 -bundle -undefined dynamic_lookup -arch arm64 -mmacosx-version-min=12.0 -DNAPI_VERSION=8 -DNODE_GYP_MODULE_NAME=jam_deck_external_drag -I.cache/drag-build/node_modules/node-api-headers/include -framework AppKit -framework ApplicationServices native/external-drag/main.mm -o dist/external-drag/external-drag-macos-arm64.node
+          codesign --force --sign - --identifier com.jamdeck.external-drag dist/external-drag/external-drag-macos-arm64.node
+          file dist/external-drag/external-drag-macos-arm64.node
+          shasum -a 256 dist/external-drag/external-drag-macos-arm64.node
+      - uses: actions/upload-artifact@v4
+        with:
+          name: external-drag-macos-arm64
+          path: dist/external-drag/external-drag-macos-arm64.node
