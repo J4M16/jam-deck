@@ -2,6 +2,18 @@
 const assert = require("assert/strict");
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const source = fs.readFileSync(path.join(__dirname, "../native/external-drag/controller.js"), "utf8");
+const crypto = require("crypto"), zlib = require("zlib");
+const normalized = value => value.replace(/\r\n/g, "\n");
+const main = normalized(fs.readFileSync(path.join(__dirname, "../main.js"), "utf8"));
+const hash = value => crypto.createHash("sha256").update(value).digest("hex");
+for (const [name, nativeSource, magic] of [["WINDOWS", "main.cpp", "4d5a"], ["MACOS", "main.mm", "cffaedfe"]]) {
+  const payload = JSON.parse(main.match(new RegExp(`const ${name}_EXTERNAL_DRAG_PAYLOAD = (\\{[^\\n]+\\});`))[1]);
+  const binary = zlib.gunzipSync(Buffer.from(payload.gzip, "base64"));
+  assert.equal(hash(binary), payload.sha256, `${name} binary integrity`);
+  assert.equal(binary.subarray(0, magic.length / 2).toString("hex"), magic);
+  assert.equal(hash(normalized(fs.readFileSync(path.join(__dirname, "../native/external-drag", nativeSource), "utf8"))), payload.sourceSha256, `${name} source provenance`);
+}
+assert(main.includes(normalized(source)), "shipped controller must match tested source");
 const notices = [];
 const api = vm.runInNewContext(`${source}\n({entries:jamDeckExternalDragEntries, plain:jamDeckRenderedPlainText, payload:jamDeckBuildExternalDragPayload, packet:jamDeckExternalDragPacket, Controller:JamDeckExternalDragController})`, {Buffer, console:{...console,error(){}}, setIcon(){}, Notice:class {constructor(text){notices.push(text);}}, process:{platform:"win32"}, require(name){if(name==="@electron/remote")return {getCurrentWindow:()=>({}),process:{pid:123}};return require(name);}});
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -27,9 +39,10 @@ function fixture() {
   const plugin={app:{vault},clipboard:{readText:()=>""}};
   const toolbar={runtime:{deckView:{plugin}},entry:{ownerDocument:{createElement(){return {style:{},events:{},setAttribute(){},addEventListener(type,handler){this.events[type]=handler;},remove(){this.isConnected=false;}};}}},canvas:{selection:new Set([node({type:"text",text:"A"})])},scheduleToolbarSync(){}};
   const controller=new api.Controller(toolbar);
+  toolbar.ownerWindow={events:new Map(),addEventListener(type,handler){this.events.set(type,handler);},removeEventListener(type,handler){if(this.events.get(type)===handler)this.events.delete(type);}};
   return {menu,plugin,toolbar,controller};
 }
-const event=()=>({preventDefault(){this.cancelled=true;},stopPropagation(){},stopImmediatePropagation(){}});
+const event=(extra={})=>({button:0,buttons:1,pointerId:7,clientX:0,clientY:0,preventDefault(){this.cancelled=true;},stopPropagation(){},stopImmediatePropagation(){this.stopped=true;},...extra});
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
   let written;
@@ -53,7 +66,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   f.controller.prepare=entries=>new Promise(resolve=>pending.push({entries,resolve}));
   f.controller.sync(f.menu,false);
   f.toolbar.canvas.selection=new Set([node({type:"text",text:"B"})]);
-  f.controller.button.events.pointerdown(event());
+  const press=event();f.controller.button.events.pointerdown(press);
+  assert(press.cancelled && press.stopped,"the handle must retain Canvas focus and selection");
   assert.equal(f.controller.pressed,null,"selection changed before RAF must not send A");
   pending[1].resolve({text:"B",files:[],textFile:"b"}); await tick();
   pending[0].resolve({text:"A",files:[],textFile:"a"}); await tick();
@@ -61,8 +75,17 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   f.controller.button.events.pointerdown(event());
   f.toolbar.canvas.selection.clear();
   let sent; f.controller.start=async payload=>{sent=payload;};
-  const drag=event(); f.controller.button.events.dragstart(drag);
-  assert(drag.cancelled); assert.equal(sent.text,"B","pressed snapshot survives selection clearing");
+  f.toolbar.ownerWindow.events.get("pointermove")(event({clientX:3}));
+  assert.equal(sent,undefined,"a click or small tremor is not an OS drag");
+  f.toolbar.ownerWindow.events.get("pointermove")(event({clientX:8}));
+  assert.equal(sent.text,"B","pressed snapshot survives selection clearing");
+  assert.equal(f.toolbar.ownerWindow.events.size,0,"listeners must be gone before native takeover");
+  f.toolbar.canvas.selection=new Set([node({type:"text",text:"B"})]);
+  for(const type of ["pointerup","pointercancel","blur","keydown"]) {
+    sent=undefined;f.controller.button.events.pointerdown(event());
+    f.toolbar.ownerWindow.events.get(type)(event({key:"Escape"}));
+    assert.equal(sent,undefined);assert.equal(f.toolbar.ownerWindow.events.size,0);
+  }
   const destroyed=fixture();let finish;
   destroyed.controller.prepare=()=>new Promise(resolve=>finish=resolve);
   destroyed.controller.sync(destroyed.menu,false);destroyed.controller.destroy();
@@ -79,5 +102,9 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   await cleanup.controller.start({text:"x",files:[],textFile:"x"});
   assert.equal(cleanup.controller.active,false);
   assert.equal(cleanup.plugin.externalDragClipboardOwner,null,"clipboard failure must release polling");
+  const throwingCancel=fixture();
+  throwingCancel.controller.cancelNative=()=>{throw Error("window closed");};
+  assert.doesNotThrow(()=>throwingCancel.controller.destroy());
+  assert.equal(throwingCancel.controller.destroyed,true);
   console.log("External drag: selection, all file types, spatial order, deduplication, rendered text and native packet passed");
 })().catch(error=>{console.error(error);process.exitCode=1;});

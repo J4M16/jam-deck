@@ -20,7 +20,7 @@ assert(pluginSource.includes("leaf.parent = context.root;"), "detached Canvas le
 assert(!pluginSource.includes("leaf.parent = context.parent;"), "detached Canvas leaf must not make Obsidian select tab index -1 and fall back to the first journal tab");
 assert(pluginSource.includes("view.saveImmediately"), "Canvas cleanup must flush pending edits");
 assert(pluginSource.includes("leaf.unload"), "Canvas cleanup must release its owned leaf events");
-assert(!pluginSource.includes("MarkdownRenderer"), "Canvas widget must not regress to Markdown preview rendering");
+assert(!pluginSource.slice(pluginSource.indexOf("class CanvasRuntimeAdapter"), pluginSource.indexOf("class JamDeckView")).includes("MarkdownRenderer"), "Canvas widget must not regress to Markdown preview rendering; outbound text conversion may render Markdown separately");
 assert(!pluginSource.includes("MarkdownRenderChild"), "Canvas widget must not regress to a static embed child");
 assert(pluginSource.includes('tabindex: "0"'), "clipboard cards must be keyboard focusable");
 assert(pluginSource.includes('setIcon(copyBtn, "copy")'), "clipboard actions must use compact accessible icons");

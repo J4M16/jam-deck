@@ -1,5 +1,9 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-10-20 — 1.3.11 通用拖出接入与实机验收
+
+- 新增 Canvas 选区工具栏“拖出所选内容”把手，按画布位置合并可读正文，附带图片、视频和普通文件；桌面／文件夹正文为 UTF-8 TXT，微信／企微混合载荷在成功接收文件后补正文，取消或焦点变化不补字。把手独立接管手势，原有卡片移动和堆叠路径不变；不新增 settings 字段。Windows x64 / macOS arm64 原生组件 CI 构建、Windows 格式自测、源码与二进制完整性、选区竞态及手势清理回归、npm run verify 通过。按 Jam 确认，本次运行目标改为 D:\jam16\Jamnote；初版已部署且数据哈希受保护。真实混合载荷准备通过，接收端验收仍进行中；手势修订尚未重载，Mac M5 未实机验证，Mac 聊天客户端是否额外接收 TXT 承诺待确认。工具：Codex；处理模型签名：具体模型标识不可见（Executor、Windows Advisor、Canvas Advisor、macOS Advisor）。
+
 ## 2026-10-20 — 通用外拖取消、焦点与生命周期
 
 - 通用外拖继续加固：修复选区准备竞态、取消清理、Windows 提前读取文件及输出排空，补正文前再次核对目标与输入焦点；Mac 文件承诺独立持有正文，原生类名按源码隔离，启动失败释放会话。首轮双平台 CI 构建通过，本轮 Windows 编译自测与 npm run verify 通过；Mac 修订待 CI，界面待最终集成与实机验证。工具：Codex；处理模型签名：具体模型标识不可见（Executor、Windows Advisor、Canvas Advisor、macOS Advisor）。

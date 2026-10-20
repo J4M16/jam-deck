@@ -86,6 +86,7 @@ class JamDeckExternalDragController {
     this.destroyed = false;
     this.active = false;
     this.cancelNative = null;
+    this.cancelGesture = null;
   }
 
   sync(menu, blocked) {
@@ -99,28 +100,11 @@ class JamDeckExternalDragController {
       const button = this.toolbar.entry.ownerDocument.createElement("button");
       button.type = "button";
       button.className = "clickable-icon jam-deck-canvas-drag-out";
-      button.draggable = true;
+      button.draggable = false;
       button.setAttribute("aria-label", "拖出所选内容");
       button.setAttribute("title", "拖到应用或桌面；桌面正文保存为 TXT");
       setIcon(button, "share");
-      button.addEventListener("pointerdown", event => {
-        event.stopPropagation();
-        const current = JSON.stringify(jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault));
-        this.pressed = current === this.signature ? this.prepared : null;
-        if (this.failed) this.signature = "";
-        if (current !== this.signature) this.sync(menu, false);
-      });
-      button.addEventListener("dragstart", event => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const payload = this.pressed;
-        this.pressed = null;
-        if (!payload || this.destroyed || this.active) {
-          if (!this.destroyed && !this.active) new Notice("Jam Deck：内容准备中，请稍后再拖");
-          return;
-        }
-        void this.start(payload);
-      });
+      button.addEventListener("pointerdown", event => this.beginGesture(event, menu), true);
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -149,6 +133,51 @@ class JamDeckExternalDragController {
       this.button?.setAttribute("aria-busy", "false");
       new Notice(`Jam Deck：无法准备拖出内容：${error.message}`);
     });
+  }
+
+  beginGesture(event, menu) {
+    if (event.button !== 0 || this.destroyed || this.active) return;
+    // This handle owns its gesture, just like the adjacent toolbar actions.
+    // Cancelling the default keeps Canvas focus/selection intact; OS drag starts
+    // directly at the distance threshold, without waiting for HTML dragstart.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this.cancelGesture?.();
+    const current = JSON.stringify(jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault));
+    const payload = this.pressed = current === this.signature ? this.prepared : null;
+    if (this.failed) this.signature = "";
+    if (current !== this.signature) this.sync(menu, false);
+    const win = this.toolbar.ownerWindow, button = this.button;
+    const cleanup = () => {
+      win.removeEventListener("pointermove", move, true);
+      win.removeEventListener("pointerup", release, true);
+      win.removeEventListener("pointercancel", release, true);
+      win.removeEventListener("blur", cleanup, true);
+      win.removeEventListener("keydown", key, true);
+      try { if (button.hasPointerCapture?.(event.pointerId)) button.releasePointerCapture(event.pointerId); } catch (_) {}
+      this.pressed = null;
+      this.cancelGesture = null;
+    };
+    const release = next => { if (next.pointerId === event.pointerId) cleanup(); };
+    const key = next => { if (next.key === "Escape") cleanup(); };
+    const move = next => {
+      if (next.pointerId !== event.pointerId) return;
+      if (!(next.buttons & 1)) { cleanup(); return; }
+      if (Math.hypot(next.clientX - event.clientX, next.clientY - event.clientY) < 6) return;
+      next.preventDefault();
+      next.stopImmediatePropagation();
+      // Remove pointercancel/blur listeners before the OS takes pointer ownership.
+      cleanup();
+      if (!payload) { new Notice("Jam Deck：内容准备中，请稍后再拖"); return; }
+      if (!this.destroyed && !this.active) void this.start(payload);
+    };
+    this.cancelGesture = cleanup;
+    win.addEventListener("pointermove", move, true);
+    win.addEventListener("pointerup", release, true);
+    win.addEventListener("pointercancel", release, true);
+    win.addEventListener("blur", cleanup, true);
+    win.addEventListener("keydown", key, true);
+    try { button.setPointerCapture?.(event.pointerId); } catch (_) {}
   }
 
   async prepare(entries) {
@@ -272,6 +301,7 @@ class JamDeckExternalDragController {
     if (this.destroyed) return;
     this.destroyed = true;
     ++this.generation;
+    this.cancelGesture?.();
     this.prepared = this.pressed = null;
     this.button?.remove();
     this.button = null;
