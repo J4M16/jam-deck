@@ -29,7 +29,8 @@ jobs:
         run: |
           npm install --prefix .cache/drag-build --no-save --ignore-scripts node-api-headers@1.9.0
           mkdir -p dist/external-drag
-          xcrun clang++ -std=c++17 -fobjc-arc -O2 -bundle -undefined dynamic_lookup -arch arm64 -mmacosx-version-min=12.0 -DNAPI_VERSION=8 -DNODE_GYP_MODULE_NAME=jam_deck_external_drag -I.cache/drag-build/node_modules/node-api-headers/include -framework AppKit -framework ApplicationServices native/external-drag/main.mm -o dist/external-drag/external-drag-macos-arm64.node
+          suffix=$(shasum -a 256 native/external-drag/main.mm | cut -c1-12)
+          xcrun clang++ -std=c++17 -fobjc-arc -O2 -bundle -undefined dynamic_lookup -arch arm64 -mmacosx-version-min=12.0 -DNAPI_VERSION=8 -DNODE_GYP_MODULE_NAME=jam_deck_external_drag -DJDDrag=JDDrag_$suffix -DJDTextPromise=JDTextPromise_$suffix -I.cache/drag-build/node_modules/node-api-headers/include -framework AppKit -framework ApplicationServices native/external-drag/main.mm -o dist/external-drag/external-drag-macos-arm64.node
           codesign --force --sign - --identifier com.jamdeck.external-drag dist/external-drag/external-drag-macos-arm64.node
           file dist/external-drag/external-drag-macos-arm64.node
           shasum -a 256 dist/external-drag/external-drag-macos-arm64.node

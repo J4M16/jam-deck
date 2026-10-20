@@ -38,7 +38,7 @@ static BOOL frontIsTarget(NSDictionary* target) {
     }
     return NO;
 }
-static BOOL editableFocus(NSDictionary* target) {
+static id focusedEditor(NSDictionary* target) {
     AXUIElementRef app = AXUIElementCreateApplication([target[@"pid"] intValue]);
     CFTypeRef focused = nullptr, role = nullptr;
     BOOL editable = NO;
@@ -47,9 +47,14 @@ static BOOL editableFocus(NSDictionary* target) {
             editable = CFEqual(role, kAXTextAreaRole) || CFEqual(role, kAXTextFieldRole) || CFEqual(role, kAXComboBoxRole);
             CFRelease(role);
         }
-        CFRelease(focused);
     }
-    CFRelease(app); return editable;
+    CFRelease(app);
+    id element = CFBridgingRelease(focused);
+    return editable ? element : nil;
+}
+static BOOL sameEditor(NSDictionary* target, id element) {
+    id current = focusedEditor(target);
+    return current && element && CFEqual((__bridge CFTypeRef)current, (__bridge CFTypeRef)element);
 }
 static void commandKey(CGKeyCode key) {
     CGEventRef down = CGEventCreateKeyboardEvent(nullptr, key, true);
@@ -59,11 +64,19 @@ static void commandKey(CGKeyCode key) {
     CFRelease(down); CFRelease(up);
 }
 
-@interface JDTextPromise : NSFilePromiseProvider
+@interface JDTextPromise : NSFilePromiseProvider<NSFilePromiseProviderDelegate>
 @property(nonatomic, copy) NSString* plainText;
+@property(nonatomic, copy) NSString* filename;
 @property(nonatomic) BOOL includeString;
 @end
 @implementation JDTextPromise
+- (NSString*)filePromiseProvider:(NSFilePromiseProvider*)provider fileNameForType:(NSString*)type { return self.filename ?: @"正文.txt"; }
+- (NSOperationQueue*)operationQueueForFilePromiseProvider:(NSFilePromiseProvider*)provider { return NSOperationQueue.mainQueue; }
+- (void)filePromiseProvider:(NSFilePromiseProvider*)provider writePromiseToURL:(NSURL*)url completionHandler:(void (^)(NSError*))completionHandler {
+    NSError* error = nil;
+    [[@"\uFEFF" stringByAppendingString:self.plainText] writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:&error];
+    completionHandler(error);
+}
 - (NSArray<NSPasteboardType>*)writableTypesForPasteboard:(NSPasteboard*)pasteboard {
     NSArray* types = [super writableTypesForPasteboard:pasteboard];
     return self.includeString ? [types arrayByAddingObject:NSPasteboardTypeString] : types;
@@ -74,7 +87,7 @@ static void commandKey(CGKeyCode key) {
 }
 @end
 
-@interface JDDrag : NSObject<NSDraggingSource, NSFilePromiseProviderDelegate>
+@interface JDDrag : NSObject<NSDraggingSource>
 @property(nonatomic) uint32_t identifier;
 @property(nonatomic, copy) NSString* text;
 @property(nonatomic, copy) NSString* textFile;
@@ -83,15 +96,8 @@ static void commandKey(CGKeyCode key) {
 @property(nonatomic, strong) NSArray* retainedItems;
 @end
 @implementation JDDrag
-- (NSDragOperation)draggingSession:(NSDraggingSession*)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context { return NSDragOperationCopy; }
+- (NSDragOperation)draggingSession:(NSDraggingSession*)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context { return context == NSDraggingContextWithinApplication ? NSDragOperationNone : NSDragOperationCopy; }
 - (BOOL)ignoreModifierKeysForDraggingSession:(NSDraggingSession*)session { return YES; }
-- (NSString*)filePromiseProvider:(NSFilePromiseProvider*)provider fileNameForType:(NSString*)type { return self.textFile.lastPathComponent ?: @"正文.txt"; }
-- (NSOperationQueue*)operationQueueForFilePromiseProvider:(NSFilePromiseProvider*)provider { return NSOperationQueue.mainQueue; }
-- (void)filePromiseProvider:(NSFilePromiseProvider*)provider writePromiseToURL:(NSURL*)url completionHandler:(void (^)(NSError*))completionHandler {
-    NSError* error = nil;
-    [[@"\uFEFF" stringByAppendingString:self.text] writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:&error];
-    completionHandler(error);
-}
 - (void)draggingSession:(NSDraggingSession*)session endedAtPoint:(NSPoint)point operation:(NSDragOperation)operation {
     self.ended = YES;
     if (self.cancelled || operation == NSDragOperationNone) {
@@ -107,17 +113,19 @@ static void commandKey(CGKeyCode key) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 220 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         if (self.cancelled) return;
         self.result = @{@"status":@"dropped", @"target":@"chat", @"pasteInjected":@NO};
-        if (!AXIsProcessTrusted() || !frontIsTarget(target) || !editableFocus(target)) return;
+        if (!AXIsProcessTrusted() || !frontIsTarget(target)) return;
+        id editor = focusedEditor(target);
+        if (!editor) return;
         NSPasteboard* board = NSPasteboard.generalPasteboard;
         [board clearContents];
         if (![board setString:self.text forType:NSPasteboardTypeString]) return;
         NSInteger change = board.changeCount;
-        if (!frontIsTarget(target) || !editableFocus(target)) return;
+        if (!frontIsTarget(target) || !sameEditor(target, editor)) return;
         commandKey(126); // Command + Up: beginning of the editing surface.
         self.result = nil;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
             if (self.cancelled) return;
-            BOOL paste = frontIsTarget(target) && editableFocus(target) && board.changeCount == change;
+            BOOL paste = frontIsTarget(target) && sameEditor(target, editor) && board.changeCount == change;
             if (paste) commandKey(9); // V
             self.result = @{@"status":@"dropped", @"target":@"chat", @"pasteInjected":@(paste)};
         });
@@ -153,8 +161,10 @@ static napi_value begin(napi_env env, napi_callback_info info) {
     }
     source.mixed = source.text.length && writers.count;
     if (source.text.length) {
-        JDTextPromise* promise = [[JDTextPromise alloc] initWithFileType:@"public.utf8-plain-text" delegate:source];
-        promise.plainText = source.text; promise.includeString = !source.mixed;
+        JDTextPromise* promise = [JDTextPromise new];
+        promise.fileType = @"public.utf8-plain-text";
+        promise.delegate = promise; // The provider owns its data; the delegate must outlive polling.
+        promise.plainText = source.text; promise.filename = source.textFile.lastPathComponent; promise.includeString = !source.mixed;
         [writers addObject:promise];
     }
     if (!writers.count) { napi_throw_error(env, nullptr, "Empty drag"); return nullptr; }
@@ -169,7 +179,17 @@ static napi_value begin(napi_env env, napi_callback_info info) {
     }
     source.retainedItems = writers; sessions[@(source.identifier)] = source;
     NSEvent* event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged location:location modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:view.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
-    NSDraggingSession* session = [view beginDraggingSessionWithItems:items event:event source:source];
+    NSDraggingSession* session = nil;
+    @try {
+        if (event) session = [view beginDraggingSessionWithItems:items event:event source:source];
+    } @catch (NSException* exception) {
+        [sessions removeObjectForKey:@(source.identifier)];
+        napi_throw_error(env, nullptr, exception.reason.UTF8String); return nullptr;
+    }
+    if (!session) {
+        [sessions removeObjectForKey:@(source.identifier)];
+        napi_throw_error(env, nullptr, "Unable to start the native drag"); return nullptr;
+    }
     session.animatesToStartingPositionsOnCancelOrFail = YES;
     napi_value result; napi_create_uint32(env, source.identifier, &result); return result;
 }

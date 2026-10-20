@@ -1,5 +1,9 @@
 ﻿# Jam Deck 开发日志
 
+## 2026-10-20 — 通用外拖取消、焦点与生命周期
+
+- 通用外拖继续加固：修复选区准备竞态、取消清理、Windows 提前读取文件及输出排空，补正文前再次核对目标与输入焦点；Mac 文件承诺独立持有正文，原生类名按源码隔离，启动失败释放会话。首轮双平台 CI 构建通过，本轮 Windows 编译自测与 npm run verify 通过；Mac 修订待 CI，界面待最终集成与实机验证。工具：Codex；处理模型签名：具体模型标识不可见（Executor、Windows Advisor、Canvas Advisor、macOS Advisor）。
+
 ## 2026-10-20 — 通用外拖原生桥接与构建
 
 - 通用外拖开发：新增 Windows / macOS 原生桥接源码与构建流程，目标为微信、企微及桌面，正文落桌面为 TXT，保留画布移动和堆叠。Windows 编译、格式自测、载荷回归及 npm run verify 通过；Mac 构建待 CI、M5 真机未验，尚未接入界面或部署。工具：Codex；处理模型签名：具体模型标识不可见（Executor、Windows Advisor、Canvas Advisor、macOS Advisor）。

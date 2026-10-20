@@ -18,8 +18,8 @@ struct Target { HWND root = nullptr; DWORD pid = 0; bool chat = false, shell = f
 struct Context {
     Payload payload;
     Target released;
-    HWND notified = nullptr;
-    bool frozen = false, filesRead = false;
+    HWND notified = nullptr, filesReadTarget = nullptr;
+    bool frozen = false;
     std::atomic_bool cancelled{false};
 };
 static bool readNumber(uint32_t& n) { return fread(&n, 4, 1, stdin) == 1; }
@@ -58,7 +58,7 @@ static Target target(const Context& c) { return c.frozen ? c.released : targetAt
 static std::vector<std::wstring> offeredFiles(const Context& c) {
     auto files = c.payload.files;
     // File destinations keep the body as a TXT. Chat receives editable text.
-    if (!c.payload.text.empty() && !target(c).chat && !c.payload.textFile.empty()) files.push_back(c.payload.textFile);
+    if (!c.payload.text.empty() && target(c).shell && !c.payload.textFile.empty()) files.push_back(c.payload.textFile);
     return files;
 }
 static bool offersText(const Context& c) { return !c.payload.text.empty() && !(target(c).chat && !c.payload.files.empty()); }
@@ -105,7 +105,7 @@ public:
             auto cursor = reinterpret_cast<wchar_t*>(reinterpret_cast<char*>(drop) + sizeof(DROPFILES));
             for (const auto& file : files) { memcpy(cursor, file.c_str(), (file.size() + 1) * sizeof(wchar_t)); cursor += file.size() + 1; }
             GlobalUnlock(memory);
-            if (context.frozen) context.filesRead = true;
+            context.filesReadTarget = target(context).root;
         }
         medium->tymed = TYMED_HGLOBAL; medium->hGlobal = memory; return S_OK;
     }
@@ -169,8 +169,15 @@ static bool keyChord(WORD key) {
     inputs[3].ki.wVk = VK_CONTROL; inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
     return SendInput(4, inputs, sizeof(INPUT)) == 4;
 }
+static HWND focusedControl(const Context& c) {
+    GUITHREADINFO info{sizeof(GUITHREADINFO)};
+    const DWORD thread = GetWindowThreadProcessId(c.released.root, nullptr);
+    return GetGUIThreadInfo(thread, &info) ? info.hwndFocus : nullptr;
+}
 static bool pasteBody(Context& c, HWND owner) {
     if (!waitTarget(c, 220)) return false;
+    const HWND focus = focusedControl(c);
+    if (!focus) return false;
     if ((GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_MENU) | GetAsyncKeyState(VK_SHIFT)) & 0x8000) return false;
     bool opened = false;
     for (int i = 0; i < 8 && sameForeground(c); ++i) { if (OpenClipboard(owner)) { opened = true; break; } Sleep(15); }
@@ -189,8 +196,8 @@ static bool pasteBody(Context& c, HWND owner) {
     CloseClipboard();
     if (!written) return false;
     const DWORD sequence = GetClipboardSequenceNumber();
-    if (!sameForeground(c) || !keyChord(VK_HOME)) return false;
-    if (!waitTarget(c, 40) || GetClipboardSequenceNumber() != sequence) return false;
+    if (!sameForeground(c) || focusedControl(c) != focus || !keyChord(VK_HOME)) return false;
+    if (!waitTarget(c, 40) || focusedControl(c) != focus || GetClipboardSequenceNumber() != sequence) return false;
     return keyChord('V');
 }
 static int selfTest() {
@@ -203,11 +210,11 @@ static int selfTest() {
     auto drop = static_cast<DROPFILES*>(GlobalLock(medium.hGlobal));
     if (!drop->fWide || DragQueryFileW(static_cast<HDROP>(medium.hGlobal), 0xFFFFFFFF, nullptr, 0) != 2) return 2;
     GlobalUnlock(medium.hGlobal); ReleaseStgMedium(&medium);
-    c.released.chat = false;
+    c.released.chat = false; c.released.shell = true;
     if (FAILED(data->GetData(&file, &medium))) return 3;
     if (DragQueryFileW(static_cast<HDROP>(medium.hGlobal), 0xFFFFFFFF, nullptr, 0) != 3) return 4;
     ReleaseStgMedium(&medium);
-    c.payload.files.clear(); c.released.chat = true;
+    c.payload.files.clear(); c.released.chat = true; c.released.shell = false;
     if (data->QueryGetData(&file) != DV_E_FORMATETC || FAILED(data->GetData(&text, &medium))) return 5;
     auto body = static_cast<wchar_t*>(GlobalLock(medium.hGlobal));
     const bool equal = c.payload.text == body; GlobalUnlock(medium.hGlobal); ReleaseStgMedium(&medium);
@@ -223,14 +230,14 @@ int main(int argc, char** argv) {
     if (!readPayload(context.payload)) { std::cout << "{\"status\":\"error\",\"reason\":\"Invalid drag payload\"}\n"; OleUninitialize(); return 1; }
     // EOF from a closed Canvas / unloaded plugin cancels the drag and any delayed paste.
     std::thread([&context]() { while (fgetc(stdin) != EOF) {} context.cancelled = true; }).detach();
-    if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) { std::cout << "{\"status\":\"cancelled\"}\n"; ExitProcess(0); }
+    if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) { std::cout << "{\"status\":\"cancelled\"}\n" << std::flush; ExitProcess(0); }
     HWND clipboardOwner = CreateWindowExW(0, L"STATIC", L"JamDeck drag clipboard", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandle(nullptr), nullptr);
     auto data = new DataObject(context); auto source = new DropSource(context);
     DWORD effect = DROPEFFECT_NONE;
     const HRESULT result = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
     const bool dropped = result == DRAGDROP_S_DROP && (effect & DROPEFFECT_COPY);
     bool pasted = false;
-    if (dropped && context.released.chat && context.filesRead && !context.payload.text.empty() && !context.payload.files.empty()) pasted = pasteBody(context, clipboardOwner);
+    if (dropped && context.released.chat && context.filesReadTarget == context.released.root && !context.payload.text.empty() && !context.payload.files.empty()) pasted = pasteBody(context, clipboardOwner);
     source->Release(); data->Release(); DestroyWindow(clipboardOwner);
     std::cout << "{\"status\":\"" << (dropped ? "dropped" : "cancelled") << "\",\"target\":\"" << (context.released.chat ? "chat" : "files") << "\",\"pasteInjected\":" << (pasted ? "true" : "false") << "}\n" << std::flush;
     OleUninitialize();

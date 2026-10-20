@@ -22,7 +22,7 @@ function jamDeckRenderedPlainText(root) {
   const visit = node => {
     if (node.nodeType === 3) return node.nodeValue || "";
     const tag = String(node.tagName || "").toUpperCase();
-    if (["SCRIPT", "STYLE"].includes(tag)) return "";
+    if (["SCRIPT", "STYLE", "BUTTON"].includes(tag) || node.getAttribute?.("aria-hidden") === "true") return "";
     if (tag === "BR") return "\n";
     if (tag === "INPUT") return node.checked ? "[x] " : "[ ] ";
     const text = Array.from(node.childNodes || []).map(visit).join("");
@@ -81,6 +81,7 @@ class JamDeckExternalDragController {
     this.prepared = null;
     this.pressed = null;
     this.signature = "";
+    this.failed = false;
     this.generation = 0;
     this.destroyed = false;
     this.active = false;
@@ -90,7 +91,7 @@ class JamDeckExternalDragController {
   sync(menu, blocked) {
     if (this.destroyed || this.active) return;
     if (!menu) {
-      if (this.button) this.button.hidden = true;
+      if (this.button) this.button.style.display = "none";
       return;
     }
     if (!this.button?.isConnected || this.button.parentElement !== menu) {
@@ -104,7 +105,10 @@ class JamDeckExternalDragController {
       setIcon(button, "share");
       button.addEventListener("pointerdown", event => {
         event.stopPropagation();
-        this.pressed = this.prepared;
+        const current = JSON.stringify(jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault));
+        this.pressed = current === this.signature ? this.prepared : null;
+        if (this.failed) this.signature = "";
+        if (current !== this.signature) this.sync(menu, false);
       });
       button.addEventListener("dragstart", event => {
         event.preventDefault();
@@ -125,20 +129,22 @@ class JamDeckExternalDragController {
       this.button = button;
     }
     const entries = blocked ? [] : jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault);
-    this.button.hidden = entries.length === 0;
+    this.button.style.display = entries.length ? "" : "none";
     const signature = JSON.stringify(entries);
     if (signature === this.signature) return;
     this.signature = signature;
+    this.failed = false;
     this.prepared = null;
     const generation = ++this.generation;
     this.button.setAttribute("aria-busy", entries.length ? "true" : "false");
     if (!entries.length) return;
     void this.prepare(entries).then(payload => {
       if (this.destroyed || generation !== this.generation) return;
-      this.prepared = payload;
+      this.prepared = payload.text || payload.files.length ? payload : null;
       this.button?.setAttribute("aria-busy", "false");
     }).catch(error => {
       if (this.destroyed || generation !== this.generation) return;
+      this.failed = true;
       console.error("jam-deck external drag preparation failed", error);
       this.button?.setAttribute("aria-busy", "false");
       new Notice(`Jam Deck：无法准备拖出内容：${error.message}`);
@@ -206,7 +212,9 @@ class JamDeckExternalDragController {
       console.error("jam-deck external drag failed", error);
     } finally {
       // Native writes are not a new user copy. Preserve any unrelated clipboard change.
-      if (this.plugin.clipboard?.readText() === payload.text) this.plugin.lastText = payload.text;
+      try {
+        if (this.plugin.clipboard?.readText() === payload.text) this.plugin.lastText = payload.text;
+      } catch (error) { console.error("jam-deck drag clipboard read failed", error); }
       if (this.plugin.externalDragClipboardOwner === this) this.plugin.externalDragClipboardOwner = null;
       this.cancelNative = null;
       this.active = false;
@@ -230,7 +238,7 @@ class JamDeckExternalDragController {
       child.stderr.on("data", bytes => { diagnostic = (diagnostic + bytes.toString("utf8")).slice(-2048); });
       child.once("error", error => finish(error));
       child.stdin.on("error", () => {});
-      child.once("exit", code => {
+      child.once("close", code => {
         try {
           const result = JSON.parse(output.trim());
           if (result.status === "error") throw Error(result.reason || diagnostic || "系统拖放失败");
@@ -248,9 +256,8 @@ class JamDeckExternalDragController {
       let timer;
       const finish = () => { clearInterval(timer); };
       this.cancelNative = () => {
-        native.cancel(id);
-        finish();
-        resolve({ status: "cancelled" });
+        try { native.cancel(id); }
+        finally { finish(); resolve({ status: "cancelled" }); }
       };
       timer = setInterval(() => {
         try {
@@ -268,6 +275,7 @@ class JamDeckExternalDragController {
     this.prepared = this.pressed = null;
     this.button?.remove();
     this.button = null;
-    this.cancelNative?.();
+    try { this.cancelNative?.(); }
+    catch (error) { console.error("jam-deck drag cancellation failed", error); }
   }
 }
