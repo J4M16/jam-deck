@@ -127,6 +127,7 @@ public:
 class DropSource final : public IDropSource, public IDropSourceNotify {
     LONG refs = 1;
     Context& context;
+    DWORD lastKeys = MAXDWORD, lastEffect = MAXDWORD;
 public:
     explicit DropSource(Context& c) : context(c) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
@@ -139,6 +140,10 @@ public:
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
     ULONG STDMETHODCALLTYPE Release() override { const auto n = InterlockedDecrement(&refs); if (!n) delete this; return n; }
     HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
+        if (keys != lastKeys || escape || context.cancelled) {
+            fprintf(stderr, "continue keys=%lu physical=%d escape=%d cancelled=%d\n", keys, !!(GetAsyncKeyState(VK_LBUTTON) & 0x8000), escape, static_cast<int>(context.cancelled.load()));
+            lastKeys = keys;
+        }
         if (escape || context.cancelled) return DRAGDROP_S_CANCEL;
         if (!(keys & MK_LBUTTON)) {
             context.released = targetAtCursor(); context.frozen = true;
@@ -147,8 +152,16 @@ public:
         }
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
-    HRESULT STDMETHODCALLTYPE DragEnterTarget(HWND window) override { context.notified = window; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD effect) override {
+        if (effect != lastEffect) { fprintf(stderr, "feedback effect=%lu\n", effect); lastEffect = effect; }
+        return DRAGDROP_S_USEDEFAULTCURSORS;
+    }
+    HRESULT STDMETHODCALLTYPE DragEnterTarget(HWND window) override {
+        context.notified = window;
+        DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
+        fprintf(stderr, "enter target=%p pid=%lu\n", window, pid);
+        return S_OK;
+    }
     HRESULT STDMETHODCALLTYPE DragLeaveTarget() override { context.notified = nullptr; return S_OK; }
 };
 
@@ -230,11 +243,14 @@ int main(int argc, char** argv) {
     if (!readPayload(context.payload)) { std::cout << "{\"status\":\"error\",\"reason\":\"Invalid drag payload\"}\n"; OleUninitialize(); return 1; }
     // EOF from a closed Canvas / unloaded plugin cancels the drag and any delayed paste.
     std::thread([&context]() { while (fgetc(stdin) != EOF) {} context.cancelled = true; }).detach();
-    if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) { std::cout << "{\"status\":\"cancelled\"}\n" << std::flush; ExitProcess(0); }
+    const bool pressed = !!(GetAsyncKeyState(VK_LBUTTON) & 0x8000);
+    fprintf(stderr, "begin physical=%d\n", pressed);
+    if (!pressed) { std::cout << "{\"status\":\"cancelled\"}\n" << std::flush; ExitProcess(0); }
     HWND clipboardOwner = CreateWindowExW(0, L"STATIC", L"JamDeck drag clipboard", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandle(nullptr), nullptr);
     auto data = new DataObject(context); auto source = new DropSource(context);
     DWORD effect = DROPEFFECT_NONE;
     const HRESULT result = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
+    fprintf(stderr, "end result=%08lx effect=%lu\n", result, effect);
     const bool dropped = result == DRAGDROP_S_DROP && (effect & DROPEFFECT_COPY);
     bool pasted = false;
     if (dropped && context.released.chat && context.filesReadTarget == context.released.root && !context.payload.text.empty() && !context.payload.files.empty()) pasted = pasteBody(context, clipboardOwner);

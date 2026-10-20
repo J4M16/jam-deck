@@ -90,7 +90,7 @@ class JamDeckExternalDragController {
   }
 
   sync(menu, blocked) {
-    if (this.destroyed || this.active) return;
+    if (this.destroyed) return;
     if (!menu) {
       if (this.button) this.button.style.display = "none";
       return;
@@ -108,9 +108,18 @@ class JamDeckExternalDragController {
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (!this.active) new Notice("Jam Deck：按住此图标，拖到目标应用或桌面后松开");
       });
       menu.appendChild(button);
       this.button = button;
+    }
+    // Canvas can replace its entire menu during a native drag. Maintain the
+    // handle before pausing payload preparation; the old DOM may be detached.
+    this.button.disabled = this.active;
+    this.button.setAttribute("aria-busy", this.active ? "true" : "false");
+    if (this.active) {
+      this.button.style.display = "";
+      return;
     }
     const entries = blocked ? [] : jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault);
     this.button.style.display = entries.length ? "" : "none";
@@ -125,7 +134,7 @@ class JamDeckExternalDragController {
     void this.prepare(entries).then(payload => {
       if (this.destroyed || generation !== this.generation) return;
       this.prepared = payload.text || payload.files.length ? payload : null;
-      this.button?.setAttribute("aria-busy", "false");
+      this.button?.setAttribute("aria-busy", this.active ? "true" : "false");
     }).catch(error => {
       if (this.destroyed || generation !== this.generation) return;
       this.failed = true;
@@ -226,6 +235,9 @@ class JamDeckExternalDragController {
     if (this.active || this.destroyed || this.plugin.externalDragClipboardOwner) return;
     this.active = true;
     this.plugin.externalDragClipboardOwner = this;
+    this.toolbar.scheduleToolbarSync();
+    const key = event => { if (event.key === "Escape") this.cancelNative?.(); };
+    this.toolbar.ownerWindow.addEventListener("keydown", key, true);
     let result;
     try {
       const remote = require("@electron/remote");
@@ -245,6 +257,7 @@ class JamDeckExternalDragController {
         if (this.plugin.clipboard?.readText() === payload.text) this.plugin.lastText = payload.text;
       } catch (error) { console.error("jam-deck drag clipboard read failed", error); }
       if (this.plugin.externalDragClipboardOwner === this) this.plugin.externalDragClipboardOwner = null;
+      this.toolbar.ownerWindow.removeEventListener("keydown", key, true);
       this.cancelNative = null;
       this.active = false;
       if (!this.destroyed) this.toolbar.scheduleToolbarSync();
@@ -255,19 +268,33 @@ class JamDeckExternalDragController {
   startWindows(payload, ownerPid) {
     return new Promise((resolve, reject) => {
       const child = spawn(jamDeckExternalDragBinary("win32"), [], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-      let output = "", diagnostic = "", settled = false;
+      let output = "", diagnostic = "", settled = false, cancelling = false, cancelTimer;
       const finish = (error, result) => {
         if (settled) return;
         settled = true;
+        clearTimeout(cancelTimer);
         child.stdin.end();
         error ? reject(error) : resolve(result);
       };
-      this.cancelNative = () => { child.stdin.end(); };
+      this.cancelNative = () => {
+        if (settled || cancelling) return;
+        cancelling = true;
+        child.stdin.end();
+        // EOF requests a normal OLE cancellation. A stuck native loop must not
+        // keep Canvas and clipboard ownership forever after explicit cancel.
+        cancelTimer = setTimeout(() => {
+          if (!settled) child.kill();
+        }, 500);
+      };
       child.stdout.on("data", bytes => { output += bytes.toString("utf8"); });
-      child.stderr.on("data", bytes => { diagnostic = (diagnostic + bytes.toString("utf8")).slice(-2048); });
+      child.stderr.on("data", bytes => {
+        diagnostic = (diagnostic + bytes.toString("utf8")).slice(-4096);
+        this.lastNativeDiagnostic = diagnostic;
+      });
       child.once("error", error => finish(error));
       child.stdin.on("error", () => {});
       child.once("close", code => {
+        if (cancelling) { finish(null, { status: "cancelled" }); return; }
         try {
           const result = JSON.parse(output.trim());
           if (result.status === "error") throw Error(result.reason || diagnostic || "系统拖放失败");
