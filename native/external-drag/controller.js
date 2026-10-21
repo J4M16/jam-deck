@@ -68,7 +68,7 @@ function jamDeckExternalDragBinary(platform) {
   if (hash(bytes) !== payload.sha256) throw Error("拖出辅助程序校验失败");
   const directory = nodePath.join(require("os").tmpdir(), "jam-deck-external-drag", "bin");
   fs.mkdirSync(directory, { recursive: true });
-  const executable = nodePath.join(directory, payload.sha256 + (platform === "win32" ? ".exe" : ".node"));
+  const executable = nodePath.join(directory, payload.sha256 + ".node");
   if (!fs.existsSync(executable) || hash(fs.readFileSync(executable)) !== payload.sha256) fs.writeFileSync(executable, bytes, { mode: 0o700 });
   return executable;
 }
@@ -87,6 +87,7 @@ class JamDeckExternalDragController {
     this.active = false;
     this.cancelNative = null;
     this.cancelGesture = null;
+    this.windowsNative = null;
   }
 
   sync(menu, blocked) {
@@ -116,7 +117,7 @@ class JamDeckExternalDragController {
     // Canvas can replace its entire menu during a native drag. Maintain the
     // handle before pausing payload preparation; the old DOM may be detached.
     this.button.disabled = this.active;
-    this.button.setAttribute("aria-busy", this.active ? "true" : "false");
+    this.button.setAttribute("aria-busy", this.active || (!this.prepared && !this.failed) ? "true" : "false");
     if (this.active) {
       this.button.style.display = "";
       return;
@@ -191,6 +192,10 @@ class JamDeckExternalDragController {
 
   async prepare(entries) {
     const fs = require("fs");
+    // Load on selection, before the mouse gesture. Windows OLE must run in the
+    // owning Electron UI thread, not a background process with another queue.
+    if (process.platform === "win32" && !this.windowsNative)
+      this.windowsNative = require("@electron/remote").require(jamDeckExternalDragBinary("win32"));
     const { MarkdownRenderer, Component } = require("obsidian");
     const sourcePath = this.toolbar.entry.leaf?.view?.file?.path || "";
     return jamDeckBuildExternalDragPayload(entries, {
@@ -242,7 +247,7 @@ class JamDeckExternalDragController {
     try {
       const remote = require("@electron/remote");
       const window = remote.getCurrentWindow();
-      if (process.platform === "win32") result = await this.startWindows(payload, remote.process.pid);
+      if (process.platform === "win32") result = await this.startWindows(payload, remote, window);
       else if (process.platform === "darwin") result = await this.startMac(payload, remote, window);
       else throw Error("拖出支持 Windows 和 macOS");
       if (!this.destroyed && result?.status === "dropped" && result.target === "chat" && payload.text && payload.files.length && !result.pasteInjected) {
@@ -265,44 +270,12 @@ class JamDeckExternalDragController {
     return result;
   }
 
-  startWindows(payload, ownerPid) {
-    return new Promise((resolve, reject) => {
-      const child = spawn(jamDeckExternalDragBinary("win32"), [], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-      let output = "", diagnostic = "", settled = false, cancelling = false, cancelTimer;
-      const finish = (error, result) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(cancelTimer);
-        child.stdin.end();
-        error ? reject(error) : resolve(result);
-      };
-      this.cancelNative = () => {
-        if (settled || cancelling) return;
-        cancelling = true;
-        child.stdin.end();
-        // EOF requests a normal OLE cancellation. A stuck native loop must not
-        // keep Canvas and clipboard ownership forever after explicit cancel.
-        cancelTimer = setTimeout(() => {
-          if (!settled) child.kill();
-        }, 500);
-      };
-      child.stdout.on("data", bytes => { output += bytes.toString("utf8"); });
-      child.stderr.on("data", bytes => {
-        diagnostic = (diagnostic + bytes.toString("utf8")).slice(-4096);
-        this.lastNativeDiagnostic = diagnostic;
-      });
-      child.once("error", error => finish(error));
-      child.stdin.on("error", () => {});
-      child.once("close", code => {
-        if (cancelling) { finish(null, { status: "cancelled" }); return; }
-        try {
-          const result = JSON.parse(output.trim());
-          if (result.status === "error") throw Error(result.reason || diagnostic || "系统拖放失败");
-          finish(null, result);
-        } catch (error) { finish(Error(diagnostic || `系统拖放退出 (${code})：${error.message}`)); }
-      });
-      child.stdin.write(jamDeckExternalDragPacket(payload, ownerPid));
-    });
+  startWindows(payload, remote, window) {
+    // This call returns after native drop/cancel. Esc and mouse release are
+    // handled entirely by OLE, without needing the waiting renderer to run JS.
+    const result = this.windowsNative.drag(window.getNativeWindowHandle(), jamDeckExternalDragPacket(payload, remote.process.pid));
+    this.lastNativeResult = result;
+    return result;
   }
 
   startMac(payload, remote, window) {

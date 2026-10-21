@@ -2,7 +2,7 @@ name: Build external drag
 on:
   push:
     branches: [develop]
-    paths: ['native/external-drag/main.cpp', 'native/external-drag/main.mm', 'scripts/build-external-drag-windows.ps1', '.github/workflows/external-drag.yml']
+    paths: ['native/external-drag/main.cpp', 'native/external-drag/main.mm', 'scripts/build-external-drag-windows.ps1', 'tests/external-drag-native-test.js', '.github/workflows/external-drag.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,13 +11,16 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Build and test Windows drag formats
         shell: powershell
         run: ./scripts/build-external-drag-windows.ps1 -OutputDirectory dist/external-drag
       - uses: actions/upload-artifact@v4
         with:
           name: external-drag-windows-x64
-          path: dist/external-drag/external-drag-windows-x64.exe
+          path: dist/external-drag/external-drag-windows-x64.node
   macos-arm64:
     runs-on: macos-15
     steps:

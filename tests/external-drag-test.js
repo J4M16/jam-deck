@@ -15,9 +15,8 @@ for (const [name, nativeSource, magic] of [["WINDOWS", "main.cpp", "4d5a"], ["MA
 }
 assert(main.includes(normalized(source)), "shipped controller must match tested source");
 const notices = [];
-let spawnChild;
-const timers = new Map();
-const api = vm.runInNewContext(`${source}\njamDeckExternalDragBinary=()=>"test-helper";\n({entries:jamDeckExternalDragEntries, plain:jamDeckRenderedPlainText, payload:jamDeckBuildExternalDragPayload, packet:jamDeckExternalDragPacket, Controller:JamDeckExternalDragController})`, {Buffer, console:{...console,error(){}}, spawn:(...args)=>spawnChild(...args), setTimeout(fn){const id={};timers.set(id,fn);return id;}, clearTimeout(id){timers.delete(id);}, setIcon(){}, Notice:class {constructor(text){notices.push(text);}}, process:{platform:"win32"}, require(name){if(name==="@electron/remote")return {getCurrentWindow:()=>({}),process:{pid:123}};return require(name);}});
+const nativeHandle=Buffer.alloc(8,1);
+const api = vm.runInNewContext(`${source}\njamDeckExternalDragBinary=()=>"test-native.node";\n({entries:jamDeckExternalDragEntries, plain:jamDeckRenderedPlainText, payload:jamDeckBuildExternalDragPayload, packet:jamDeckExternalDragPacket, Controller:JamDeckExternalDragController})`, {Buffer, console:{...console,error(){}}, setIcon(){}, Notice:class {constructor(text){notices.push(text);}}, process:{platform:"win32"}, require(name){if(name==="@electron/remote")return {getCurrentWindow:()=>({getNativeWindowHandle:()=>nativeHandle}),process:{pid:123}};return require(name);}});
 const plain = value => JSON.parse(JSON.stringify(value));
 const node = data => ({getData:()=>data});
 const selected = [
@@ -124,28 +123,24 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   rebuilding.controller.sync(newMenu,false);
   assert.equal(rebuilding.controller.button.disabled,false);
   assert.equal(rebuilding.plugin.externalDragClipboardOwner,null);
-  const {EventEmitter}=require("events");
-  const child=new EventEmitter();
-  child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();
-  let ended=0,killed=0;
-  child.stdin.write=()=>{};child.stdin.end=()=>ended++;
-  child.kill=()=>{killed++;setImmediate(()=>child.emit("close",null));return true;};
-  spawnChild=()=>child;
-  const hanging=fixture(), oldNotices=notices.length;
-  const cancelled=hanging.controller.start(busyPayload);
-  hanging.controller.destroy();
-  assert.equal(ended,1);
-  assert.equal(hanging.controller.active,true,"wait for the child to actually exit");
-  for(const [id,callback] of [...timers]){timers.delete(id);callback();}
-  await cancelled;
-  assert.equal(killed,1);
-  assert.equal(hanging.controller.active,false);
-  assert.equal(hanging.plugin.externalDragClipboardOwner,null);
-  assert.equal(timers.size,0);
-  assert.equal(hanging.toolbar.ownerWindow.events.size,0);
-  child.stdout.emit("data",Buffer.from('{"status":"dropped"}'));
-  child.emit("close",0);
-  assert.equal(notices.length,oldNotices,"late child events must not report success");
+  const native=fixture();let calls=0;
+  native.controller.windowsNative={drag(handle,packet){
+    calls++;
+    assert.equal(handle,nativeHandle);
+    assert.equal(packet.readUInt32LE(4),123);
+    assert.equal(native.plugin.externalDragClipboardOwner,native.controller);
+    return {status:"cancelled",queryCount:2};
+  }};
+  await native.controller.start(busyPayload);
+  await native.controller.start(busyPayload);
+  assert.equal(calls,2,"native cancellation must allow the next drag");
+  assert.equal(native.controller.active,false);
+  assert.equal(native.plugin.externalDragClipboardOwner,null);
+  assert.equal(native.toolbar.ownerWindow.events.size,0);
+  native.controller.windowsNative.drag=()=>{throw Error("invalid source window");};
+  await native.controller.start(busyPayload);
+  assert.equal(native.controller.active,false);
+  assert.equal(native.plugin.externalDragClipboardOwner,null,"native exception must release ownership");
   const throwingCancel=fixture();
   throwingCancel.controller.cancelNative=()=>{throw Error("window closed");};
   assert.doesNotThrow(()=>throwingCancel.controller.destroy());

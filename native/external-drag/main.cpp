@@ -4,38 +4,57 @@
 #include <shlobj.h>
 #include <shellapi.h>
 #include <algorithm>
-#include <atomic>
 #include <cstdio>
-#include <fcntl.h>
-#include <io.h>
-#include <iostream>
+#include <cstring>
+#include <memory>
+#include <node_api.h>
+#include <delayimp.h>
 #include <string>
-#include <thread>
 #include <vector>
+
+// Node-API imports belong to the host executable (Obsidian/Electron or Node).
+static FARPROC WINAPI nodeApiDelayLoad(unsigned event, PDelayLoadInfo info) {
+    if (event == dliNotePreLoadLibrary && !_stricmp(info->szDll, "node.exe"))
+        return reinterpret_cast<FARPROC>(GetModuleHandleW(nullptr));
+    return nullptr;
+}
+extern "C" const PfnDliHook __pfnDliNotifyHook2 = nodeApiDelayLoad;
 
 struct Payload { uint32_t owner = 0; std::wstring text, textFile; std::vector<std::wstring> files; };
 struct Target { HWND root = nullptr; DWORD pid = 0; bool chat = false, shell = false; };
 struct Context {
     Payload payload;
     Target released;
-    HWND notified = nullptr, filesReadTarget = nullptr;
-    bool frozen = false;
-    std::atomic_bool cancelled{false};
+    HWND sourceWindow = nullptr, filesReadTarget = nullptr;
+    bool frozen = false, cancelled = false;
+    uint32_t queryCount = 0;
 };
-static bool readNumber(uint32_t& n) { return fread(&n, 4, 1, stdin) == 1; }
-static bool readString(std::wstring& s) {
-    uint32_t bytes;
-    if (!readNumber(bytes) || bytes % 2 || bytes > 32 * 1024 * 1024) return false;
-    s.resize(bytes / 2);
-    return !bytes || fread(s.data(), 1, bytes, stdin) == bytes;
-}
-static bool readPayload(Payload& p) {
+class PacketReader {
+    const unsigned char* cursor;
+    size_t remaining;
+public:
+    PacketReader(const void* bytes, size_t length) : cursor(static_cast<const unsigned char*>(bytes)), remaining(length) {}
+    bool read(void* output, size_t length) {
+        if (length > remaining) return false;
+        if (length) memcpy(output, cursor, length);
+        cursor += length; remaining -= length; return true;
+    }
+    bool number(uint32_t& value) { return read(&value, sizeof(value)); }
+    bool string(std::wstring& value) {
+        uint32_t bytes;
+        if (!number(bytes) || bytes % 2 || bytes > remaining || bytes > 32 * 1024 * 1024) return false;
+        value.resize(bytes / 2); return read(value.data(), bytes);
+    }
+    bool ended() const { return remaining == 0; }
+};
+static bool readPayload(Payload& p, const void* bytes, size_t length) {
+    PacketReader reader(bytes, length);
     char magic[4]; uint32_t count;
-    if (fread(magic, 1, 4, stdin) != 4 || memcmp(magic, "JD01", 4)) return false;
-    if (!readNumber(p.owner) || !readString(p.text) || !readString(p.textFile) || !readNumber(count) || count > 10000) return false;
+    if (!reader.read(magic, 4) || memcmp(magic, "JD01", 4)) return false;
+    if (!reader.number(p.owner) || !reader.string(p.text) || !reader.string(p.textFile) || !reader.number(count) || count > 10000) return false;
     p.files.resize(count);
-    for (auto& file : p.files) if (!readString(file)) return false;
-    return !p.text.empty() || !p.files.empty();
+    for (auto& file : p.files) if (!reader.string(file)) return false;
+    return reader.ended() && (!p.text.empty() || !p.files.empty());
 }
 static Target targetAtCursor() {
     POINT point; GetCursorPos(&point);
@@ -56,19 +75,21 @@ static Target targetAtCursor() {
 }
 static Target target(const Context& c) { return c.frozen ? c.released : targetAtCursor(); }
 static std::vector<std::wstring> offeredFiles(const Context& c) {
+    if (c.cancelled || target(c).pid == c.payload.owner) return {};
     auto files = c.payload.files;
     // File destinations keep the body as a TXT. Chat receives editable text.
     if (!c.payload.text.empty() && target(c).shell && !c.payload.textFile.empty()) files.push_back(c.payload.textFile);
     return files;
 }
-static bool offersText(const Context& c) { return !c.payload.text.empty() && !(target(c).chat && !c.payload.files.empty()); }
+static bool offersText(const Context& c) { const auto t = target(c); return !c.cancelled && t.pid != c.payload.owner && !c.payload.text.empty() && !(t.chat && !c.payload.files.empty()); }
 static bool offersFiles(const Context& c) { return !offeredFiles(c).empty(); }
 
 class DataObject final : public IDataObject {
     LONG refs = 1;
+    std::shared_ptr<Context> retained;
     Context& context;
 public:
-    explicit DataObject(Context& c) : context(c) {}
+    explicit DataObject(std::shared_ptr<Context> c) : retained(std::move(c)), context(*retained) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER; *out = nullptr;
         if (iid == IID_IUnknown || iid == IID_IDataObject) { *out = static_cast<IDataObject*>(this); AddRef(); return S_OK; }
@@ -124,27 +145,23 @@ public:
     HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
 };
 
-class DropSource final : public IDropSource, public IDropSourceNotify {
+class DropSource final : public IDropSource {
     LONG refs = 1;
+    std::shared_ptr<Context> retained;
     Context& context;
-    DWORD lastKeys = MAXDWORD, lastEffect = MAXDWORD;
 public:
-    explicit DropSource(Context& c) : context(c) {}
+    explicit DropSource(std::shared_ptr<Context> c) : retained(std::move(c)), context(*retained) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
         if (!out) return E_POINTER; *out = nullptr;
         if (iid == IID_IUnknown || iid == IID_IDropSource) *out = static_cast<IDropSource*>(this);
-        else if (iid == IID_IDropSourceNotify) *out = static_cast<IDropSourceNotify*>(this);
         else return E_NOINTERFACE;
         AddRef(); return S_OK;
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
     ULONG STDMETHODCALLTYPE Release() override { const auto n = InterlockedDecrement(&refs); if (!n) delete this; return n; }
     HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
-        if (keys != lastKeys || escape || context.cancelled) {
-            fprintf(stderr, "continue keys=%lu physical=%d escape=%d cancelled=%d\n", keys, !!(GetAsyncKeyState(VK_LBUTTON) & 0x8000), escape, static_cast<int>(context.cancelled.load()));
-            lastKeys = keys;
-        }
-        if (escape || context.cancelled) return DRAGDROP_S_CANCEL;
+        ++context.queryCount;
+        if (escape || context.cancelled || !IsWindow(context.sourceWindow)) return DRAGDROP_S_CANCEL;
         if (!(keys & MK_LBUTTON)) {
             context.released = targetAtCursor(); context.frozen = true;
             if (!context.released.root || context.released.pid == context.payload.owner) return DRAGDROP_S_CANCEL;
@@ -152,17 +169,7 @@ public:
         }
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD effect) override {
-        if (effect != lastEffect) { fprintf(stderr, "feedback effect=%lu\n", effect); lastEffect = effect; }
-        return DRAGDROP_S_USEDEFAULTCURSORS;
-    }
-    HRESULT STDMETHODCALLTYPE DragEnterTarget(HWND window) override {
-        context.notified = window;
-        DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
-        fprintf(stderr, "enter target=%p pid=%lu\n", window, pid);
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE DragLeaveTarget() override { context.notified = nullptr; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
 };
 
 static bool sameForeground(const Context& c) {
@@ -214,8 +221,10 @@ static bool pasteBody(Context& c, HWND owner) {
     return keyChord('V');
 }
 static int selfTest() {
-    Context c; c.frozen = true; c.payload.text = L"[制作]\r\n中文"; c.payload.textFile = L"C:\\测试\\正文.txt"; c.payload.files = {L"C:\\测试\\视频.mp4", L"C:\\测试\\图片.png"};
-    DataObject* data = new DataObject(c);
+    auto state = std::make_shared<Context>(); auto& c = *state;
+    c.payload.owner = 1; c.released.pid = 2;
+    c.frozen = true; c.payload.text = L"[制作]\r\n中文"; c.payload.textFile = L"C:\\测试\\正文.txt"; c.payload.files = {L"C:\\测试\\视频.mp4", L"C:\\测试\\图片.png"};
+    DataObject* data = new DataObject(state);
     FORMATETC file{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL}, text{CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
     STGMEDIUM medium{};
     c.released.chat = true;
@@ -231,32 +240,79 @@ static int selfTest() {
     if (data->QueryGetData(&file) != DV_E_FORMATETC || FAILED(data->GetData(&text, &medium))) return 5;
     auto body = static_cast<wchar_t*>(GlobalLock(medium.hGlobal));
     const bool equal = c.payload.text == body; GlobalUnlock(medium.hGlobal); ReleaseStgMedium(&medium);
-    data->Release();
     if (!equal) return 6;
-    std::cout << "{\"selfTest\":\"passed\"}\n"; return 0;
+    c.released.pid = c.payload.owner;
+    if (data->QueryGetData(&text) != DV_E_FORMATETC || data->QueryGetData(&file) != DV_E_FORMATETC) return 7;
+    IEnumFORMATETC* formats = nullptr;
+    if (FAILED(data->EnumFormatEtc(DATADIR_GET, &formats))) return 8;
+    FORMATETC format{}; ULONG count = 0;
+    const auto enumerated = formats->Next(1, &format, &count); formats->Release();
+    if (enumerated != S_FALSE || count != 0) return 9;
+    auto source = new DropSource(state);
+    if (source->QueryContinueDrag(TRUE, MK_LBUTTON) != DRAGDROP_S_CANCEL) return 10;
+    source->Release();
+    c.released.pid = 2;
+    std::weak_ptr<Context> lifetime = state;
+    state.reset();
+    if (lifetime.expired() || FAILED(data->GetData(&text, &medium))) return 11;
+    ReleaseStgMedium(&medium); data->Release();
+    if (!lifetime.expired()) return 12;
+    return 0;
 }
-int main(int argc, char** argv) {
-    _setmode(_fileno(stdin), _O_BINARY);
-    if (FAILED(OleInitialize(nullptr))) { std::cout << "{\"status\":\"error\",\"reason\":\"OLE initialization failed\"}\n"; return 1; }
-    if (argc == 2 && !strcmp(argv[1], "--self-test")) { const int result = selfTest(); OleUninitialize(); return result; }
-    Context context;
-    if (!readPayload(context.payload)) { std::cout << "{\"status\":\"error\",\"reason\":\"Invalid drag payload\"}\n"; OleUninitialize(); return 1; }
-    // EOF from a closed Canvas / unloaded plugin cancels the drag and any delayed paste.
-    std::thread([&context]() { while (fgetc(stdin) != EOF) {} context.cancelled = true; }).detach();
-    const bool pressed = !!(GetAsyncKeyState(VK_LBUTTON) & 0x8000);
-    fprintf(stderr, "begin physical=%d\n", pressed);
-    if (!pressed) { std::cout << "{\"status\":\"cancelled\"}\n" << std::flush; ExitProcess(0); }
-    HWND clipboardOwner = CreateWindowExW(0, L"STATIC", L"JamDeck drag clipboard", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandle(nullptr), nullptr);
-    auto data = new DataObject(context); auto source = new DropSource(context);
+static napi_value stringValue(napi_env env, const char* text) {
+    napi_value value; napi_create_string_utf8(env, text, NAPI_AUTO_LENGTH, &value); return value;
+}
+static napi_value dragResult(napi_env env, bool dropped, bool chat, bool pasted, uint32_t queries) {
+    napi_value result, value; napi_create_object(env, &result);
+    napi_set_named_property(env, result, "status", stringValue(env, dropped ? "dropped" : "cancelled"));
+    napi_set_named_property(env, result, "target", stringValue(env, chat ? "chat" : "files"));
+    napi_get_boolean(env, pasted, &value); napi_set_named_property(env, result, "pasteInjected", value);
+    napi_create_uint32(env, queries, &value); napi_set_named_property(env, result, "queryCount", value);
+    return result;
+}
+static napi_value drag(napi_env env, napi_callback_info info) {
+    size_t argc = 2, handleSize = 0, packetSize = 0; napi_value args[2]; void* handleBytes = nullptr; void* packet = nullptr;
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc != 2 || napi_get_buffer_info(env, args[0], &handleBytes, &handleSize) != napi_ok || handleSize != sizeof(HWND) ||
+        napi_get_buffer_info(env, args[1], &packet, &packetSize) != napi_ok) {
+        napi_throw_type_error(env, nullptr, "Expected native window handle and drag packet"); return nullptr;
+    }
+    HWND window; memcpy(&window, handleBytes, sizeof(window));
+    DWORD pid = 0; const DWORD thread = GetWindowThreadProcessId(window, &pid);
+    if (!IsWindow(window) || thread != GetCurrentThreadId() || pid != GetCurrentProcessId()) {
+        napi_throw_error(env, nullptr, "Drag must run on the source window UI thread"); return nullptr;
+    }
+    auto state = std::make_shared<Context>(); auto& context = *state;
+    context.sourceWindow = window;
+    if (!readPayload(context.payload, packet, packetSize) || context.payload.owner != pid) {
+        napi_throw_error(env, nullptr, "Invalid drag payload"); return nullptr;
+    }
+    if (GetAncestor(GetForegroundWindow(), GA_ROOT) != GetAncestor(window, GA_ROOT) || !(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+        return dragResult(env, false, false, false, 0);
+    if (FAILED(OleInitialize(nullptr))) { napi_throw_error(env, nullptr, "OLE initialization failed"); return nullptr; }
+    // Everything inside the OLE loop is native. The calling renderer is waiting
+    // synchronously, so no callbacks, IPC requests or JS timers may be required.
+    ReleaseCapture();
+    auto data = new DataObject(state); auto source = new DropSource(state);
     DWORD effect = DROPEFFECT_NONE;
     const HRESULT result = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
-    fprintf(stderr, "end result=%08lx effect=%lu\n", result, effect);
     const bool dropped = result == DRAGDROP_S_DROP && (effect & DROPEFFECT_COPY);
+    context.cancelled = !dropped;
+    context.frozen = true;
     bool pasted = false;
-    if (dropped && context.released.chat && context.filesReadTarget == context.released.root && !context.payload.text.empty() && !context.payload.files.empty()) pasted = pasteBody(context, clipboardOwner);
-    source->Release(); data->Release(); DestroyWindow(clipboardOwner);
-    std::cout << "{\"status\":\"" << (dropped ? "dropped" : "cancelled") << "\",\"target\":\"" << (context.released.chat ? "chat" : "files") << "\",\"pasteInjected\":" << (pasted ? "true" : "false") << "}\n" << std::flush;
+    if (dropped && context.released.chat && context.filesReadTarget == context.released.root && !context.payload.text.empty() && !context.payload.files.empty()) pasted = pasteBody(context, window);
+    source->Release(); data->Release();
     OleUninitialize();
-    // The stdin watcher is process-scoped; do not destroy its referenced Context.
-    ExitProcess(0);
+    if (FAILED(result)) { napi_throw_error(env, nullptr, "System drag operation failed"); return nullptr; }
+    return dragResult(env, dropped, context.released.chat, pasted, context.queryCount);
 }
+static napi_value test(napi_env env, napi_callback_info) {
+    napi_value value; napi_create_int32(env, selfTest(), &value); return value;
+}
+static napi_value init(napi_env env, napi_value exports) {
+    napi_value function;
+    napi_create_function(env, "drag", NAPI_AUTO_LENGTH, drag, nullptr, &function); napi_set_named_property(env, exports, "drag", function);
+    napi_create_function(env, "selfTest", NAPI_AUTO_LENGTH, test, nullptr, &function); napi_set_named_property(env, exports, "selfTest", function);
+    return exports;
+}
+NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
