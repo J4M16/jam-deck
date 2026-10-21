@@ -2171,7 +2171,6 @@ const DEFAULT_SETTINGS = {
   // 搜索/联网类提问交给本机 DeepSeek Harness（dsh）执行；关闭后全部走上方模型。
   harnessSearch: true,
   aiLocalWorkspacePath: "",
-  canvasExportDir: "",
   aiFabPos: null,
   // 归档路径可配置（P1-1 + 0.30）：mode 决定「文件 / 目录」两种形式，默认都是文件。
   // 文件模式 = 单个 markdown 按日期分节；目录模式 = 目录下按日期建 YYYY-MM-DD.md。
@@ -4067,7 +4066,6 @@ class CanvasInkOverlay {
 }
 
 const JAM_DECK_CANVAS_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "avif"]);
-const JAM_DECK_CANVAS_VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "m4v", "mkv", "ogv"]);
 const JAM_DECK_STACK_OVERLAP_THRESHOLD = 0.5;
 const JAM_DECK_STACK_DETACH_THRESHOLD = 0.4;
 const JAM_DECK_STACK_SHRINK_DEAD_BAND = 0.95;
@@ -4106,44 +4104,6 @@ function jamDeckCanvasStackKind(data) {
 function jamDeckCanvasFileExtension(data) {
   if (!data || data.type !== "file" || typeof data.file !== "string" || !data.file.trim()) return "";
   return data.file.toLowerCase().split(/[?#]/)[0].split(".").pop() || "";
-}
-
-function jamDeckIsCanvasExportableMedia(data) {
-  const extension = jamDeckCanvasFileExtension(data);
-  return JAM_DECK_CANVAS_IMAGE_EXTENSIONS.has(extension) || JAM_DECK_CANVAS_VIDEO_EXTENSIONS.has(extension);
-}
-
-function jamDeckSelectedExportableCanvasFiles(canvas, vault) {
-  if (!canvas || !canvas.selection || typeof canvas.selection.values !== "function") return [];
-  const files = [];
-  const seen = new Set();
-  for (const node of canvas.selection.values()) {
-    let data = null;
-    try { data = node && typeof node.getData === "function" ? node.getData() : null; } catch (error) { data = null; }
-    if (!jamDeckIsCanvasExportableMedia(data)) continue;
-    const file = vault && typeof vault.getAbstractFileByPath === "function" ? vault.getAbstractFileByPath(data.file) : null;
-    if (!file || !file.path || Array.isArray(file.children)) continue;
-    if (seen.has(file.path)) continue;
-    seen.add(file.path);
-    files.push(file);
-  }
-  return files;
-}
-
-function jamDeckUniqueOsCopyPath(dir, filename, existsSync) {
-  const pathApi = require("path");
-  const name = String(filename || "").replace(/[\\/]/g, "");
-  if (!dir || !name) return "";
-  const parsed = pathApi.parse(name);
-  let dest = pathApi.join(dir, name);
-  let n = 1;
-  const exists = typeof existsSync === "function" ? existsSync : () => false;
-  while (exists(dest)) {
-    dest = pathApi.join(dir, `${parsed.name} (${n})${parsed.ext}`);
-    n += 1;
-    if (n > 9999) break;
-  }
-  return dest;
 }
 
 function jamDeckNextCanvasFileName(fileExists) {
@@ -9817,7 +9777,7 @@ function jamDeckIsNativeCanvasFocusButton(button) {
   if (!button || !button.getAttribute) return false;
   if (button.classList && (
     button.classList.contains("jam-deck-canvas-ai-toolbar")
-    || button.classList.contains("jam-deck-canvas-export-toolbar")
+    || button.classList.contains("jam-deck-canvas-drag-out")
     || button.classList.contains("jam-deck-canvas-folder-toolbar")
   )) return false;
   const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""}`;
@@ -9887,10 +9847,8 @@ class CanvasSelectionToolbarController {
     this.ownerWindow = entry.ownerDocument && entry.ownerDocument.defaultView;
     this.disposers = [];
     this.aiToolbarButton = null;
-    this.exportToolbarButton = null;
     this.externalDrag = null;
     this.aiPressedNode = null;
-    this.exportPressedFiles = null;
     this.selectedAiNode = null;
     this.toolbarFrame = 0;
     this.toolbarObserver = null;
@@ -10003,47 +9961,6 @@ class CanvasSelectionToolbarController {
     return button;
   }
 
-  collectExportableFiles() {
-    const plugin = this.runtime && this.runtime.deckView && this.runtime.deckView.plugin;
-    const vault = plugin && plugin.app && plugin.app.vault;
-    return jamDeckSelectedExportableCanvasFiles(this.canvas, vault);
-  }
-
-  ensureExportToolbarButton(menu) {
-    if (!menu) return null;
-    if (this.exportToolbarButton && this.exportToolbarButton.isConnected && this.exportToolbarButton.parentElement === menu) return this.exportToolbarButton;
-    if (this.exportToolbarButton) this.exportToolbarButton.remove();
-    const existing = menu.querySelector(".jam-deck-canvas-export-toolbar");
-    if (existing) existing.remove();
-    const button = this.entry.ownerDocument.createElement("button");
-    button.type = "button";
-    button.className = "clickable-icon jam-deck-canvas-export-toolbar";
-    button.setAttribute("aria-label", "导出选中附件");
-    setIcon(button, "download");
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.exportPressedFiles = this.collectExportableFiles();
-    }, true);
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const files = (this.exportPressedFiles && this.exportPressedFiles.length)
-        ? this.exportPressedFiles
-        : this.collectExportableFiles();
-      this.exportPressedFiles = null;
-      const plugin = this.runtime && this.runtime.deckView && this.runtime.deckView.plugin;
-      if (!files.length || !plugin || typeof plugin.exportCanvasMediaFiles !== "function") {
-        new Notice("Jam Deck：没有可导出的图片或视频");
-        return;
-      }
-      void plugin.exportCanvasMediaFiles(files);
-    }, true);
-    menu.appendChild(button);
-    this.exportToolbarButton = button;
-    return button;
-  }
-
   getSingleSelectedNode() {
     if (!this.canvas || !this.canvas.selection || typeof this.canvas.selection.values !== "function") return null;
     const selected = Array.from(this.canvas.selection.values()).filter(Boolean);
@@ -10126,13 +10043,11 @@ class CanvasSelectionToolbarController {
     if (!menu) {
       this.externalDrag?.sync(null, true);
       if (this.aiToolbarButton) this.aiToolbarButton.style.display = "none";
-      if (this.exportToolbarButton) this.exportToolbarButton.style.display = "none";
       this.selectedAiNode = null;
       return;
     }
     this.hijackNativeFocusButton(menu);
     const aiButton = this.ensureAiToolbarButton(menu);
-    const exportButton = this.ensureExportToolbarButton(menu);
     const stack = this.entry.imageStackController;
     const blocked = !!(stack && (stack.previewWrapper || stack.imageFocus || stack.drag));
     if (!this.externalDrag) this.externalDrag = new JamDeckExternalDragController(this);
@@ -10141,10 +10056,6 @@ class CanvasSelectionToolbarController {
     this.selectedAiNode = blocked ? null : (selected.text || selected.image);
     if (aiButton) {
       aiButton.style.display = this.selectedAiNode ? "" : "none";
-    }
-    const exportable = blocked ? [] : this.collectExportableFiles();
-    if (exportButton) {
-      exportButton.style.display = exportable.length ? "" : "none";
     }
   }
 
@@ -10171,12 +10082,7 @@ class CanvasSelectionToolbarController {
       try { this.aiToolbarButton.remove(); } catch (error) {}
       this.aiToolbarButton = null;
     }
-    if (this.exportToolbarButton) {
-      try { this.exportToolbarButton.remove(); } catch (error) {}
-      this.exportToolbarButton = null;
-    }
     this.aiPressedNode = null;
-    this.exportPressedFiles = null;
     this.selectedAiNode = null;
     this.canvas = null;
     this.root = null;
@@ -10292,7 +10198,7 @@ class JamDeckExternalDragController {
       button.draggable = false;
       button.setAttribute("aria-label", "拖出所选内容");
       button.setAttribute("title", "拖到应用或桌面；桌面正文保存为 TXT");
-      setIcon(button, "share");
+      setIcon(button, "hand");
       button.addEventListener("pointerdown", event => this.beginGesture(event, menu), true);
       button.addEventListener("click", event => {
         event.preventDefault();
@@ -17273,9 +17179,6 @@ class JamDeckPlugin extends Plugin {
     this.settings.aiLocalWorkspacePath = typeof this.settings.aiLocalWorkspacePath === "string"
       ? this.settings.aiLocalWorkspacePath.trim()
       : "";
-    this.settings.canvasExportDir = typeof this.settings.canvasExportDir === "string"
-      ? this.settings.canvasExportDir.trim()
-      : "";
     this.settings.islandLeaveMs = jamDeckNormalizeIslandLeaveMs(this.settings.islandLeaveMs);
     return repaired;
   }
@@ -18382,142 +18285,6 @@ class JamDeckPlugin extends Plugin {
     this.lastImageSignature = this.imageSignature(image);
     new Notice("Jam Deck：Canvas 图片已复制");
     return true;
-  }
-
-  async showElectronDirectoryPicker(defaultPath) {
-    let dialog = null;
-    let win = null;
-    try {
-      const electron = require("electron");
-      if (electron.remote && electron.remote.dialog) {
-        dialog = electron.remote.dialog;
-        win = typeof electron.remote.getCurrentWindow === "function" ? electron.remote.getCurrentWindow() : null;
-      } else if (electron.dialog && typeof electron.dialog.showOpenDialog === "function") {
-        dialog = electron.dialog;
-        win = electron.BrowserWindow && typeof electron.BrowserWindow.getFocusedWindow === "function"
-          ? electron.BrowserWindow.getFocusedWindow()
-          : null;
-      }
-    } catch (error) {}
-    if (!dialog) {
-      try {
-        const remote = require("@electron/remote");
-        if (remote && remote.dialog) {
-          dialog = remote.dialog;
-          win = typeof remote.getCurrentWindow === "function" ? remote.getCurrentWindow() : null;
-        }
-      } catch (error) {}
-    }
-    if (!dialog || typeof dialog.showOpenDialog !== "function") return undefined;
-    const options = {
-      title: "选择导出位置",
-      properties: ["openDirectory", "createDirectory"],
-    };
-    if (defaultPath) options.defaultPath = defaultPath;
-    try {
-      const result = win
-        ? await dialog.showOpenDialog(win, options)
-        : await dialog.showOpenDialog(options);
-      if (!result || result.canceled || !result.filePaths || !result.filePaths[0]) return null;
-      return String(result.filePaths[0]);
-    } catch (error) {
-      console.error("jam-deck export directory dialog failed", error);
-      return undefined;
-    }
-  }
-
-  showPowerShellDirectoryPicker(defaultPath) {
-    const { exec } = require("child_process");
-    const safe = String(defaultPath || "").replace(/'/g, "''");
-    const ps = `
-Add-Type -AssemblyName System.Windows.Forms | Out-Null
-[System.Windows.Forms.Application]::EnableVisualStyles()
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = '选择导出位置'
-$d.ShowNewFolderButton = $true
-if ('${safe}') { try { $d.SelectedPath = '${safe}' } catch {} }
-$r = $d.ShowDialog()
-if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
-  [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
-  Write-Output $d.SelectedPath
-}
-`;
-    const encoded = Buffer.from(ps, "utf16le").toString("base64");
-    return new Promise((resolve) => {
-      exec(`powershell -NoProfile -STA -EncodedCommand ${encoded}`, { timeout: 120000, windowsHide: true }, (error, stdout) => {
-        if (error) {
-          resolve(null);
-          return;
-        }
-        const line = String(stdout || "").trim().split(/\r?\n/).filter(Boolean).pop() || "";
-        resolve(line || null);
-      });
-    });
-  }
-
-  async pickCanvasExportDirectory() {
-    const defaultPath = this.settings && this.settings.canvasExportDir || "";
-    const electronPick = await this.showElectronDirectoryPicker(defaultPath);
-    let picked = electronPick;
-    if (picked === undefined) {
-      picked = process.platform === "win32" ? await this.showPowerShellDirectoryPicker(defaultPath) : null;
-      if (picked == null && process.platform !== "win32") {
-        new Notice("Jam Deck：当前环境无法选择导出目录");
-      }
-    }
-    if (!picked) return null;
-    this.settings.canvasExportDir = picked;
-    try { await this.saveSettings(); } catch (error) {}
-    return picked;
-  }
-
-  async copyVaultFileToOsDir(file, dir) {
-    const fs = require("fs");
-    const pathApi = require("path");
-    if (!file || !file.path || !dir) throw new Error("缺少导出文件或目录");
-    const dest = jamDeckUniqueOsCopyPath(dir, pathApi.basename(file.path), (candidate) => fs.existsSync(candidate));
-    if (!dest) throw new Error("无法生成导出路径");
-    try {
-      const src = this.absoluteFromVaultRel(file.path);
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, dest);
-        return dest;
-      }
-    } catch (error) {}
-    const data = await this.app.vault.readBinary(file);
-    fs.writeFileSync(dest, Buffer.from(data));
-    return dest;
-  }
-
-  async exportCanvasMediaFiles(files) {
-    const list = Array.isArray(files) ? files.filter((file) => file && file.path && !Array.isArray(file.children)) : [];
-    if (!list.length) {
-      new Notice("Jam Deck：没有可导出的图片或视频");
-      return false;
-    }
-    const dir = await this.pickCanvasExportDirectory();
-    if (!dir) return false;
-    let copied = 0;
-    let skipped = 0;
-    for (const file of list) {
-      try {
-        await this.copyVaultFileToOsDir(file, dir);
-        copied += 1;
-      } catch (error) {
-        console.error("jam-deck canvas export failed", file && file.path, error);
-        skipped += 1;
-      }
-    }
-    if (copied && !skipped) {
-      new Notice(copied === 1 ? "Jam Deck：已导出 1 个附件" : `Jam Deck：已导出 ${copied} 个附件`);
-      return true;
-    }
-    if (copied && skipped) {
-      new Notice(`Jam Deck：已导出 ${copied} 个附件，跳过 ${skipped} 个`);
-      return true;
-    }
-    new Notice("Jam Deck：导出失败");
-    return false;
   }
 
   async hydrateClipboardImageDrag(card, item, resourceUrl) {
@@ -22490,11 +22257,4 @@ JamDeckPlugin.dshRpc = jamDeckDshRpc;
 JamDeckPlugin.prepareDshWorkspace = jamDeckPrepareDshWorkspace;
 JamDeckPlugin.AI_LOCAL_WEB_URL = AI_LOCAL_WEB_URL;
 JamDeckPlugin.selectedCanvasNodes = jamDeckSelectedCanvasNodes;
-JamDeckPlugin.canvasExportHelpers = {
-  isMedia: jamDeckIsCanvasExportableMedia,
-  files: jamDeckSelectedExportableCanvasFiles,
-  uniquePath: jamDeckUniqueOsCopyPath,
-  imageExtensions: JAM_DECK_CANVAS_IMAGE_EXTENSIONS,
-  videoExtensions: JAM_DECK_CANVAS_VIDEO_EXTENSIONS,
-};
 module.exports = JamDeckPlugin;

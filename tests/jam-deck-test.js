@@ -135,17 +135,6 @@ assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-stage-toggle
 assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl"), "Canvas AI must target the native selection popup, not the bottom card palette");
 assert(!pluginSource.includes("const nativeMenu = this.canvas && this.canvas.cardMenuEl"), "Canvas AI must not resolve the bottom card palette");
 assert(pluginSource.includes("if (selected.length !== 1) return { image: null, text: null }"), "Canvas AI must only appear for one authoritative selected node");
-assert(pluginSource.includes("ensureExportToolbarButton(menu)"), "Canvas export must mount on the native selection popup");
-assert(pluginSource.includes('className = "clickable-icon jam-deck-canvas-export-toolbar"'), "Canvas export must reuse native clickable-icon chrome");
-assert(pluginSource.includes('setIcon(button, "download")'), "Canvas export must use the download icon");
-assert(pluginSource.includes('setAttribute("aria-label", "导出选中附件")'), "Canvas export must expose an export label");
-assert(pluginSource.includes("this.canvas && this.canvas.menu && this.canvas.menu.menuEl") && pluginSource.includes("jam-deck-canvas-export-toolbar"), "Canvas export must live on .canvas-menu, not a new Spatial bar");
-assert(pluginSource.includes("jamDeckSelectedExportableCanvasFiles") && pluginSource.includes("JAM_DECK_CANVAS_VIDEO_EXTENSIONS"), "Canvas export must collect images, GIFs, and videos from the current selection");
-assert(pluginSource.includes("exportCanvasMediaFiles(files)") && pluginSource.includes("copyFileSync"), "Canvas export must copy vault attachments to a chosen OS folder");
-assert(pluginSource.includes("showOpenDialog") && pluginSource.includes("FolderBrowserDialog"), "Canvas export must pick a destination directory with a system folder dialog");
-assert(pluginSource.includes("if (this.exportToolbarButton && this.exportToolbarButton.isConnected && this.exportToolbarButton.parentElement === menu) return this.exportToolbarButton;"), "Canvas export must not rewrite its icon after the button is mounted");
-assert(pluginSource.includes("this.exportToolbarButton.remove()"), "Canvas export must remove its toolbar button on destroy");
-assert(styleSource.includes(".jam-deck-canvas-leaf .jam-deck-canvas-export-toolbar"), "Canvas export styling must stay inside the embedded Canvas leaf");
 assert(pluginSource.includes("hijackNativeFocusButton(menu)"), "native Canvas focus must be hijacked on the selection toolbar");
 assert(pluginSource.includes("onFocusHotkey(event)") && pluginSource.includes('code === "KeyF"'), "fullscreen preview must bind F as a selection-toolbar hotkey including video KeyF");
 assert(pluginSource.includes("isToolbarArmed()") && pluginSource.includes("openSelectedNodeFocus()"), "F must require the floating selection toolbar before opening fullscreen preview");
@@ -808,39 +797,9 @@ assert(!JamDeckPlugin.isNativeCanvasFocusButton({
   classList: { contains: (name) => name === "jam-deck-canvas-ai-toolbar" },
 }), "Jam Deck toolbar actions must not be treated as the native focus button");
 assert(!JamDeckPlugin.isNativeCanvasFocusButton({
-  getAttribute: (name) => name === "aria-label" ? "导出选中附件" : "",
-  classList: { contains: (name) => name === "jam-deck-canvas-export-toolbar" },
-}), "Canvas export must not be treated as the native focus button");
-const canvasExport = JamDeckPlugin.canvasExportHelpers;
-assert(canvasExport, "Canvas export helpers must be exported for fixtures");
-assert(canvasExport.isMedia({ type: "file", file: "shot.gif" }), "GIF nodes must be exportable");
-assert(canvasExport.isMedia({ type: "file", file: "clip.mp4" }), "video file nodes must be exportable");
-assert(canvasExport.isMedia({ type: "file", file: "Work/pic.webp" }), "image file nodes must be exportable");
-assert(!canvasExport.isMedia({ type: "file", file: "Work/brief.md" }), "Markdown notes must not count as exportable media");
-assert(!canvasExport.isMedia({ type: "text", text: "hello" }), "text nodes must not count as exportable media");
-assert(!canvasExport.isMedia({ type: "link", url: "https://example.com" }), "link nodes must not count as exportable media");
-const exportGif = { getData: () => ({ type: "file", file: "a.gif" }) };
-const exportVideo = { getData: () => ({ type: "file", file: "b.mp4" }) };
-const exportText = { getData: () => ({ type: "text", text: "skip" }) };
-const exportVault = {
-  getAbstractFileByPath: (vaultPath) => ({ path: vaultPath }),
-};
-assert.deepStrictEqual(
-  canvasExport.files({ selection: new Set([exportGif, exportVideo, exportText]) }, exportVault).map((file) => file.path),
-  ["a.gif", "b.mp4"],
-  "multi-select must export only image/GIF/video attachments from the authoritative selection",
-);
-assert.deepStrictEqual(
-  canvasExport.files({ selection: new Set([exportText]) }, exportVault),
-  [],
-  "text-only selection must not expose exportable files",
-);
-const occupied = new Set([path.join("D:", "out", "a.gif")]);
-assert.strictEqual(
-  canvasExport.uniquePath(path.join("D:", "out"), "a.gif", (candidate) => occupied.has(candidate)),
-  path.join("D:", "out", "a (1).gif"),
-  "export must not overwrite an existing file with the same name",
-);
+  getAttribute: (name) => name === "aria-label" ? "拖出所选内容" : "",
+  classList: { contains: (name) => name === "jam-deck-canvas-drag-out" },
+}), "Canvas external drag must not be treated as the native focus button");
 const selectedLinkNode = { getData: () => ({ type: "link", url: "https://miro.com/board" }) };
 assert.deepStrictEqual(
   JamDeckPlugin.selectedCanvasNodes({ selection: new Set([selectedLinkNode]) }),

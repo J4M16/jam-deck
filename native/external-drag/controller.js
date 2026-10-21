@@ -104,7 +104,7 @@ class JamDeckExternalDragController {
       button.draggable = false;
       button.setAttribute("aria-label", "拖出所选内容");
       button.setAttribute("title", "拖到应用或桌面；桌面正文保存为 TXT");
-      setIcon(button, "share");
+      setIcon(button, "hand");
       button.addEventListener("pointerdown", event => this.beginGesture(event, menu), true);
       button.addEventListener("click", event => {
         event.preventDefault();

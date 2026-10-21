@@ -862,8 +862,7 @@ input.jam-deck-countdown-duration {
   opacity: 0;
   transition: none;
 }
-.jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar,
-.jam-deck-canvas-leaf .jam-deck-canvas-export-toolbar {
+.jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar {
   position: relative;
 }
 .jam-deck-canvas-leaf .jam-deck-canvas-ai-toolbar.is-loading {
