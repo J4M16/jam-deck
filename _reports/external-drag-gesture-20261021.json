@@ -1,0 +1,23 @@
+{
+  "version": "1.3.11",
+  "checks": [
+    {
+      "duration": 60,
+      "cancel": "pointerup",
+      "restored": true
+    },
+    {
+      "duration": 550,
+      "cancel": "pointerup",
+      "restored": true
+    },
+    {
+      "duration": 130,
+      "cancel": "Escape",
+      "restored": true
+    }
+  ],
+  "nodes": 5,
+  "unchanged": true,
+  "nativeDragInvoked": false
+}

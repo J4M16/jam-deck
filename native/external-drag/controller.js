@@ -73,6 +73,119 @@ function jamDeckExternalDragBinary(platform) {
   return executable;
 }
 
+// A temporary visual only: animate the real surfaces without editing their
+// inline styles, Canvas coordinates, selection, group membership or payload.
+class JamDeckExternalDragVisual {
+  constructor(toolbar) {
+    this.toolbar = toolbar;
+    this.win = toolbar.ownerWindow;
+    this.root = null;
+    this.sources = [];
+    this.animations = [];
+    this.timer = 0;
+    this.destroyed = false;
+    this.closing = false;
+    this.reduced = toolbar.runtime.deckView.plugin.settings?.animationsEnabled === false;
+  }
+
+  animate(element, keyframes, duration, delay = 0) {
+    const animation = element.animate(keyframes, {
+      duration: this.reduced ? 0 : duration, delay: this.reduced ? 0 : delay,
+      easing: "cubic-bezier(.22, 1, .36, 1)", fill: "both",
+    });
+    this.animations.push(animation);
+  }
+
+  show() {
+    const canvas = this.toolbar.canvas, wrapper = canvas.wrapperEl;
+    const folder = this.toolbar.entry.folderController;
+    const selected = Array.from(canvas.selection?.values?.() || []);
+    const entries = jamDeckExternalDragEntries(canvas, this.toolbar.runtime.deckView.plugin.app.vault);
+    if (entries.length < 2 || !wrapper || !folder) return false;
+    // Batch screen reads before creating animations. Canvas zoom is accounted
+    // for once; original transforms are restored simply by cancelling WAAPI.
+    for (const entry of entries) {
+      const element = selected[entry.index]?.nodeEl;
+      if (!element?.isConnected) continue;
+      const rect = element.getBoundingClientRect(), style = this.win.getComputedStyle(element);
+      if (!rect.width || !rect.height || style.visibility === "hidden" || style.display === "none") continue;
+      this.sources.push({ element, rect, scale: rect.width / element.offsetWidth,
+        transform: style.transform === "none" ? "" : style.transform, opacity: style.opacity });
+    }
+    if (this.sources.length < 2) return false;
+    const centerX = (Math.min(...this.sources.map(s => s.rect.left)) + Math.max(...this.sources.map(s => s.rect.right))) / 2;
+    const centerY = (Math.min(...this.sources.map(s => s.rect.top)) + Math.max(...this.sources.map(s => s.rect.bottom))) / 2;
+    const origin = wrapper.getBoundingClientRect(), doc = this.toolbar.entry.ownerDocument;
+    const root = this.root = doc.createElement("div");
+    root.className = "jam-deck-external-drag-visual";
+    root.setAttribute("aria-hidden", "true");
+    const shell = doc.createElement("div");
+    this.shell = shell;
+    shell.className = "jam-deck-canvas-folder jam-deck-external-drag-folder";
+    shell.style.left = (centerX - origin.left - 100) + "px";
+    shell.style.top = (centerY - origin.top - 75) + "px";
+    // Reuse the authored shell layers, without folder controls, thumbnails,
+    // representatives, interactions or any real folder runtime.
+    const view = { shell };
+    folder.createFolderBackboard(view);
+    folder.createFolderLayers(view);
+    this.front = view.front;
+    shell.append(view.backboard, view.front);
+    root.appendChild(shell);
+    wrapper.appendChild(root);
+    for (const source of this.sources) {
+      const x = (centerX - source.rect.left - source.rect.width / 2) / source.scale;
+      const y = (centerY - source.rect.top - source.rect.height / 2) / source.scale;
+      this.animate(source.element, [
+        { transform: source.transform || "none", opacity: source.opacity },
+        { transform: source.transform + " translate(" + x + "px, " + y + "px)", opacity: 0 },
+      ], 380);
+    }
+    this.animate(shell, [
+      { transform: "translateY(10px)", opacity: 0 },
+      { transform: "translateY(0)", opacity: 1 },
+    ], 280, 60);
+    this.animate(view.front, [
+      { transform: "perspective(260px) rotateX(-38deg)" },
+      { transform: "perspective(260px) rotateX(0deg)" },
+    ], 260, 240);
+    return true;
+  }
+
+  release() {
+    if (this.destroyed || this.closing) return;
+    if (this.reduced || !this.root) { this.destroy(); return; }
+    this.closing = true;
+    const current = this.sources.map(source => {
+      const style = this.win.getComputedStyle(source.element);
+      return { transform: style.transform, opacity: style.opacity };
+    });
+    const folderFrames = [this.shell, this.front].map(element => {
+      const style = this.win.getComputedStyle(element);
+      return { transform: style.transform, opacity: style.opacity };
+    });
+    for (const animation of this.animations) animation.cancel();
+    this.animations = [];
+    this.sources.forEach((source, index) => {
+      if (!source.element.isConnected) return;
+      const restored = this.win.getComputedStyle(source.element);
+      this.animate(source.element, [current[index], { transform: restored.transform, opacity: restored.opacity }], 160);
+    });
+    [this.shell, this.front].forEach((element, index) => this.animate(element, [folderFrames[index], folderFrames[index]], 160));
+    this.animate(this.root, [{ opacity: 1 }, { opacity: 0 }], 160);
+    this.timer = this.win.setTimeout(() => this.destroy(), 160);
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    if (this.timer) this.win.clearTimeout(this.timer);
+    for (const animation of this.animations) animation.cancel();
+    this.animations = [];
+    this.root?.remove();
+  }
+}
+
 class JamDeckExternalDragController {
   constructor(toolbar) {
     this.toolbar = toolbar;
@@ -88,6 +201,7 @@ class JamDeckExternalDragController {
     this.cancelNative = null;
     this.cancelGesture = null;
     this.windowsNative = null;
+    this.visual = null;
   }
 
   sync(menu, blocked) {
@@ -153,41 +267,73 @@ class JamDeckExternalDragController {
     event.preventDefault();
     event.stopImmediatePropagation();
     this.cancelGesture?.();
+    this.visual?.destroy();
+    this.visual = null;
     const current = JSON.stringify(jamDeckExternalDragEntries(this.toolbar.canvas, this.plugin.app.vault));
     const payload = this.pressed = current === this.signature ? this.prepared : null;
     if (this.failed) this.signature = "";
     if (current !== this.signature) this.sync(menu, false);
     const win = this.toolbar.ownerWindow, button = this.button;
+    if (payload) {
+      const visual = new JamDeckExternalDragVisual(this.toolbar);
+      try {
+        if (visual.show()) this.visual = visual;
+        else visual.destroy();
+      } catch (error) {
+        visual.destroy();
+        console.error("jam-deck drag visual failed", error);
+      }
+    }
+    let frame = 0, painted = !this.visual, waiting = false;
     const cleanup = () => {
+      if (frame) win.cancelAnimationFrame(frame);
+      frame = 0;
       win.removeEventListener("pointermove", move, true);
       win.removeEventListener("pointerup", release, true);
       win.removeEventListener("pointercancel", release, true);
-      win.removeEventListener("blur", cleanup, true);
+      win.removeEventListener("blur", cancel, true);
       win.removeEventListener("keydown", key, true);
       try { if (button.hasPointerCapture?.(event.pointerId)) button.releasePointerCapture(event.pointerId); } catch (_) {}
       this.pressed = null;
       this.cancelGesture = null;
     };
-    const release = next => { if (next.pointerId === event.pointerId) cleanup(); };
-    const key = next => { if (next.key === "Escape") cleanup(); };
-    const move = next => {
-      if (next.pointerId !== event.pointerId) return;
-      if (!(next.buttons & 1)) { cleanup(); return; }
-      if (Math.hypot(next.clientX - event.clientX, next.clientY - event.clientY) < 6) return;
-      next.preventDefault();
-      next.stopImmediatePropagation();
-      // Remove pointercancel/blur listeners before the OS takes pointer ownership.
+    const cancel = () => { cleanup(); this.visual?.release(); };
+    const release = next => { if (next.pointerId === event.pointerId) cancel(); };
+    const key = next => { if (next.key === "Escape") cancel(); };
+    const takeover = () => {
+      // Input cleanup must not discard the visual when OLE/AppKit takes over.
       cleanup();
       if (!payload) { new Notice("Jam Deck：内容准备中，请稍后再拖"); return; }
       if (!this.destroyed && !this.active) void this.start(payload);
     };
-    this.cancelGesture = cleanup;
+    const move = next => {
+      if (next.pointerId !== event.pointerId) return;
+      if (!(next.buttons & 1)) { cancel(); return; }
+      if (Math.hypot(next.clientX - event.clientX, next.clientY - event.clientY) < 6) return;
+      next.preventDefault();
+      next.stopImmediatePropagation();
+      waiting = true;
+      if (painted) takeover();
+    };
+    this.cancelGesture = cancel;
     win.addEventListener("pointermove", move, true);
     win.addEventListener("pointerup", release, true);
     win.addEventListener("pointercancel", release, true);
-    win.addEventListener("blur", cleanup, true);
+    win.addEventListener("blur", cancel, true);
     win.addEventListener("keydown", key, true);
     try { button.setPointerCapture?.(event.pointerId); } catch (_) {}
+    if (!painted) {
+      // Let one frame paint before the synchronous Windows native call.
+      // This is a frame handoff, never a 500ms delay: compositor animations
+      // continue while JS waits inside OLE. Releases still cancel while queued.
+      frame = win.requestAnimationFrame(() => {
+        frame = win.requestAnimationFrame(() => {
+          frame = 0;
+          painted = true;
+          if (waiting) takeover();
+        });
+      });
+    }
   }
 
   async prepare(entries) {
@@ -237,7 +383,10 @@ class JamDeckExternalDragController {
   }
 
   async start(payload) {
-    if (this.active || this.destroyed || this.plugin.externalDragClipboardOwner) return;
+    if (this.active || this.destroyed || this.plugin.externalDragClipboardOwner) {
+      if (!this.active) this.visual?.release();
+      return;
+    }
     this.active = true;
     this.plugin.externalDragClipboardOwner = this;
     this.toolbar.scheduleToolbarSync();
@@ -265,6 +414,7 @@ class JamDeckExternalDragController {
       this.toolbar.ownerWindow.removeEventListener("keydown", key, true);
       this.cancelNative = null;
       this.active = false;
+      this.visual?.release();
       if (!this.destroyed) this.toolbar.scheduleToolbarSync();
     }
     return result;
@@ -302,6 +452,8 @@ class JamDeckExternalDragController {
     this.destroyed = true;
     ++this.generation;
     this.cancelGesture?.();
+    this.visual?.destroy();
+    this.visual = null;
     this.prepared = this.pressed = null;
     this.button?.remove();
     this.button = null;

@@ -4317,6 +4317,22 @@ button.jam-deck-routine-add:focus-visible { outline: none; box-shadow: 0 0 0 2px
 .jam-deck-canvas-leaf .jam-deck-canvas-folder.is-preview-closing-flap .jam-deck-canvas-folder-proxy {
   opacity: 1;
 }
+/* External drag collects existing surfaces into a decorative empty folder.
+   The selection and Canvas data remain untouched; the handle keeps focus. */
+.jam-deck-canvas-leaf .jam-deck-external-drag-visual {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+.jam-deck-canvas-leaf .jam-deck-external-drag-folder {
+  width: 200px;
+  height: 150px;
+  pointer-events: none;
+}
+.jam-deck-canvas-leaf .jam-deck-external-drag-folder > .jam-deck-canvas-folder-front {
+  transition: none;
+}
 .jam-deck-canvas-leaf .canvas-controls,
 .jam-deck-canvas-leaf .canvas-card-menu,
 .jam-deck-canvas-leaf .canvas-menu,

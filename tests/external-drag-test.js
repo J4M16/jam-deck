@@ -45,6 +45,36 @@ function fixture() {
 }
 const event=(extra={})=>({button:0,buttons:1,pointerId:7,clientX:0,clientY:0,preventDefault(){this.cancelled=true;},stopPropagation(){},stopImmediatePropagation(){this.stopped=true;},...extra});
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+function visualFixture() {
+  const f=fixture(), animations=[], frames=new Map(), timers=new Map();let serial=0;
+  const element=(rect={left:0,top:0,width:800,height:600})=>({
+    style:{},events:{},children:[],isConnected:true,offsetWidth:rect.width*2,
+    addEventListener(type,handler){this.events[type]=handler;},
+    getBoundingClientRect:()=>({...rect,right:rect.left+rect.width,bottom:rect.top+rect.height}),
+    setAttribute(){},append(...items){this.children.push(...items);},appendChild(item){this.children.push(item);},
+    remove(){this.isConnected=false;},
+    animate(keyframes,options){const animation={element:this,keyframes,options,cancelled:false,cancel(){this.cancelled=true;}};animations.push(animation);return animation;},
+  });
+  f.plugin.settings={animationsEnabled:true};
+  f.toolbar.entry.ownerDocument.createElement=()=>element();
+  f.toolbar.entry.folderController={
+    createFolderBackboard(view){view.backboard=element();view.backboard.className="existing-backboard";},
+    createFolderLayers(view){view.front=element();view.front.className="existing-front";view.representatives=element();},
+  };
+  const nodes=[{left:100,top:100,width:100,height:100},{left:400,top:200,width:200,height:100}]
+    .map((rect,i)=>({...node({type:"text",text:"item "+i,x:rect.left,y:rect.top}),nodeEl:element(rect)}));
+  f.toolbar.canvas.selection=new Set(nodes);f.toolbar.canvas.wrapperEl=element();
+  Object.assign(f.toolbar.ownerWindow,{
+    getComputedStyle:()=>({transform:"matrix(1, 0, 0, 1, 10, 20)",opacity:"1",visibility:"visible",display:"block"}),
+    requestAnimationFrame(callback){const id=++serial;frames.set(id,callback);return id;},
+    cancelAnimationFrame(id){frames.delete(id);},
+    setTimeout(callback){const id=++serial;timers.set(id,callback);return id;},
+    clearTimeout(id){timers.delete(id);},
+  });
+  f.controller.prepare=async()=>({text:"item 0\n\nitem 1",files:[],textFile:"body.txt"});
+  return {...f,nodes,animations,frames,timers,paint(){const pending=[...frames.values()];frames.clear();pending.forEach(fn=>fn());},
+    settle(){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());}};
+}
 (async()=>{
   let written;
   const payload=await api.payload(entries,{plainText:async s=>s,absolutePath:s=>"/vault/"+s,writeTextFile:async(text,files)=>{written={text,files};return "/tmp/正文.txt";}});
@@ -141,6 +171,66 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   await native.controller.start(busyPayload);
   assert.equal(native.controller.active,false);
   assert.equal(native.plugin.externalDragClipboardOwner,null,"native exception must release ownership");
+  for(const cancel of ["pointerup","pointercancel","blur","keydown","destroy"]) {
+    const f=visualFixture();f.controller.sync(f.menu,false);await tick();
+    const before=JSON.stringify(f.nodes.map(n=>n.getData()));
+    f.controller.button.events.pointerdown(event());
+    const visual=f.controller.visual;
+    assert(visual?.root?.isConnected,"holding a multi-selection must create the visual folder");
+    assert.equal(visual.root.children[0].children.length,2,"folder has only the existing backboard and front, no sample cards");
+    assert.equal(Math.max(...f.animations.map(a=>a.options.duration+(a.options.delay||0))),500,"gather completes in half a second");
+    assert(f.animations.filter(a=>f.nodes.some(n=>n.nodeEl===a.element)).every(a=>a.keyframes.at(-1).opacity===0));
+    assert(f.animations.find(a=>a.element===f.nodes[0].nodeEl).keyframes.at(-1).transform.endsWith("translate(400px, 100px)"),
+      "half-size zoom must gather the first node at the screen-space union center");
+    assert(f.animations.find(a=>a.element===f.nodes[1].nodeEl).keyframes.at(-1).transform.endsWith("translate(-300px, -100px)"));
+    if(cancel==="destroy")f.controller.destroy();else f.toolbar.ownerWindow.events.get(cancel)(event({key:"Escape"}));
+    f.settle();
+    assert.equal(visual.root.isConnected,false);assert(f.animations.every(a=>a.cancelled));
+    assert.equal(f.frames.size,0);assert.equal(f.toolbar.ownerWindow.events.size,0);
+    assert.equal(JSON.stringify(f.nodes.map(n=>n.getData())),before,"visual cancellation must not move or group Canvas nodes");
+    assert(f.nodes.every(n=>Object.keys(n.nodeEl.style).length===0),"original inline styles remain untouched");
+  }
+  const quick=visualFixture();quick.controller.sync(quick.menu,false);await tick();
+  let finishDrag,quickStarts=0;
+  quick.controller.startWindows=()=>{quickStarts++;return new Promise(resolve=>finishDrag=resolve);};
+  quick.controller.button.events.pointerdown(event());
+  const gathering=quick.controller.visual;
+  quick.toolbar.ownerWindow.events.get("pointermove")(event({clientX:9}));
+  assert.equal(quickStarts,0,"fast movement must allow the first visual frame to reach the compositor");
+  quick.paint();quick.paint();
+  assert.equal(quickStarts,1,"native drag starts after the first paint, without waiting 500ms");
+  assert(gathering.root.isConnected);assert(!quick.animations.some(a=>a.cancelled),"native takeover must retain the gathering visual");
+  quick.controller.button.remove();quick.controller.sync(fixture().menu,false);
+  assert.equal(quick.controller.visual,gathering,"menu replacement must not restart or remove the animation");
+  finishDrag({status:"cancelled"});await tick();quick.settle();
+  assert.equal(gathering.root.isConnected,false);
+  const released=visualFixture();released.controller.sync(released.menu,false);await tick();
+  let lateStarts=0;released.controller.startWindows=()=>{lateStarts++;};
+  released.controller.button.events.pointerdown(event());
+  released.toolbar.ownerWindow.events.get("pointermove")(event({clientX:9}));
+  released.toolbar.ownerWindow.events.get("pointerup")(event());
+  released.paint();released.paint();released.settle();
+  assert.equal(lateStarts,0,"releasing during the first-frame handoff must never start a late drag");
+  for(const status of ["dropped","cancelled","failed"]) {
+    const f=visualFixture();f.controller.sync(f.menu,false);await tick();
+    f.controller.startWindows=()=>{if(status==="failed")throw Error("native failure");return {status};};
+    f.controller.button.events.pointerdown(event());const visual=f.controller.visual;
+    f.paint();f.paint();f.toolbar.ownerWindow.events.get("pointermove")(event({clientX:8}));
+    await tick();f.settle();
+    assert.equal(visual.root.isConnected,false,"native "+status+" must restore all original surfaces");
+    assert(f.animations.every(a=>a.cancelled));assert.equal(f.controller.active,false);
+  }
+  const repeated=visualFixture();repeated.controller.sync(repeated.menu,false);await tick();
+  repeated.controller.button.events.pointerdown(event());const firstVisual=repeated.controller.visual;
+  repeated.toolbar.ownerWindow.events.get("pointerup")(event());
+  repeated.controller.button.events.pointerdown(event());
+  assert(firstVisual.destroyed,"a new press must cancel the previous return animation");
+  repeated.controller.destroy();repeated.settle();
+  assert(repeated.animations.every(a=>a.cancelled));
+  const reduced=visualFixture();reduced.plugin.settings.animationsEnabled=false;
+  reduced.controller.sync(reduced.menu,false);await tick();reduced.controller.button.events.pointerdown(event());
+  assert(reduced.animations.every(a=>a.options.duration===0 && !a.options.delay),"disabled animations go straight to the empty folder");
+  reduced.controller.destroy();assert(reduced.animations.every(a=>a.cancelled));
   const throwingCancel=fixture();
   throwingCancel.controller.cancelNative=()=>{throw Error("window closed");};
   assert.doesNotThrow(()=>throwingCancel.controller.destroy());
